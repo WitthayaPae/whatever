@@ -65,6 +65,7 @@ void RanIME_Backspace ( void );
 //  the mixer runs on the audio callback thread and would otherwise play on
 //  over whatever the player switched to.
 void RanAudioSink_Pause ( int paused );
+void RanAudioSink_KeepAlive ( int on );
 
 const char *RanIOS_DataRoot ( void );
 void        RanIOS_InstallPlatformPaths ( void );
@@ -252,6 +253,15 @@ static int  g_imeInsetPerMille = 0;
 //  calls in. That is the one structural difference between the two files.
 - (void)tick:(CADisplayLink *)link
 {
+    //  Never draw from the background. The app now keeps running there (the
+    //  background grace in RanAppDelegate), and iOS kills a process that
+    //  touches the GPU while it is not in front.
+    if ( [UIApplication sharedApplication].applicationState == UIApplicationStateBackground )
+    {
+        self.lastTick = 0;
+        return;
+    }
+
     const CFTimeInterval now = link.timestamp;
     const float dt = self.lastTick > 0 ? (float)(now - self.lastTick) : 0.0f;
     self.lastTick = now;
@@ -1179,8 +1189,38 @@ static NSString *RanPatchReasonCode ( NSString *error )
 //  Android.
 //  The crash recorder follows it too: a death in the background is the player
 //  swiping the app away, not a crash.
-- (void)applicationDidEnterBackground:(UIApplication *)app { RanAudioSink_Pause ( 1 ); RanCrash_SetForeground ( 0 ); }
-- (void)applicationWillEnterForeground:(UIApplication *)app { RanAudioSink_Pause ( 0 ); RanCrash_SetForeground ( 1 ); }
+//
+//  Background grace (2026-10-05): leaving the app used to cost the connection
+//  at once - iOS suspends a backgrounded app within seconds, the network thread
+//  stops answering the server, and the socket is gone on return. Now the
+//  audio queue keeps playing silence (UIBackgroundModes=audio), so the app and
+//  its connection keep running for up to kBackgroundGraceSec. Past that the
+//  game closes, which the server sees as a normal disconnect - the same limit
+//  as Android (android_main.cpp).
+static const double kBackgroundGraceSec = 600.0;
+static NSInteger    s_bgGeneration = 0;
+
+- (void)applicationDidEnterBackground:(UIApplication *)app
+{
+    RanAudioSink_KeepAlive ( 1 );
+    RanCrash_SetForeground ( 0 );
+    const NSInteger gen = ++s_bgGeneration;
+    RanPlat_Log ( RANLOG_INFO, "RanApp", "background: grace %.0f s", kBackgroundGraceSec );
+    dispatch_after ( dispatch_time ( DISPATCH_TIME_NOW, (int64_t)( kBackgroundGraceSec * NSEC_PER_SEC ) ),
+                     dispatch_get_main_queue (), ^{
+        if ( gen != s_bgGeneration )	return;		//	came back in time
+        RanPlat_Log ( RANLOG_INFO, "RanApp", "background grace over - closing" );
+        RanCrash_CleanExit ();
+        exit ( 0 );
+    } );
+}
+- (void)applicationWillEnterForeground:(UIApplication *)app
+{
+    ++s_bgGeneration;
+    RanAudioSink_KeepAlive ( 0 );
+    RanAudioSink_Pause ( 0 );
+    RanCrash_SetForeground ( 1 );
+}
 - (void)applicationWillTerminate:(UIApplication *)app { RanCrash_CleanExit (); }
 
 //  AltStore / SideStore add a URL scheme when they re-sign the app and launch

@@ -31,11 +31,15 @@ const int kBuffers = 3;
 AudioQueueRef       g_queue = NULL;
 AudioQueueBufferRef g_buf[kBuffers];
 bool g_running = false;
+//  Background keep-alive (RanAudioSink_KeepAlive): the queue keeps running but
+//  plays silence, which is what lets iOS leave the app - and its connection to
+//  the game server - running while the player is in another app.
+volatile bool g_silent = false;
 
 void queueCallback ( void *, AudioQueueRef q, AudioQueueBufferRef buf )
 {
     const UInt32 bytes = (UInt32) ( kFramesPerBuffer * RANAUDIO_CHANNELS * sizeof(short) );
-    if (!g_running) {
+    if (!g_running || g_silent) {
         memset ( buf->mAudioData, 0, bytes );
     } else {
         RanAudio_Mix ( (short *) buf->mAudioData, kFramesPerBuffer );
@@ -102,6 +106,29 @@ extern "C" int RanAudioSink_Start ( void )
 
 //  The app went to the background. Pausing stops the callback, so the mixer is
 //  not run at all - the same trade as the Android sink.
+//  In the background: keep the queue playing silence under the Playback
+//  category (mixable, so other apps' sound is untouched), which with
+//  UIBackgroundModes=audio keeps the process running. Back in front: the game's
+//  own Ambient category and its own sound again.
+extern "C" void RanAudioSink_KeepAlive ( int on )
+{
+    if (!g_queue) return;
+    NSError *err = nil;
+    if (on) {
+        g_silent = true;
+        [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback
+                                         withOptions:AVAudioSessionCategoryOptionMixWithOthers
+                                               error:&err];
+    } else {
+        [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryAmbient error:&err];
+        g_silent = false;
+    }
+    if (err) LOGE ( "audio keep-alive category: %s", err.localizedDescription.UTF8String );
+    [[AVAudioSession sharedInstance] setActive:YES error:nil];
+    AudioQueueStart ( g_queue, NULL );
+    LOGI ( "audio keep-alive %s", on ? "on (silent)" : "off" );
+}
+
 extern "C" void RanAudioSink_Pause ( int paused )
 {
     if (!g_queue) return;

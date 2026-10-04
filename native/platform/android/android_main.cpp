@@ -75,6 +75,14 @@ extern "C" void RanInput_KeyTap(int scanCode);
 #include "../../shim/platform/touch_ui.h"
 #include "../../shim/platform/touch_gesture.h"
 
+//  When the activity was paused (0 = in front). See kBackgroundGraceMs.
+static int64_t g_bgSinceMs = 0;
+static int64_t nowMsMonotonic() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
 namespace {
 
 struct AppState {
@@ -890,10 +898,12 @@ void onAppCmd(android_app *app, int32_t cmd) {
         case APP_CMD_PAUSE:
             RanAudioSink_Pause(1);
             RanCrash_SetForeground(0);     //  a death from here on is a swipe-away, not a crash
+            g_bgSinceMs = nowMsMonotonic();
             break;
         case APP_CMD_RESUME:
             RanAudioSink_Pause(0);
             RanCrash_SetForeground(1);
+            g_bgSinceMs = 0;
             break;
 
         case APP_CMD_INIT_WINDOW:
@@ -983,6 +993,13 @@ extern "C" void RanPlat_PumpEvents(void) {
     g_pumpBlocking = false;
 }
 
+//  Background grace (2026-10-05). In the background the connection stays up -
+//  the network thread answers the server's heartbeat while the frame loop is
+//  parked - so a player can top up or answer a message and come straight back.
+//  Past kBackgroundGraceMs the game closes, which the server sees as a normal
+//  disconnect. The same limit as iOS (ran_ios_main.mm).
+static const int64_t kBackgroundGraceMs = 600000;
+
 extern "C" void android_main(android_app *app) {
     g_app = app;
     g_loopThread = pthread_self();
@@ -1000,6 +1017,18 @@ extern "C" void android_main(android_app *app) {
         android_poll_source *source;
         // Block until the surface exists; poll once booted so frames keep running.
         int timeout = (state.ready && state.booted) ? 0 : -1;
+        //  In the background, wake once a second to watch the grace time.
+        if (state.booted && g_bgSinceMs) {
+            if (timeout < 0) timeout = 1000;
+            //  Diagnostic: a "bggrace30" flag shortens it to 30 s for testing.
+            static int s_checked = 0; static int64_t s_grace = kBackgroundGraceMs;
+            if (!s_checked) { s_checked = 1; if (RanPlat_DiagExists("bggrace30")) s_grace = 30000; }
+            if (nowMsMonotonic() - g_bgSinceMs > s_grace) {
+                LOGI("background grace over - closing");
+                RanCrash_CleanExit();
+                exit(0);
+            }
+        }
         while (ALooper_pollOnce(timeout, NULL, &events, (void **)&source) >= 0) {
             if (source) source->process(app, source);
             if (app->destroyRequested) { state.quit = true; break; }

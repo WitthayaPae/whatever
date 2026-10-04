@@ -39,11 +39,30 @@ If anything here disagrees with another file, this file wins.
     instead.
   - Verified: login x2, character select x1.27, start into the world.
 - PC client, Emulator and both servers build with 0 errors.
-- Next (queued by the user):
-  - announcement for the top two enhance grades;
-  - background grace time before kick. Finding so far: Android stays connected
-    in the background (net thread answers the heartbeat; 80 s test OK), so the
-    instant kick is iOS suspension.
+
+## 2026-10-05 (2) — Enhance announcement + background grace: v189 "1.1.8", patch 620
+
+- **Enhance announcement** (server, GLCharInvenMsg.cpp MsgReqInvenGrinding):
+  - A success that reaches the top two grades of the cap the handler enforces
+    (wGRADE_MAX / wGRADE_MAX_REGI) is broadcast via SENDTOAGENT, like the boss
+    drop.
+  - Text is ENHANCE_TOP_SUCCESS in servertext.xml ("[ตีบวก] ยินดีด้วย! %s ตีบวก
+    %s สำเร็จเป็น +%d"). Silent if the key is missing.
+  - The user must deploy ServerField.exe (_Bin/Tool, 02:19) and servertext.xml.
+  - Not tested live (needs the new server).
+  - FINDING: default.charclass says wGRADE_MAX 7, but GLogicDataLoad.cpp:138
+    raises anything below GRADE_HIGH (9) to 9, so the real cap is +9 (rate
+    +7->+8 = 80%). Asked the user.
+- **Background grace** (both platforms, 10 minutes):
+  - Android: the connection already survives the background (the net thread
+    answers the heartbeat). Added kBackgroundGraceMs: the looper wakes each
+    second while paused; past the limit, clean exit. Verified with the
+    `bggrace30` diag flag: alive at 15 s, closed at 30 s.
+  - iOS: UIBackgroundModes=audio. On background the AudioQueue keeps playing
+    silence under Playback+MixWithOthers (RanAudioSink_KeepAlive), so the app
+    and its socket stay up. A dispatch_after of 600 s exits if still in the
+    background. The frame tick skips while in the background (no GPU work there).
+  - iOS is NOT verified on a device (no iPhone).
 
 ## 2026-10-04 (4) — GUI too small on phones: research + mockup (NOT implemented)
 
