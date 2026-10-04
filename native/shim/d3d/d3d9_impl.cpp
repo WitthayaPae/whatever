@@ -332,6 +332,7 @@ public:
     //  A text glyph atlas: A8 coverage that must sample as white with that
     //  alpha, which GL gets from a swizzle set after each full upload.
     bool        m_glyphAtlas = false;
+    bool        m_hdArt = false;      //  textures/gui_hd (RanD3D_MarkHdArt)
 
     RanTexture(IDirect3DDevice9 *dev, UINT w, UINT h, UINT levels, D3DFORMAT fmt)
         : m_format(fmt), m_device(dev) {
@@ -542,6 +543,7 @@ public:
                                                  s->m_dirtyY1 - s->m_dirtyY0,
                                                  (int)m_format, origin, pitch);
                     if (m_glyphAtlas) RanGLR_SampleAsWhiteAlpha(m_glTex);
+            if (m_hdArt) RanGLR_MarkHdTexture(m_glTex);
                     s->clearDirty();
                     m_dirty = false;
                     return m_glTex;
@@ -589,6 +591,7 @@ public:
             if ((first || boxHalf) && !m_reloadedOnce) ++g_live.texHalved;
             RanGLR_FinishTexture(m_glTex, (int)(m_surfaces.size() - first), (int)m_format);
             if (m_glyphAtlas) RanGLR_SampleAsWhiteAlpha(m_glTex);
+            if (m_hdArt) RanGLR_MarkHdTexture(m_glTex);
             if (!m_srcPath.empty()) {
                 LOGI("texture %u = %s (%ux%u, %u levels)", m_glTex, m_srcPath.c_str(),
                      m_surfaces[0]->m_width, m_surfaces[0]->m_height,
@@ -2862,6 +2865,15 @@ extern "C" void RanD3D_HeldMemLine(char *out, int cap) {
 
 extern "C" void RanD3D_MarkGlyphAtlas(IDirect3DTexture9 *pTex) {
     if (pTex) ((RanTexture *)pTex)->m_glyphAtlas = true;
+}
+
+//  Interface art loaded from textures/gui_hd: more texels than the layout's
+//  logical pixels, so the shader must filter it by its own texels.
+extern "C" void RanD3D_MarkHdArt(IDirect3DTexture9 *pTex) {
+    if (!pTex) return;
+    RanTexture *t = (RanTexture *)pTex;
+    t->m_hdArt = true;
+    if (t->m_glTex) RanGLR_MarkHdTexture(t->m_glTex);
 }
 
 //  Called by the image loaders on every texture they create.

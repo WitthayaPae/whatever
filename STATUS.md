@@ -12,6 +12,39 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-05 — HD icons, start screens magnified: v188 "1.1.7", patch 618
+
+- Icons looked pixelated at 2x. Measured: 35x35 texels per icon at ~3.7 screen
+  px/texel on phones (6 on LDPlayer), and the art snap draws texels as squares.
+  Compared on the real atlas: nearest, bilinear, Lanczos, Real-ESRGAN x4plus and
+  anime (scratchpad research/icon_compare.png). x4plus is the only sharp,
+  classic-looking result.
+- MOBILE/tools/icon-hd/make-icon-hd.py upscales each atlas x4 with Real-ESRGAN,
+  then Lanczos to x2 (PNG) into CLIENT/textures/gui_hd/ (~15 s an atlas).
+  - Covers 201 item/skill icon atlases (6 named in data do not exist) and the
+    CharInven* doll art: 206 files, 127 MB.
+- TextureManager (RAN_MOBILE) loads textures/gui_hd/<stem>.png for a gui
+  texture when the folder listing (made once) has it. The UVs are fractions, so
+  the 2x art drops in.
+- The shim marks those textures uTexHD; the shader filters them by their own
+  texels (no logical-grid snap).
+- The PC client never reads gui_hd.
+- Verified on LDPlayer: bag, equipment and doll icons are sharp. No gui_hd open
+  failures.
+- Start screens magnified: DxLobyStage runs MobileApplyMagnify on
+  COuterInterface (windows plus SELECT_CHARACTER_PAGE, CHARACTER_CREATE_PAGE /
+  INFO, PASS_KEYBOARD, MESSAGE_WINDOW).
+  - Fit and clamp use the drawn content rect (MobileContentRect). Where the
+    window cannot move (its rect is taller than the screen) the anchor moves
+    instead.
+  - Verified: login x2, character select x1.27, start into the world.
+- PC client, Emulator and both servers build with 0 errors.
+- Next (queued by the user):
+  - announcement for the top two enhance grades;
+  - background grace time before kick. Finding so far: Android stays connected
+    in the background (net thread answers the heartbeat; 80 s test OK), so the
+    instant kick is iOS suspension.
+
 ## 2026-10-04 (4) — GUI too small on phones: research + mockup (NOT implemented)
 
 Asked: the whole GUI is too small for mobile. Research Ran Origin Mobile and

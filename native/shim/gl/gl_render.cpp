@@ -300,7 +300,8 @@ const char *kFS =
     "uniform highp vec2  uTexSize;\n"   // texels of the bound texture, 0 if unknown
     "uniform highp float uUiSharpen;\n" // magnification the interface is drawn at
     "uniform highp float uPanelH;\n" // framebuffer height, 0 when drawing into a render target
-    "uniform highp vec2  uUiOrigin;\n" // panel px (from the top-left) where the logical grid starts; moves for a magnified window
+    "uniform highp vec2  uUiOrigin;\n"
+    "uniform int   uTexHD;\n" // 1: higher-resolution interface art (textures/gui_hd), filtered by its own texels // panel px (from the top-left) where the logical grid starts; moves for a magnified window
     "#ifndef uAlphaTest\n"
     "uniform int   uAlphaTest;\n"
     "#endif\n"
@@ -359,6 +360,22 @@ const char *kFS =
     "    //  Interface only. World geometry is as often minified as magnified,\n"
     "    //  and this is a magnification filter.\n"
     "    highp vec2 uvS = vUV;\n"
+    //  Higher-resolution art has more texels than logical pixels, so it must
+    //  not be snapped to the logical grid - that samples it once per logical
+    //  pixel and throws the extra detail away. Magnified, it gets the
+    //  sharp-bilinear squeeze measured in its OWN texels (screen pixels per
+    //  texel from the derivatives); minified, plain bilinear.
+    "    if (uPreTransformed == 1 && uUseTexture == 1 && uTexHD == 1 && uTexSize.x > 1.0) {\n"
+    "        highp vec2 dHx = dFdx(vUV) * uTexSize;\n"
+    "        highp vec2 dHy = dFdy(vUV) * uTexSize;\n"
+    "        highp float tppH = max(length(dHx), length(dHy));\n"
+    "        if (tppH < 1.0) {\n"
+    "            highp vec2 tH = vUV * uTexSize;\n"
+    "            highp vec2 iH = floor(tH) + 0.5;\n"
+    "            highp vec2 fH = clamp((tH - iH) / max(tppH, 0.05), -0.5, 0.5);\n"
+    "            uvS = (iH + fH) / uTexSize;\n"
+    "        }\n"
+    "    } else\n"
     "    if (uPreTransformed == 1 && uUseTexture == 1 && uTexSize.x > 1.0 && uUiSharpen > 1.0) {\n"
     "        //  Interface art the frame magnifies (texels bigger than a pixel)\n"
     "        //  samples where D3D9 samples the logical pixel it belongs to: a\n"
@@ -653,6 +670,9 @@ GLint  uFlipY = -1, uWorldM = -1, uViewProj = -1, uVertexBlend = -1, uIndexedBle
 GLint  uTexStage1 = -1;
 GLint  uPanelH = -1;
 GLint  uUiOrigin = -1;
+GLint  uTexHD = -1;
+//  GL names of interface art loaded from textures/gui_hd (RanGLR_MarkHdTexture).
+std::set<unsigned> g_hdTex;
 //  The 2D texture bound to stage 1, on its own unit so the cube map can keep
 //  unit 1 and stage 0 can keep unit 0.
 unsigned g_stage1Tex2D = 0;
@@ -1366,6 +1386,7 @@ void fetchUniformLocations(GLuint prog) {
     uUiSharpen      = glGetUniformLocation(prog, "uUiSharpen");
     uPanelH         = glGetUniformLocation(prog, "uPanelH");
     uUiOrigin       = glGetUniformLocation(prog, "uUiOrigin");
+    uTexHD          = glGetUniformLocation(prog, "uTexHD");
     uGammaOn        = glGetUniformLocation(prog, "uGammaOn");
     uPlain          = glGetUniformLocation(prog, "uPlain");
     uGammaLut       = glGetUniformLocation(prog, "uGammaLut");
@@ -1422,7 +1443,7 @@ GLint *const kLocationVars[] = {
     &uMVP, &uViewport, &uPreTransformed, &uFlipY, &uMatAlpha, &uWorldM, &uViewProj,
     &uVertexBlend, &uIndexedBlend, &uTex, &uUseTexture, &uAlphaTest, &uAlphaRef,
     &uColorOp, &uColorArg1, &uColorArg2, &uAlphaOp, &uAlphaArg1, &uAlphaArg2,
-    &uTexFactor, &uTexCube, &uStage1, &uTexSize, &uUiSharpen, &uPanelH, &uUiOrigin, &uGammaOn, &uPlain,
+    &uTexFactor, &uTexCube, &uStage1, &uTexSize, &uUiSharpen, &uPanelH, &uUiOrigin, &uTexHD, &uGammaOn, &uPlain,
     &uGammaLut, &uSpecularOn, &uMatSpecular, &uMatPower, &uLightSpecular, &uView,
     &uWorld, &uCameraPos, &uCameraPosF, &uLighting, &uLightCount, &uGlobalAmbient,
     &uMatDiffuse, &uHasVertexColor, &uMatAmbient, &uMatEmissive, &uLightType,
@@ -3853,8 +3874,10 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     {
         static unsigned s_lastTex = 0xFFFFFFFFu;
         static float    s_lastW = 0.0f, s_lastH = 0.0f;
+        static int      s_lastHD = 0;
         if (glTexture != s_lastTex) {
             s_lastTex = glTexture;
+            s_lastHD = g_hdTex.count(glTexture) ? 1 : 0;
             s_lastW = s_lastH = 0.0f;
             std::map<unsigned, std::pair<int, int> >::const_iterator d = g_texDims.find(glTexture);
             if (d != g_texDims.end()) {
@@ -3863,6 +3886,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
             }
         }
         setUniform2f(uTexSize, s_lastW, s_lastH);
+        setUniform1i(uTexHD, s_lastHD);
         //  A magnified window's logical pixel is UIScale*s panel pixels, and
         //  its grid starts where the window's anchor maps to.
         {
@@ -4509,6 +4533,11 @@ extern "C" long long RanGLR_TexGpuBytes(void) { return g_texGpuBytes; }
 //  A one-channel coverage texture sampled as (1, 1, 1, coverage): what the
 //  glyph atlas stored as white-plus-alpha in four bytes. Swizzle is texture
 //  object state, so it holds for every later draw.
+//  This texture is higher-resolution interface art (see uTexHD).
+extern "C" void RanGLR_MarkHdTexture(unsigned tex) {
+    if (tex) g_hdTex.insert(tex);
+}
+
 extern "C" void RanGLR_SampleAsWhiteAlpha(unsigned tex) {
     if (!g_inited || !tex) return;
     bindTex2D(tex);
