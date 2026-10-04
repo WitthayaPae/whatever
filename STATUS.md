@@ -31,7 +31,7 @@ cannot be opened.
   - a few steps away: ring + button, and the press opens it
 - Not verified: the tablet, and iOS on a device.
 
-### Closed-beta reports, 2026-10-04 (v184 "1.1.4", patch 613)
+### Closed-beta reports, 2026-10-04 (v186 "1.1.5", patch 614 + servers)
 
 - [ ] **Item protection necklace / สร้อยมังกร cannot be worn. DATA, not code.**
   - Cause: the EP1 port (MID<600) kept emSuit = 6 (NECK) on ITEM_ANTI_DISAPPEAR
@@ -42,7 +42,20 @@ cannot be opened.
     has them at 22 (ORNAMENT).
   - Fix: set emSuit to 22 in Editor_Item for those 11 items, save, and deploy
     item.isf / GLogic.rcc to the server and the patch.
-  - Left to the user: item data was being edited at 20:13, so I did not touch it.
+  - **Superseded.** The user wants the necklace worn in the NECK slot, as in EP1.
+    The item.csv edit was reverted (byte-identical to its backup again).
+  - Fixed in code instead, shared by the servers and all clients, not RAN_MOBILE:
+    - `CHECKSLOT_ITEM` (GLogixExPC.cpp) allows ITEM_ANTI_DISAPPEAR in SLOT_NECK
+      or SLOT_ORNAMENT. The suit check still decides which one.
+    - Server `MsgReqInvenGrinding` (GLCharInvenMsg.cpp) looks for the necklace
+      in NECK first, then ORNAMENT, and uses it up from the slot it was found in.
+      This mirrors EP1 (GLCharInvenMsg.cpp:5888 there).
+  - ITEM_REVIVE was left untouched (ornament-only), as the user asked only about
+    the protection necklace. The same data/rule mismatch applies to it.
+  - Servers rebuilt 21:20: `_Bin\Tool\ServerAgent.exe` / `ServerField.exe`, 0
+    errors. The user must deploy ServerField; until then the server refuses the
+    neck wear.
+- [x] Bag full + pick-up: confirm on ground tap - the user tested it, works.
   - 143/23 (Advance) is EP1 type 85 (ANTI_REVERT), which means something else in
     EP9. Needs a design decision.
 - [x] **Pet dual-skill card (type 59) had no way to be used on a phone.**
