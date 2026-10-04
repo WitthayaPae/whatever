@@ -31,10 +31,33 @@ cannot be opened.
   - a few steps away: ring + button, and the press opens it
 - Not verified: the tablet, and iOS on a device.
 
-### Still open (reported 2026-10-04)
-- [ ] The item protection necklace cannot be used.
-- [ ] Pet dual-skill card: add a "ใช้งาน" option while a pet is out.
-- [ ] Pet and bike icons overlap the active pet-skill icon.
+### Closed-beta reports, 2026-10-04 (v184 "1.1.4", patch 613)
+
+- [ ] **Item protection necklace / สร้อยมังกร cannot be worn. DATA, not code.**
+  - Cause: the EP1 port (MID<600) kept emSuit = 6 (NECK) on ITEM_ANTI_DISAPPEAR
+    (143/3, 143/18) and on all 9 ITEM_REVIVE items:
+    2/1, 65/59, 106/51, 184/78, 184/106, 184/185, 184/187, 184/189, 184/191.
+  - EP9's `CHECKSLOT_ITEM` (GLogixExPC.cpp:2979) allows those two types only in
+    SLOT_ORNAMENT, so they fail on PC, phone and server alike. EP9's own item1.isf
+    has them at 22 (ORNAMENT).
+  - Fix: set emSuit to 22 in Editor_Item for those 11 items, save, and deploy
+    item.isf / GLogic.rcc to the server and the patch.
+  - Left to the user: item data was being edited at 20:13, so I did not touch it.
+  - 143/23 (Advance) is EP1 type 85 (ANTI_REVERT), which means something else in
+    EP9. Needs a design decision.
+- [x] **Pet dual-skill card (type 59) had no way to be used on a phone.**
+  - Cause: PC holds the card and right-clicks the pet's card. On a phone, a tap
+    with the card in hand swaps the two items.
+  - Fix: `MobileItemSheet` offers ใช้งาน when the pet is out, has no dual skill
+    yet, and its card is in the bag. `MobileApplyHeld` / `MobileApplyFrame` lift
+    the card, run ReqInvenDrug on the pet card (the PC path, then
+    ReqEnableDualSkill), and put back whatever is left.
+  - Compiled. Not tried on a device: the test account has no dual-skill card.
+- [x] **Pet-skill icons overlapped by the pet and bike boxes.**
+  - Cause: the boxes are moved under the buff row on mobile; the
+    PET_SKILL_INFO_DISPLAY pair stayed at its PC place in the same corner.
+  - Fix: the pair now joins the same row, after the pet box (DxGameStage).
+  - Not seen with an active pet skill yet.
 
 ## 2026-10-04 (2) — Skill aim shipped: v182 "1.1.2", patch 611 (Android + iOS)
 
