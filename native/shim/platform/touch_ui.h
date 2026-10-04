@@ -220,3 +220,22 @@ extern "C" void RanTouch_RenderEditTop(void);
 //  The chat fold button, drawn after the interface so it is over the window it
 //  belongs to. Everything else on the pad draws under the windows.
 extern "C" void RanTouch_RenderChatTop(void);
+
+//  Skill aim, RoV-style (2026-10-04). A finger on a filled skill button is the
+//  overlay's: lifted inside the dead zone it is a tap, dragged it aims, lifted
+//  on the cancel circle it is nothing.
+//
+//  While a skill is held: which slot (index into the circles the client set),
+//  whether it has left the dead zone, the drag direction in screen space (unit,
+//  y down), how far along the knob's travel (0..1), and whether it is over the
+//  cancel circle. Returns 0 when no skill is held.
+extern "C" int  RanTouch_GetSkillAim(int *slot, int *aimed, float *dx, float *dy,
+                                     float *mag, int *cancel);
+//  One per lift that should cast: aimed 0 is a tap, 1 an aimed release with
+//  the direction and distance it was let go at. Cancelled lifts queue nothing.
+extern "C" int  RanTouch_ConsumeSkill(int *slot, int *aimed, float *dx, float *dy, float *mag);
+//  Settings > Function. Off: dragging does not aim, every lift is a tap.
+extern "C" void RanTouch_SetSkillAim(int on);
+//  The client holds a skill picked up from the skill window: skill buttons
+//  are left to the client so the drop lands in the slot.
+extern "C" void RanTouch_SetSkillCarry(int carrying);

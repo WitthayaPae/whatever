@@ -12,6 +12,38 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-04 — Skill buttons: ROV-style drag-to-aim (ANALYSIS ONLY, not built)
+
+First closed-beta feedback: skill attacks. Asked: make skills work like ROV, so
+dragging a skill button lets the player aim it and pick the target. Analysis
+only. The user has to approve the design before any code changes.
+
+How it works today (read from the code, not yet reproduced on a device):
+- `touch_ui.cpp` only notes a press on a skill circle (press flash). The touch
+  is not claimed, so it falls through to the client's quick-skill slot.
+- Tap: `touch_gesture` sends a left click on lift. `CBasicSkillTray`
+  LB_UP then calls `ReqSkillRunSet`, which arms the skill.
+  `GLCharacter::MobileCastRunSkill` then casts it at `m_sMobileTarget`, or the
+  auto-pick when auto-target is on.
+- Hold 450 ms without moving: right button, then RB_UP on the slot. With no
+  skill being carried, that calls `ReqSkillQuickReSet`, which **removes the
+  skill from the slot**. So a player who presses and holds a skill loses it.
+- Drag (>30 px): a left-button drag on the control, with no aiming at all.
+- Ground skills (TAR_ZONE, 19 player skills, shaman and gunner; TAR_SPECIFIC
+  teleport, 1 skill): `SkillReaction` aims at `GetMouseTargetPosWnd`. On the
+  phone that is the pointer, and the pointer is the finger on the skill
+  button. So they land on the ground behind the button, or fail with
+  NOTARGET_SKILL when that ray misses the navmesh. Bug in the current build.
+- Player skill mix (skill.csv, 657 class skills), as TAR/REALM:
+  - SPEC/ZONE 279, SPEC/FAN 122, SPEC/SELF 48: these lock onto a target.
+  - SELF 168: no aim.
+  - SELF_TOSPEC 20: line toward a target.
+  - ZONE 19 + SPECIFIC 1: ground point.
+
+- [ ] Waiting for the user to approve the design, then build it. Shared code
+  goes in `touch_ui.cpp` plus `SOURCE` under `RAN_MOBILE`, so Android and iOS
+  get it from one edit.
+
 ## 2026-10-03 (8) — Android launcher stuck forever on "Exception 416" (v181, 1.1.1)
 
 A Realme C85 5G player sat on "เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้ (Exception 416)".

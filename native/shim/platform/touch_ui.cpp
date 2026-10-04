@@ -36,6 +36,13 @@ extern "C" int RanUI_PointInControl(int x, int y) __attribute__((weak));
 //  an open WINDOW keeps its press.
 extern "C" int RanUI_PointInDragControl(int x, int y) __attribute__((weak));
 
+//  Whether a real window covers a point, leaving out the name plates AND the
+//  skill tray. Asked before a skill button is claimed: the slots are the
+//  tray's own controls, so the plain question always says "a control is here"
+//  on a skill button, while an open window over the arc must still get its
+//  press.
+extern "C" int RanUI_PointInWindowOverSkill(int x, int y) __attribute__((weak));
+
 #define LOGI(...) RanPlat_Log(RANLOG_INFO,  "RanTouch", __VA_ARGS__)
 #define LOGE(...) RanPlat_Log(RANLOG_ERROR, "RanTouch", __VA_ARGS__)
 
@@ -210,6 +217,38 @@ Button g_buttons[kButtonCount];
 struct SkillCircle { float x, y, r; bool filled; float cool; float press; };
 SkillCircle g_skillCircles[RANTOUCH_MAX_SKILL_CIRCLES];
 int         g_skillCircleCount = 0;
+
+//  --- skill aim (RoV-style) ------------------------------------------------
+//
+//  A finger that lands on a filled skill button is the overlay's now, not the
+//  client's (closed-beta feedback, 2026-10-04). Before, the touch fell through
+//  to the client's quick slot, which made three gestures out of it: a tap cast
+//  at the current target, a drag did nothing useful, and a held press became
+//  the long-press right button - which the tray reads as "clear this slot", so
+//  holding a skill threw it off the bar.
+//
+//  Now: lift without leaving the dead zone and it is the same tap as before
+//  (ReqSkillRunSet, cast at the target / auto-pick). Leave the dead zone and
+//  it aims: the knob follows the thumb, the client draws the indicator in the
+//  world from RanTouch_GetSkillAim, and lifting casts where it points. Lifting
+//  on the cancel circle casts nothing.
+//
+//  Not claimed while the client holds a skill picked up from the skill window
+//  (g_skillCarry): that finger is dropping a skill onto a slot, and the slot
+//  has to see it.
+struct SkillAim {
+    int   ptr = -1;             //  finger on a skill, -1 none
+    int   slot = 0;             //  index into g_skillCircles
+    float ox = 0, oy = 0;       //  where it went down
+    float fx = 0, fy = 0;       //  where it is now
+    bool  aiming = false;       //  left the dead zone
+    bool  overCancel = false;
+} g_aim;
+bool g_aimOn = true;            //  Settings > Function; off = every lift is a tap
+bool g_skillCarry = false;
+struct SkillEvt { int slot, aimed; float dx, dy, mag; };
+SkillEvt g_skillEvt[8];
+int      g_skillEvtN = 0;
 
 //  --- pinch --------------------------------------------------------------
 struct Pinch {
@@ -1392,6 +1431,50 @@ extern "C" void RanTouch_TakeBotStats(int *taps, int *spots, int *gapCV1000) {
     g_botGapN = 0; g_botGapSum = g_botGapSq = 0.0;
 }
 
+namespace {
+
+//  The thumb has to travel this far before a press becomes an aim. A resting
+//  fingertip wanders several pixels (touch_gesture's kHoldSlop is 10), and a
+//  tap that drifted must still be a tap.
+float skillAimDead(float r) { const float d = r * 0.35f; return d > 14.0f ? d : 14.0f; }
+
+//  How far the knob travels: full range of the skill at this distance.
+float skillAimMax(float r)  { return r * 2.4f; }
+
+//  0..1 along the knob's travel, 0 at the edge of the dead zone.
+float skillAimMag(float r, float d) {
+    const float dead = skillAimDead(r), mx = skillAimMax(r);
+    if (d <= dead) return 0.0f;
+    const float m = (d - dead) / (mx - dead);
+    return m > 1.0f ? 1.0f : m;
+}
+
+//  The cancel circle: straight above the skill arc, over the attack button's
+//  column, where a thumb dragging a skill reaches it without crossing the
+//  world it is aiming at.
+void cancelCircle(Vec2 &c, float &r) {
+    const float baseR = g_buttons[0].radius > 0.0f ? g_buttons[0].radius : g_unit * 0.5f;
+    r = baseR * 0.62f;
+    float top = g_buttons[0].centre.y - baseR;
+    for (int i = 0; i < g_skillCircleCount; ++i) {
+        const float t = g_skillCircles[i].y - g_skillCircles[i].r * 1.3f;
+        if (t < top) top = t;
+    }
+    c.x = g_buttons[0].centre.x;
+    c.y = top - r * 1.9f;
+    if (c.y < r * 1.4f) c.y = r * 1.4f;
+}
+
+void skillEvtPush(int slot, int aimed, float dx, float dy, float mag) {
+    if (g_skillEvtN >= (int)(sizeof(g_skillEvt) / sizeof(g_skillEvt[0]))) return;
+    SkillEvt &e = g_skillEvt[g_skillEvtN++];
+    e.slot = slot; e.aimed = aimed; e.dx = dx; e.dy = dy; e.mag = mag;
+}
+
+void skillAimDrop() { g_aim.ptr = -1; g_aim.aiming = false; g_aim.overCancel = false; }
+
+}   // namespace
+
 // ------------------------------------------------------------------- API
 void RanTouch_Init(int w, int h) {
     if (g_inited) return;
@@ -1428,6 +1511,8 @@ void RanTouch_SetActive(int active) {
     g_stick.dir.x = g_stick.dir.y = 0.0f; g_stick.magnitude = 0.0f;
     for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; }
     g_pinch.a = g_pinch.b = -1;
+    skillAimDrop();
+    g_skillEvtN = 0;
 }
 
 int RanTouch_IsActive(void) { return g_active ? 1 : 0; }
@@ -1531,6 +1616,25 @@ int RanTouch_PointerDown(int id, float x, float y) {
             bc.pressedEdge = true;
             Touch *tc = addTouch(id, x, y);
             if (tc) tc->claimed = true;
+            return 1;
+        }
+    }
+
+    //  A skill button, ahead of the window rule below: the slots ARE controls
+    //  (the tray's), so that rule would hand every skill press to the client.
+    //  A real window over the arc still wins - asked with the tray left out.
+    if (g_aim.ptr < 0 && !g_skillCarry) {
+        for (int i = 0; i < g_skillCircleCount; ++i) {
+            SkillCircle &c = g_skillCircles[i];
+            if (!c.filled || len(x - c.x, y - c.y) > c.r) continue;
+            if (RanUI_PointInWindowOverSkill && RanUI_PointInWindowOverSkill((int)x, (int)y)) break;
+            g_aim.ptr = id; g_aim.slot = i;
+            g_aim.ox = g_aim.fx = x; g_aim.oy = g_aim.fy = y;
+            g_aim.aiming = false; g_aim.overCancel = false;
+            c.press = 0.0f;
+            botNoteTap(x, y);
+            Touch *ts = addTouch(id, x, y);
+            if (ts) ts->claimed = true;
             return 1;
         }
     }
@@ -1662,6 +1766,19 @@ int RanTouch_PointerMove(int id, float x, float y) {
     Touch *t = findTouch(id);
     if (t) { t->x = x; t->y = y; }
 
+    if (g_aim.ptr == id) {
+        g_aim.fx = x; g_aim.fy = y;
+        if (g_aimOn && !g_aim.aiming && g_aim.slot < g_skillCircleCount &&
+            len(x - g_aim.ox, y - g_aim.oy) > skillAimDead(g_skillCircles[g_aim.slot].r))
+            g_aim.aiming = true;
+        if (g_aim.aiming) {
+            Vec2 cc; float cr;
+            cancelCircle(cc, cr);
+            g_aim.overCancel = len(x - cc.x, y - cc.y) <= cr * 1.15f;
+        }
+        return 1;
+    }
+
     if (g_stick.pointer == id) {
         float dx = x - g_stick.origin.x;
         float dy = y - g_stick.origin.y;
@@ -1721,6 +1838,21 @@ int RanTouch_PointerUp(int id, float x, float y) {
         return 1;
     }
     int claimed = 0;
+
+    if (g_aim.ptr == id) {
+        const float r = (g_aim.slot < g_skillCircleCount) ? g_skillCircles[g_aim.slot].r : 1.0f;
+        const float dx = x - g_aim.ox, dy = y - g_aim.oy;
+        const float d = len(dx, dy);
+        if (!g_aim.aiming)
+            skillEvtPush(g_aim.slot, 0, 0.0f, 0.0f, 0.0f);
+        else if (g_aim.overCancel)
+            LOGI("skill %d: aim cancelled", g_aim.slot);
+        else
+            skillEvtPush(g_aim.slot, 1, d > 0.0001f ? dx / d : 0.0f,
+                         d > 0.0001f ? dy / d : 0.0f, skillAimMag(r, d));
+        skillAimDrop();
+        claimed = 1;
+    }
 
     if (g_stick.pointer == id) {
         g_stick.pointer = -1;
@@ -3397,6 +3529,40 @@ void RanTouch_Render(void) {
         drawDiscBottom(c.x, iy, ir, c.cool,
                        0.0f, 0.0f, 0.0f, 150.0f / 255.0f);
     }
+
+    //  The skill under the thumb: the pad the knob travels in, the knob, and
+    //  while aiming the cancel circle. Live, over the icon, at full opacity
+    //  whatever the arc's - it is what the thumb is doing right now.
+    g_drawAlpha = 1.0f;
+    if (g_aim.ptr >= 0 && g_aim.slot < g_skillCircleCount) {
+        const SkillCircle &c = g_skillCircles[g_aim.slot];
+        const float mx = skillAimMax(c.r);
+        drawFan(c.x, c.y, mx, 0.0f, 0.0f, 0.0f, 0.30f);
+        drawRing(c.x, c.y, mx - 2.5f, mx, 1.0f, 1.0f, 1.0f, g_aim.aiming ? 0.60f : 0.35f);
+        if (g_aim.aiming) {
+            float dx = g_aim.fx - g_aim.ox, dy = g_aim.fy - g_aim.oy;
+            const float d = len(dx, dy);
+            const float kr = c.r * 0.62f;
+            const float lim = mx - kr * 0.5f;
+            if (d > lim) { dx *= lim / d; dy *= lim / d; }
+            const bool off = g_aim.overCancel;
+            discGrad(c.x + dx, c.y + dy, kr,
+                     off ? rgba(1.0f, 0.55f, 0.55f, 0.90f) : rgba(1.0f, 1.0f, 1.0f, 0.92f),
+                     off ? rgba(0.85f, 0.20f, 0.20f, 0.80f) : rgba(0.62f, 0.80f, 1.0f, 0.80f));
+
+            Vec2 cc; float cr;
+            cancelCircle(cc, cr);
+            discGrad(cc.x, cc.y, cr,
+                     off ? rgba(0.95f, 0.25f, 0.25f, 0.92f) : rgba(0.10f, 0.10f, 0.12f, 0.62f),
+                     off ? rgba(0.75f, 0.10f, 0.10f, 0.92f) : rgba(0.05f, 0.05f, 0.06f, 0.62f));
+            drawRing(cc.x, cc.y, cr - 2.0f, cr, 1.0f, 1.0f, 1.0f, off ? 0.95f : 0.70f);
+            const float k = cr * 0.42f, lw = cr * 0.09f;
+            const Col xc = rgba(1.0f, 1.0f, 1.0f, off ? 1.0f : 0.85f);
+            drawCapsule(cc.x - k, cc.y - k, cc.x + k, cc.y + k, lw, xc);
+            drawCapsule(cc.x - k, cc.y + k, cc.x + k, cc.y - k, lw, xc);
+        }
+    }
+
     //  Back to the flat-colour program for anything after this.
     glUseProgram(g_prog);
     glBindVertexArray(g_vao);
@@ -3567,6 +3733,44 @@ extern "C" int RanTouch_ConsumeButton(int *outSlot) {
     return 0;
 }
 
+//  --- skill aim API -------------------------------------------------------
+
+extern "C" int RanTouch_GetSkillAim(int *slot, int *aimed, float *dx, float *dy,
+                                    float *mag, int *cancel) {
+    if (!g_inited || !g_active || g_aim.ptr < 0 || g_aim.slot >= g_skillCircleCount) return 0;
+    const float r = g_skillCircles[g_aim.slot].r;
+    const float ddx = g_aim.fx - g_aim.ox, ddy = g_aim.fy - g_aim.oy;
+    const float d = len(ddx, ddy);
+    if (slot)   *slot = g_aim.slot;
+    if (aimed)  *aimed = g_aim.aiming ? 1 : 0;
+    if (dx)     *dx = (g_aim.aiming && d > 0.0001f) ? ddx / d : 0.0f;
+    if (dy)     *dy = (g_aim.aiming && d > 0.0001f) ? ddy / d : 0.0f;
+    if (mag)    *mag = g_aim.aiming ? skillAimMag(r, d) : 0.0f;
+    if (cancel) *cancel = g_aim.overCancel ? 1 : 0;
+    return 1;
+}
+
+extern "C" int RanTouch_ConsumeSkill(int *slot, int *aimed, float *dx, float *dy, float *mag) {
+    if (g_skillEvtN <= 0) return 0;
+    const SkillEvt e = g_skillEvt[0];
+    for (int i = 1; i < g_skillEvtN; ++i) g_skillEvt[i - 1] = g_skillEvt[i];
+    --g_skillEvtN;
+    if (!g_inited || !g_active) return 0;
+    if (slot)  *slot = e.slot;
+    if (aimed) *aimed = e.aimed;
+    if (dx)    *dx = e.dx;
+    if (dy)    *dy = e.dy;
+    if (mag)   *mag = e.mag;
+    return 1;
+}
+
+extern "C" void RanTouch_SetSkillAim(int on) {
+    g_aimOn = (on != 0);
+    if (!g_aimOn && g_aim.ptr >= 0) { g_aim.aiming = false; g_aim.overCancel = false; }
+}
+
+extern "C" void RanTouch_SetSkillCarry(int carrying) { g_skillCarry = (carrying != 0); }
+
 //  --- HUD arrangement API -------------------------------------------------
 
 //  Enter or leave the editor. Entering snapshots the arrangement for cancel and
@@ -3582,6 +3786,8 @@ extern "C" void RanTouch_SetEditMode(int on) {
         for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; g_buttons[i].pressedEdge = false; }
         for (int i = 0; i < kMaxPointers; ++i) g_touch[i].id = -1;
         g_pinch.a = g_pinch.b = -1;
+        skillAimDrop();
+        g_skillEvtN = 0;
         g_edit = true;
         g_editSel = -1;
     } else if (!on && g_edit) {
