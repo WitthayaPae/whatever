@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-02
+- **Last updated:** 2026-10-04
 - **Approach:** compile the real PC client (`SOURCE/`) for mobile. Decided 2026-08-24.
 - **Current phase:** 1 complete · 2 complete · **3 in progress — login works end to end; character-select scene and models remain**
 - **Builds:** `cd MOBILE/native && ./build.sh` → 0 errors, produces `out/arm64-v8a/libran.so`
@@ -12,7 +12,38 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
-## 2026-10-04 — Skill buttons: ROV-style drag-to-aim (ANALYSIS ONLY, not built)
+## 2026-10-04 (2) — Skill aim shipped: v182 "1.1.2", patch 611 (Android + iOS)
+
+The user chose: cancel circle only; an aimed lock also becomes the current target.
+- Overlay (`touch_ui.cpp`, shared by both platforms) claims filled skill circles.
+  It is not claimed while a skill is being carried from the skill window, or when a
+  real window covers the button (`RanUI_PointInWindowOverSkill`, which leaves out
+  the tray).
+  - Lift inside the dead zone (max(14 px, 0.35r)) = tap = `ReqSkillRunSet`.
+  - Drag = aim. The knob travels 2.4r.
+  - Lift on the ✕ circle above the arc = nothing cast.
+- Game side:
+  - `GLCharacter::MobileAimSolve/Pick/Preview/Commit/RenderAim`.
+  - Target skills lock the enemy nearest the aim point, within 1.5x reach (a tap
+    already walks into range).
+  - Ground skills (TAR_ZONE / TAR_SPECIFIC) aim a navmesh point, clamped to reach.
+    A tap aims at the target, then the auto-pick, then straight ahead.
+    `SkillReaction` reads `m_vMobileAimPos` instead of the pointer. This fixes ground
+    skills landing behind the button, and a NULL read in the TAR_SPECIFIC branch.
+- Settings > Function: "เล็งสกิลด้วยการลาก" (`bMobileSkillAim`, default on).
+- Verified on LDPlayer (x86_64, brawler Lv1):
+  - lock line, lock ring and splash drawn; `aim lock -> 538` + cast on release
+  - cancel: no cast
+  - tap: cast
+  - 1.5 s still hold: cast, and the skill stays in its slot
+  - drag right: line to the right
+  - settings row fits
+- NOT verified:
+  - ground skills on a device (no shaman / gunner character)
+  - the tablet
+  - iOS on a device (no iPhone). The CI binary 182 does contain the new strings.
+
+## 2026-10-04 — Skill buttons: ROV-style drag-to-aim (analysis; built in (2) above)
 
 First closed-beta feedback: skill attacks. Asked: make skills work like ROV, so
 dragging a skill button lets the player aim it and pick the target. Analysis
@@ -40,9 +71,7 @@ How it works today (read from the code, not yet reproduced on a device):
   - SELF_TOSPEC 20: line toward a target.
   - ZONE 19 + SPECIFIC 1: ground point.
 
-- [ ] Waiting for the user to approve the design, then build it. Shared code
-  goes in `touch_ui.cpp` plus `SOURCE` under `RAN_MOBILE`, so Android and iOS
-  get it from one edit.
+- [x] Built and shipped, see (2) above.
 
 ## 2026-10-03 (8) — Android launcher stuck forever on "Exception 416" (v181, 1.1.1)
 
