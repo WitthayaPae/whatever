@@ -239,3 +239,8 @@ extern "C" void RanTouch_SetSkillAim(int on);
 //  The client holds a skill picked up from the skill window: skill buttons
 //  are left to the client so the drop lands in the slot.
 extern "C" void RanTouch_SetSkillCarry(int carrying);
+
+//  Talk to NPC (2026-10-04). The client shows the button while an NPC is in
+//  reach; ConsumeTalk returns 1 once per press.
+extern "C" void RanTouch_SetTalkButton(int show);
+extern "C" int  RanTouch_ConsumeTalk(void);

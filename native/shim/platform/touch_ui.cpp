@@ -245,6 +245,23 @@ struct SkillAim {
     bool  overCancel = false;
 } g_aim;
 bool g_aimOn = true;            //  Settings > Function; off = every lift is a tap
+
+//  --- talk to NPC ----------------------------------------------------------
+//
+//  Shown by the client while an NPC is within reach (RanTouch_SetTalkButton).
+//  In a crowd the players standing round an NPC cover it, and a tap lands on
+//  one of them instead - so the NPC could not be opened at all. This button
+//  opens the nearest NPC whoever is standing in front of it.
+//
+//  Its own little state rather than a slot in g_buttons: that table is walked
+//  by the editor, the cache signature and half a dozen render passes, and a
+//  button that comes and goes with the world belongs in none of them.
+//  It sits where the aim's cancel circle goes, and gives way to it while a
+//  skill is being aimed.
+bool g_talkShow = false;
+int  g_talkPtr  = -1;
+bool g_talkDown = false;
+bool g_talkEdge = false;
 bool g_skillCarry = false;
 struct SkillEvt { int slot, aimed; float dx, dy, mag; };
 SkillEvt g_skillEvt[8];
@@ -1465,6 +1482,16 @@ void cancelCircle(Vec2 &c, float &r) {
     if (c.y < r * 1.4f) c.y = r * 1.4f;
 }
 
+//  The talk button: the cancel circle's place, a little larger - it is a
+//  button to press, not a place to drop a drag.
+void talkCircle(Vec2 &c, float &r) {
+    float cr;
+    cancelCircle(c, cr);
+    r = cr * 1.08f;
+}
+
+bool talkVisible() { return g_talkShow && !g_edit && !(g_aim.ptr >= 0 && g_aim.aiming); }
+
 void skillEvtPush(int slot, int aimed, float dx, float dy, float mag) {
     if (g_skillEvtN >= (int)(sizeof(g_skillEvt) / sizeof(g_skillEvt[0]))) return;
     SkillEvt &e = g_skillEvt[g_skillEvtN++];
@@ -1513,6 +1540,7 @@ void RanTouch_SetActive(int active) {
     g_pinch.a = g_pinch.b = -1;
     skillAimDrop();
     g_skillEvtN = 0;
+    g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
 }
 
 int RanTouch_IsActive(void) { return g_active ? 1 : 0; }
@@ -1616,6 +1644,21 @@ int RanTouch_PointerDown(int id, float x, float y) {
             bc.pressedEdge = true;
             Touch *tc = addTouch(id, x, y);
             if (tc) tc->claimed = true;
+            return 1;
+        }
+    }
+
+    //  The talk button. A window over it keeps its press, as everywhere else.
+    if (g_talkPtr < 0 && talkVisible()) {
+        Vec2 tc; float tr;
+        talkCircle(tc, tr);
+        const int win = RanUI_PointInDragControl
+                          ? RanUI_PointInDragControl((int)x, (int)y)
+                          : (RanUI_PointInControl ? RanUI_PointInControl((int)x, (int)y) : 0);
+        if (!win && hit(tc, tr, x, y)) {
+            g_talkPtr = id; g_talkDown = true;
+            Touch *tt = addTouch(id, x, y);
+            if (tt) tt->claimed = true;
             return 1;
         }
     }
@@ -1766,6 +1809,13 @@ int RanTouch_PointerMove(int id, float x, float y) {
     Touch *t = findTouch(id);
     if (t) { t->x = x; t->y = y; }
 
+    if (g_talkPtr == id) {
+        Vec2 tc; float tr;
+        talkCircle(tc, tr);
+        g_talkDown = hit(tc, tr * 1.4f, x, y);     //  sliding off cancels, like a button
+        return 1;
+    }
+
     if (g_aim.ptr == id) {
         g_aim.fx = x; g_aim.fy = y;
         if (g_aimOn && !g_aim.aiming && g_aim.slot < g_skillCircleCount &&
@@ -1838,6 +1888,12 @@ int RanTouch_PointerUp(int id, float x, float y) {
         return 1;
     }
     int claimed = 0;
+
+    if (g_talkPtr == id) {
+        if (g_talkDown && g_talkShow) g_talkEdge = true;
+        g_talkPtr = -1; g_talkDown = false;
+        claimed = 1;
+    }
 
     if (g_aim.ptr == id) {
         const float r = (g_aim.slot < g_skillCircleCount) ? g_skillCircles[g_aim.slot].r : 1.0f;
@@ -3530,6 +3586,40 @@ void RanTouch_Render(void) {
                        0.0f, 0.0f, 0.0f, 150.0f / 255.0f);
     }
 
+    //  The talk button: the round bezel the skill slots wear, and a speech
+    //  bubble in its seat where a skill's picture would be. Brighter while
+    //  pressed.
+    g_drawAlpha = 1.0f;
+    if (talkVisible()) {
+        Vec2 tc; float tr;
+        talkCircle(tc, tr);
+        const bool dn = g_talkDown && g_talkPtr >= 0;
+        drawHalo(tc.x, tc.y, tr, rgba(1.0f, 0.85f, 0.45f, dn ? 0.55f : 0.30f), 0.35f);
+        float gy = tc.y;
+        if (hudSheet()) {
+            //  A dark seat first, in case the bezel's window is clear.
+            discGrad(tc.x, tc.y - tr * kBezelSize * kSeatUp, tr * kBezelSize * kSeatWin,
+                     rgba(0.18f, 0.14f, 0.09f, 0.92f), rgba(0.07f, 0.05f, 0.03f, 0.92f));
+            emit();
+            drawHudCell(kCellStickBase, tc.x, tc.y, tr * kBezelSize, 1.0f);
+            gy = tc.y - tr * kBezelSize * kSeatUp;
+        } else {
+            discGrad(tc.x, tc.y, tr, rgba(0.16f, 0.13f, 0.09f, 0.90f), rgba(0.06f, 0.05f, 0.04f, 0.90f));
+            drawRing(tc.x, tc.y, tr * 0.86f, tr * 0.98f, 0.93f, 0.74f, 0.36f, 0.95f);
+        }
+        //  The bubble: a round body, a tail to the lower left, three dots.
+        const Col cb = dn ? rgba(1.0f, 0.92f, 0.62f, 1.0f) : rgba(1.0f, 0.97f, 0.88f, 0.96f);
+        const float bx = tc.x, by = gy - tr * 0.05f, br = tr * 0.40f;
+        discGrad(bx, by, br, cb, cb);
+        const float tail[] = { bx - br * 0.55f, by + br * 0.55f,
+                               bx - br * 0.95f, by + br * 1.15f,
+                               bx - br * 0.05f, by + br * 0.85f };
+        drawPoly(tail, 3, cb);
+        const Col cd = rgba(0.22f, 0.16f, 0.08f, 1.0f);
+        for (int k = -1; k <= 1; ++k)
+            discGrad(bx + (float)k * br * 0.42f, by, br * 0.13f, cd, cd);
+    }
+
     //  The skill under the thumb: the pad the knob travels in, the knob, and
     //  while aiming the cancel circle. Live, over the icon, at full opacity
     //  whatever the arc's - it is what the thumb is doing right now.
@@ -3771,6 +3861,17 @@ extern "C" void RanTouch_SetSkillAim(int on) {
 
 extern "C" void RanTouch_SetSkillCarry(int carrying) { g_skillCarry = (carrying != 0); }
 
+extern "C" void RanTouch_SetTalkButton(int show) {
+    g_talkShow = (show != 0);
+    if (!g_talkShow) { g_talkPtr = -1; g_talkDown = false; }
+}
+
+extern "C" int RanTouch_ConsumeTalk(void) {
+    if (!g_talkEdge) return 0;
+    g_talkEdge = false;
+    return (g_inited && g_active) ? 1 : 0;
+}
+
 //  --- HUD arrangement API -------------------------------------------------
 
 //  Enter or leave the editor. Entering snapshots the arrangement for cancel and
@@ -3788,6 +3889,7 @@ extern "C" void RanTouch_SetEditMode(int on) {
         g_pinch.a = g_pinch.b = -1;
         skillAimDrop();
         g_skillEvtN = 0;
+        g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
         g_edit = true;
         g_editSel = -1;
     } else if (!on && g_edit) {

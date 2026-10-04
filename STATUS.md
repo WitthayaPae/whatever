@@ -12,6 +12,30 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-04 (3) — Talk-to-NPC button: v183 "1.1.3", patch 612 (Android + iOS)
+
+Asked: in a crowd, players stand in front of the NPC and take every tap, so it
+cannot be opened.
+- Change:
+  - `GLCharacter::MobileTalkFind` finds the nearest NPC within reach + 50 every
+    frame. NPCs live in the crow list, so the search uses `DetectCrow(CROW_EX_MOB)`
+    and filters to CROW_NPC. Asking for CROW_EX_NPC finds nothing.
+  - The overlay shows a round talk button (speech bubble, skill-slot bezel) above
+    the skill arc. It gives way to the aim's cancel circle.
+  - Pressing it runs `NpcReaction`, which walks into range and then opens the
+    dialogue, like a PC click.
+  - A yellow ring marks the NPC. The button is hidden while the dialogue is open,
+    while dead, and in HUD edit mode.
+- Verified on LDPlayer:
+  - next to เด็กฝึกงาน, the dialogue opens (`RanTalk: talk button -> npc 531`)
+  - a few steps away: ring + button, and the press opens it
+- Not verified: the tablet, and iOS on a device.
+
+### Still open (reported 2026-10-04)
+- [ ] The item protection necklace cannot be used.
+- [ ] Pet dual-skill card: add a "ใช้งาน" option while a pet is out.
+- [ ] Pet and bike icons overlap the active pet-skill icon.
+
 ## 2026-10-04 (2) — Skill aim shipped: v182 "1.1.2", patch 611 (Android + iOS)
 
 The user chose: cancel circle only; an aimed lock also becomes the current target.
