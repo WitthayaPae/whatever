@@ -300,6 +300,7 @@ const char *kFS =
     "uniform highp vec2  uTexSize;\n"   // texels of the bound texture, 0 if unknown
     "uniform highp float uUiSharpen;\n" // magnification the interface is drawn at
     "uniform highp float uPanelH;\n" // framebuffer height, 0 when drawing into a render target
+    "uniform highp vec2  uUiOrigin;\n" // panel px (from the top-left) where the logical grid starts; moves for a magnified window
     "#ifndef uAlphaTest\n"
     "uniform int   uAlphaTest;\n"
     "#endif\n"
@@ -378,7 +379,7 @@ const char *kFS =
     "        highp float tpp = max(tpx, tpy);\n"
     "        if (uPanelH > 0.0 && tpp >= 0.75 && min(tpx, tpy) < 0.75) {\n"
     "            highp float s = uUiSharpen;\n"
-    "            highp vec2 lg = vec2(gl_FragCoord.x, uPanelH - gl_FragCoord.y) / s;\n"
+    "            highp vec2 lg = (vec2(gl_FragCoord.x, uPanelH - gl_FragCoord.y) - uUiOrigin) / s;\n"
     "            highp float hp = 0.5 / s;\n"
     "            highp vec2 c = floor(lg + hp);\n"
     "            highp vec2 w = clamp((lg + hp - c) * s, 0.0, 1.0);\n"
@@ -392,7 +393,7 @@ const char *kFS =
     "            if (m.y < 0.5) uvS.y = sh.y;\n"
     "        } else if (uPanelH > 0.0 && tpp < 0.75) {\n"
     "            highp float s = uUiSharpen;\n"
-    "            highp vec2 lg = vec2(gl_FragCoord.x, uPanelH - gl_FragCoord.y) / s;\n"
+    "            highp vec2 lg = (vec2(gl_FragCoord.x, uPanelH - gl_FragCoord.y) - uUiOrigin) / s;\n"
     //  Where a logical-pixel edge falls inside this screen pixel, sample
     //  between the two logical pixels by how much of the screen pixel each
     //  covers. At a whole scale an edge never falls inside, so this is exactly
@@ -651,6 +652,7 @@ float  g_viewMatrix[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
 GLint  uFlipY = -1, uWorldM = -1, uViewProj = -1, uVertexBlend = -1, uIndexedBlend = -1;
 GLint  uTexStage1 = -1;
 GLint  uPanelH = -1;
+GLint  uUiOrigin = -1;
 //  The 2D texture bound to stage 1, on its own unit so the cube map can keep
 //  unit 1 and stage 0 can keep unit 0.
 unsigned g_stage1Tex2D = 0;
@@ -1363,6 +1365,7 @@ void fetchUniformLocations(GLuint prog) {
     uTexSize        = glGetUniformLocation(prog, "uTexSize");
     uUiSharpen      = glGetUniformLocation(prog, "uUiSharpen");
     uPanelH         = glGetUniformLocation(prog, "uPanelH");
+    uUiOrigin       = glGetUniformLocation(prog, "uUiOrigin");
     uGammaOn        = glGetUniformLocation(prog, "uGammaOn");
     uPlain          = glGetUniformLocation(prog, "uPlain");
     uGammaLut       = glGetUniformLocation(prog, "uGammaLut");
@@ -1419,7 +1422,7 @@ GLint *const kLocationVars[] = {
     &uMVP, &uViewport, &uPreTransformed, &uFlipY, &uMatAlpha, &uWorldM, &uViewProj,
     &uVertexBlend, &uIndexedBlend, &uTex, &uUseTexture, &uAlphaTest, &uAlphaRef,
     &uColorOp, &uColorArg1, &uColorArg2, &uAlphaOp, &uAlphaArg1, &uAlphaArg2,
-    &uTexFactor, &uTexCube, &uStage1, &uTexSize, &uUiSharpen, &uPanelH, &uGammaOn, &uPlain,
+    &uTexFactor, &uTexCube, &uStage1, &uTexSize, &uUiSharpen, &uPanelH, &uUiOrigin, &uGammaOn, &uPlain,
     &uGammaLut, &uSpecularOn, &uMatSpecular, &uMatPower, &uLightSpecular, &uView,
     &uWorld, &uCameraPos, &uCameraPosF, &uLighting, &uLightCount, &uGlobalAmbient,
     &uMatDiffuse, &uHasVertexColor, &uMatAmbient, &uMatEmissive, &uLightType,
@@ -1762,6 +1765,75 @@ static unsigned baseFramebuffer(void) {
 static int baseWidth(void)  { return g_sceneActive ? g_sceneW : RanGL_Width(); }
 static int baseHeight(void) { return g_sceneActive ? g_sceneH : RanGL_Height(); }
 
+//  ---- window magnify (2026-10-04) -----------------------------------------
+//
+//  An in-game window is drawn larger on a phone by drawing it through a
+//  magnified viewport: every interface draw is pre-transformed (logical pixels,
+//  mapped to clip space against the full logical screen), so stretching the
+//  viewport about an anchor stretches the whole window - its art, its text and
+//  any 3D preview it sets a sub-viewport for - by the same amount, about the
+//  same point. Nothing is transformed twice: the D3D viewport stays what the
+//  client set, and only its trip to glViewport is magnified.
+//
+//  Only on the frame itself: a render target or the scene target is never
+//  magnified.
+static float g_uiMagS = 1.0f, g_uiMagAX = 0.0f, g_uiMagAY = 0.0f;
+//  The D3D viewport the client last set, logical; w < 0 means the full surface.
+static int   g_vpX = 0, g_vpY = 0, g_vpW = -1, g_vpH = -1;
+
+static bool uiMagnifyOn(void) { return g_uiMagS != 1.0f && !g_rtActive && !g_sceneActive; }
+
+//  The client's viewport (logical, D3D's top-down Y) to glViewport.
+static void applyViewport(void) {
+    const float scale = g_rtActive ? 1.0f
+                                   : RanGL_UIScale() * (g_sceneActive ? g_sceneScale : 1.0f);
+    const int surfaceH = g_rtActive ? g_rtH : baseHeight();
+    float x, y, w, h;
+    if (g_vpW < 0 || g_rtActive || g_sceneActive) {
+        if (g_vpW < 0 && !uiMagnifyOn()) {
+            glViewport(0, 0, g_rtActive ? g_rtW : baseWidth(), surfaceH);
+            return;
+        }
+        x = 0.0f; y = 0.0f;
+        w = (float)(g_rtActive ? g_rtW : RanGL_LogicalWidth());
+        h = (float)(g_rtActive ? g_rtH : RanGL_LogicalHeight());
+        if (g_vpW >= 0) { x = (float)g_vpX; y = (float)g_vpY; w = (float)g_vpW; h = (float)g_vpH; }
+    } else {
+        x = (float)g_vpX; y = (float)g_vpY; w = (float)g_vpW; h = (float)g_vpH;
+    }
+    if (uiMagnifyOn()) {
+        const float s = g_uiMagS;
+        x = g_uiMagAX + (x - g_uiMagAX) * s;
+        y = g_uiMagAY + (y - g_uiMagAY) * s;
+        w *= s; h *= s;
+    }
+    //  Edges rounded, not sizes, so neighbouring rects meet on one column.
+    const int x0 = (int)lroundf(x * scale), x1 = (int)lroundf((x + w) * scale);
+    const int y0 = (int)lroundf(y * scale), y1 = (int)lroundf((y + h) * scale);
+    // D3D viewport Y is measured from the top, GL's from the bottom - except in
+    // a render target, whose rows are stored top first (see uFlipY).
+    glViewport(x0, g_rtActive ? y0 : surfaceH - y1, x1 - x0, y1 - y0);
+}
+
+//  The full surface again (render target released, scene composited).
+static void viewportFull(void) {
+    g_vpW = g_vpH = -1;
+    applyViewport();
+}
+
+//  Draw what follows magnified by s about (ax, ay), logical pixels; s = 1 ends
+//  it. The client flushes its own quad queue around this so no quad drawn
+//  before is caught by it, and no quad of the window escapes it.
+extern "C" void RanGLR_SetUiMagnify(float s, float ax, float ay) {
+    if (!g_inited) return;
+    if (!(s > 0.0f)) s = 1.0f;
+    if (s == g_uiMagS && ax == g_uiMagAX && ay == g_uiMagAY) return;
+    g_uiMagS = s; g_uiMagAX = ax; g_uiMagAY = ay;
+    applyViewport();
+}
+
+extern "C" float RanGLR_UiMagnify(void) { return uiMagnifyOn() ? g_uiMagS : 1.0f; }
+
 //  glTex == 0 selects the back buffer. Everything else renders into that
 //  texture through a cached FBO sized to the surface.
 //  Copy one render-target texture into another, which is what D3D StretchRect
@@ -1802,7 +1874,7 @@ extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
             g_rtActive = false;
             ++g_rtSwitches;
         }
-        glViewport(0, 0, baseWidth(), baseHeight());
+        viewportFull();
         return;
     }
 
@@ -1859,7 +1931,7 @@ extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
             LOGE("render target %ux%u incomplete: 0x%04X", w, h, st);
             glBindFramebuffer(GL_FRAMEBUFFER, baseFramebuffer());
             g_rtActive = false;
-            glViewport(0, 0, baseWidth(), baseHeight());
+            viewportFull();
             return;
         }
     } else {
@@ -2087,7 +2159,7 @@ extern "C" void RanGLR_SceneEnd(void) {
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
     glBindFramebuffer(GL_FRAMEBUFFER, dst);
-    glViewport(0, 0, RanGL_Width(), RanGL_Height());
+    viewportFull();
     ++g_rtSwitches;
     //  The blit changed bindings behind the state cache's back.
     RanGLR_InvalidateStateCache();
@@ -2186,16 +2258,11 @@ extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil
 extern "C" void RanGLR_SetViewport(int x, int y, int w, int h) {
     if (!g_inited) return;
     //  The client works in logical pixels (see RanGL_UIScale) and the frame is
-    //  stretched to the panel, so a viewport it sets scales with it — except on
-    //  a render target, which is already sized in real pixels.
-    const float scale = g_rtActive ? 1.0f
-                                   : RanGL_UIScale() * (g_sceneActive ? g_sceneScale : 1.0f);
-    const int surfaceH = g_rtActive ? g_rtH : baseHeight();
-    const int x0 = (int)lroundf(x * scale), x1 = (int)lroundf((x + w) * scale);
-    const int y0 = (int)lroundf(y * scale), y1 = (int)lroundf((y + h) * scale);
-    // D3D viewport Y is measured from the top, GL's from the bottom - except in
-    // a render target, whose rows are stored top first (see uFlipY).
-    glViewport(x0, g_rtActive ? y0 : surfaceH - y1, x1 - x0, y1 - y0);
+    //  stretched to the panel, so a viewport it sets scales with it - except on
+    //  a render target, which is already sized in real pixels. A magnified
+    //  window's viewports are magnified with it (applyViewport).
+    g_vpX = x; g_vpY = y; g_vpW = w; g_vpH = h;
+    applyViewport();
 }
 
 // Apply the D3D render-state block to GL immediately before a draw. Doing it
@@ -3796,7 +3863,15 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
             }
         }
         setUniform2f(uTexSize, s_lastW, s_lastH);
-        setUniform1f(uUiSharpen, g_noUiSharp ? 1.0f : RanGL_UIScale());
+        //  A magnified window's logical pixel is UIScale*s panel pixels, and
+        //  its grid starts where the window's anchor maps to.
+        {
+            const float mag = uiMagnifyOn() ? g_uiMagS : 1.0f;
+            const float U = RanGL_UIScale();
+            setUniform1f(uUiSharpen, g_noUiSharp ? 1.0f : U * mag);
+            setUniform2f(uUiOrigin, mag != 1.0f ? U * g_uiMagAX * (1.0f - mag) : 0.0f,
+                                    mag != 1.0f ? U * g_uiMagAY * (1.0f - mag) : 0.0f);
+        }
         //  gl_FragCoord is in framebuffer pixels from the bottom; the logical
         //  pixel a fragment belongs to needs the height. 0 inside a render
         //  target, whose draws are not magnified and must not be snapped.

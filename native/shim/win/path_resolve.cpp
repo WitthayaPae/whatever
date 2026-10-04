@@ -29,6 +29,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 #include <mutex>
 
 #define LOGW(...) RanPlat_Log(RANLOG_WARN, "RanPath", __VA_ARGS__)
@@ -45,8 +46,13 @@ bool exists(const std::string &p) {
 }
 
 // Find `name` inside `dir` ignoring case. Returns the real spelling.
-bool matchEntry(const std::string &dir, const std::string &name, std::string &out) {
+//  *pListed says whether the directory could be read at all: "not there" and
+//  "could not look" are different answers, and only the first may lead to a
+//  new directory being made (see RanPath_MakeDir).
+bool matchEntry(const std::string &dir, const std::string &name, std::string &out,
+                bool *pListed = NULL) {
     DIR *d = opendir(dir.empty() ? "/" : dir.c_str());
+    if (pListed) *pListed = (d != NULL);
     if (!d) return false;
     bool found = false;
     struct dirent *e;
@@ -100,11 +106,22 @@ extern "C" int RanPath_MakeDir(const char *in) {
                 //  Case may differ from what the client asked for, exactly as
                 //  when opening a file.
                 std::string real;
-                if (matchEntry(cur.empty() ? "." : cur, comp, real)) {
+                bool listed = true;
+                if (matchEntry(cur.empty() ? "." : cur, comp, real, &listed)) {
                     std::string alt = cur;
                     if (!alt.empty() && alt.back() != '/') alt += '/';
                     alt += real;
                     cur = alt;
+                } else if (!listed) {
+                    //  Could not read the parent, so a differently-cased twin
+                    //  may well be there. Making the directory anyway is how a
+                    //  "Data" appeared beside the data root's "data" and hid it:
+                    //  every later open went into the empty twin and the game
+                    //  could not boot (2026-10-04). Fail instead.
+                    const int err = errno;
+                    LOGW("mkdir %s: cannot list %s (errno %d), not creating", in, cur.c_str(), err);
+                    errno = err ? err : EIO;
+                    return -1;
                 } else {
                     result = mkdir(probe.c_str(), 0777);
                     if (result != 0 && errno == EEXIST) result = 0;
@@ -454,4 +471,83 @@ extern "C" void RanLog_Login(int result, int verFileOk, int clientPatch, int cli
                         "result=%d verFile=%s client=(%d,%d) server=(%d,%d)",
                         result, verFileOk ? "ok" : "UNREADABLE",
                         clientPatch, clientGame, serverPatch, serverGame);
+}
+
+//  Remove case-twins that hold no files.
+//
+//  An empty "Data" made beside the real "data" (see RanPath_MakeDir) shadows
+//  it for good: lookups take the exact spelling first, so every file under it
+//  is missing and the game will not boot again. Any directory in `root` whose
+//  name matches another one's ignoring case, and which contains directories
+//  only - no regular file anywhere under it - is deleted. One that holds a file
+//  is left alone and reported: that is somebody's data.
+namespace {
+bool holdsNoFiles(const std::string &dir) {
+    DIR *d = opendir(dir.c_str());
+    if (!d) return false;
+    bool empty = true;
+    struct dirent *e;
+    while (empty && (e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        const std::string sub = dir + "/" + e->d_name;
+        struct stat st;
+        if (lstat(sub.c_str(), &st) != 0) { empty = false; break; }
+        if (S_ISDIR(st.st_mode)) { if (!holdsNoFiles(sub)) empty = false; }
+        else empty = false;
+    }
+    closedir(d);
+    return empty;
+}
+void removeDirTree(const std::string &dir) {
+    DIR *d = opendir(dir.c_str());
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d)) != NULL) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            removeDirTree(dir + "/" + e->d_name);
+        }
+        closedir(d);
+    }
+    rmdir(dir.c_str());
+}
+}
+
+extern "C" int RanPath_HealCaseTwins(const char *rootIn) {
+    if (!rootIn || !*rootIn) return 0;
+    std::string root = normalise(rootIn);
+    while (root.size() > 1 && root.back() == '/') root.pop_back();
+
+    std::vector<std::string> dirs;
+    DIR *d = opendir(root.c_str());
+    if (!d) return 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        struct stat st;
+        if (stat((root + "/" + e->d_name).c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+            dirs.push_back(e->d_name);
+    }
+    closedir(d);
+
+    int removed = 0;
+    for (size_t i = 0; i < dirs.size(); ++i)
+        for (size_t j = 0; j < dirs.size(); ++j) {
+            if (i == j || dirs[i] == dirs[j] || strcasecmp(dirs[i].c_str(), dirs[j].c_str()) != 0) continue;
+            //  Of a twin pair, the one with no files goes; if both are empty
+            //  either may, and the other stays.
+            const std::string path = root + "/" + dirs[i];
+            if (!exists(path) || !exists(root + "/" + dirs[j])) continue;
+            if (holdsNoFiles(path)) {
+                removeDirTree(path);
+                LOGW("removed empty case-twin %s (shadowed %s)", path.c_str(), dirs[j].c_str());
+                ++removed;
+            } else {
+                LOGW("case-twin %s holds files; left alone", path.c_str());
+            }
+        }
+    if (removed) {
+        std::lock_guard<std::mutex> lk(g_lock);
+        g_cache.clear();
+    }
+    return removed;
 }

@@ -12,6 +12,59 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-04 (4) — GUI too small on phones: research + mockup (NOT implemented)
+
+Asked: the whole GUI is too small for mobile. Research Ran Origin Mobile and
+KlassX, then make a mockup for approval before implementing. Lower priority:
+the new pad icons are "too much", not classic. Players want classic.
+
+- Now: `RanGL_ChooseUIScale` lays phones out at about 640 logical rows (LDPlayer
+  3840x2160 gets 720). An inventory slot is about 32 logical px, roughly 3.4 mm on
+  a 6.5" phone.
+- KlassX (Play store shots): classic RAN windows and art, drawn about 2.2x larger.
+  An inventory slot is about 11.5% of screen height (about 7.8 mm). The inventory
+  shows 4 rows with a scrollbar, so it does not fit unscrolled.
+- Ran Origin: redrawn UI, large labelled icons and buttons. Less classic.
+- [x] Mockup for the user (real window art, enlarged and fitted to a phone):
+  https://claude.ai/artifact/J6Qo4qo1yezmCv48WrpVp7
+- [x] DONE 2026-10-05, v187 "1.1.6", patch 616 (Android + iOS). Verified on LDPlayer, 1280x720 logical:
+  - Drag-to-scroll: skill list and bag scroll with a finger, with a fling. The
+    pointer is parked on the window title during the scroll, so no tooltip pops up.
+  - Bag: 7 rows (6 on 640-row phones), its own scrollbar, and the 11th data row
+    is reachable for the first time.
+  - Magnify (per window, x2 or as much as fits):
+    - bag x2, skills x1.94, character x1.54, NPC dialogue x2;
+    - item detail + action sheet grow together;
+    - text is sharp (font tier 1 at UIScale*2, cap 6);
+    - taps, title drag and scroll all map correctly.
+  - Not magnified: the menu (its icons are separate controls), chat, HUD groups.
+  - Bug found and fixed during testing: pop-ups were first anchored on the live
+    finger, so the tap meant for them moved them. On the test account that stray
+    tap opened Beta Boss's shop: the weapon ended up in the bag and gold went
+    899,632,016 -> 899,210,816 (-421,200).
+  - Not verified: a real 640-row phone, the tablet, iOS on a device. Two windows
+    open side by side (shop + bag) may overlap when both are enlarged.
+- [x] Case-twin "Data" dir: found during testing. A "Data/Animation/RccAniBinTemp"
+  made at 23:03 shadowed "data", and the next boot failed. Fixed in two ways:
+  - RanPath_MakeDir refuses to create when it cannot list the parent.
+  - RanApp_Boot heals any empty case-twin, verified on LDPlayer
+    ("removed empty case-twin .../Data").
+  - The cause of the failed listing is unproven (possibly fd exhaustion).
+- Build order used:
+  1. [ ] Drag-to-scroll in every list. Drive CBasicScrollThumbFrame's percent
+     directly (the LargeMap pan precedent), not wheel events; gesture layer
+     scroll mode.
+  2. [ ] Inventory: 6 visible rows on 640-row phones (7 on 720) plus a
+     scrollbar, copied from CRebuildInventoryPage. This also shows data row 10,
+     which is never visible today.
+  3. [ ] Per-window render magnify:
+     - k = min(2, fit) for each whitelisted window;
+     - shim magnifies through glViewport, plus snap-uniform origin and a
+       font tier-1 atlas;
+     - input inverse-mapped in UpdateList and PointInList;
+     - CheckBoundary, AlignMainControl and the edge sweep use the magnified size.
+- [ ] Icons back to classic (lower priority).
+
 ## 2026-10-04 (3) — Talk-to-NPC button: v183 "1.1.3", patch 612 (Android + iOS)
 
 Asked: in a crowd, players stand in front of the NPC and take every tap, so it

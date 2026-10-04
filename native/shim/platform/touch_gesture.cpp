@@ -7,6 +7,7 @@
 
 #include <time.h>
 #include <stdint.h>
+#include <math.h>
 
 extern "C" {
 void RanInput_PointerMove ( int x, int y );
@@ -18,6 +19,9 @@ int  RanUI_PointInControl ( int x, int y );
 //  the middle of the screen.
 int  RanUI_PointInDragControl ( int x, int y );
 void RanUI_EndEditIfOutside ( int x, int y );
+//  Drag-to-scroll: is there a list under the point, and move it by dy.
+int  RanUI_ScrollableAt ( int x, int y, int *parkX, int *parkY );
+int  RanUI_ScrollAt ( int x, int y, float dy );
 }
 
 namespace {
@@ -37,7 +41,46 @@ struct TouchGesture {
     int     button  = 0;        // which one
     int     x = 0, y = 0;       // where it started
     int64_t downMs  = 0;
+    //  A vertical drag that started on a list: the list follows the finger
+    //  and no button is pressed at all. lastY is where the last step ended.
+    bool    scrolling = false;
+    int     lastY = 0;
 } g_gesture;
+
+//  The fling after a scroll lifts: the finger's speed when it left, decaying.
+//  Measured from the last moves rather than the last one, because a single
+//  event is a few milliseconds and a few pixels and says nothing reliable.
+struct ScrollFling {
+    bool    on = false;
+    int     x = 0, y = 0;           //  the list it is moving (its start point)
+    float   v = 0.0f;               //  pixels per second, + = finger moving down
+    int64_t lastMs = 0;
+    //  recent samples while dragging
+    int     sy[6] = { 0 };
+    int64_t st[6] = { 0 };
+    int     n = 0;
+} g_fling;
+
+void flingSample ( int y, int64_t t ) {
+    const int i = g_fling.n % 6;
+    g_fling.sy[i] = y; g_fling.st[i] = t; ++g_fling.n;
+}
+
+//  Speed over the last ~100 ms of samples.
+float flingVelocity ( int64_t now ) {
+    const int count = g_fling.n < 6 ? g_fling.n : 6;
+    if (count < 2) return 0.0f;
+    const int newest = (g_fling.n - 1) % 6;
+    int oldest = newest;
+    for (int k = 1; k < count; ++k) {
+        const int j = (g_fling.n - 1 - k) % 6;
+        if (now - g_fling.st[j] > 100) break;
+        oldest = j;
+    }
+    const int64_t dt = g_fling.st[newest] - g_fling.st[oldest];
+    if (dt <= 0 || now - g_fling.st[newest] > 80) return 0.0f;   //  held still before lifting
+    return (float)(g_fling.sy[newest] - g_fling.sy[oldest]) * 1000.0f / (float)dt;
+}
 
 bool g_imeActive = false;
 
@@ -104,13 +147,29 @@ void gesturePress ( int button ) {
 extern "C" void RanGesture_SetImeActive ( int active ) { g_imeActive = ( active != 0 ); }
 
 extern "C" void RanGesture_Tick ( void ) {
-    if (!g_gesture.active || g_gesture.pressed) return;
+    //  The fling: keep moving the list at the finger's last speed, slowing.
+    if (g_fling.on) {
+        const int64_t now = nowMs ();
+        const float dt = (float)(now - g_fling.lastMs) * 0.001f;
+        g_fling.lastMs = now;
+        if (dt > 0.0f && dt < 0.25f) {
+            const float step = g_fling.v * dt;
+            g_fling.v *= expf ( -dt / 0.30f );
+            if ( !RanUI_ScrollAt ( g_fling.x, g_fling.y, step ) ) g_fling.on = false;
+        }
+        if (fabsf ( g_fling.v ) < 40.0f) g_fling.on = false;
+    }
+
+    if (!g_gesture.active || g_gesture.pressed || g_gesture.scrolling) return;
     if (g_gesture.moved) return;        // a drag in progress, not a hold
     if (nowMs() - g_gesture.downMs < kLongPressMs) return;
     gesturePress ( 1 );                 // right
 }
 
 extern "C" void RanGesture_Down ( int x, int y ) {
+    //  A new touch stops a fling, the way a finger stops a scrolling list.
+    g_fling.on = false;
+
     //  A second finger means a pinch is starting. Anything already dragging has
     //  to let go now, before the pinch moves.
     if (RanTouch_IsPinching() && g_gesture.pressed) {
@@ -133,9 +192,21 @@ extern "C" void RanGesture_Down ( int x, int y ) {
     g_gesture.x       = x;
     g_gesture.y       = y;
     g_gesture.downMs  = nowMs();
+    g_gesture.scrolling = false;
 }
 
 extern "C" void RanGesture_Move ( int x, int y ) {
+    //  Scrolling a list: the finger moves the list, not the pointer. The
+    //  pointer rests on the window's title (RanUI_ScrollableAt), inside the
+    //  window - some lists only take their scroll while they are under it.
+    if (g_gesture.active && g_gesture.scrolling) {
+        if (RanTouch_IsPinching()) { g_gesture.scrolling = false; g_gesture.active = false; return; }
+        RanUI_ScrollAt ( g_gesture.x, g_gesture.y, (float)(y - g_gesture.lastY) );
+        g_gesture.lastY = y;
+        flingSample ( y, nowMs () );
+        return;
+    }
+
     RanInput_PointerMove ( x, y );
 
     //  A pinch is two fingers moving, and that movement would otherwise cross
@@ -160,6 +231,26 @@ extern "C" void RanGesture_Move ( int x, int y ) {
         //  two thresholds is exactly where a slow camera drag used to be
         //  mistaken for a hold.
         if (dx * dx + dy * dy > kHoldSlop * kHoldSlop) g_gesture.moved = true;
+        int parkX = g_gesture.x, parkY = g_gesture.y;
+        if (dx * dx + dy * dy > kDragSlop * kDragSlop &&
+            ( dy < 0 ? -dy : dy ) >= ( dx < 0 ? -dx : dx ) &&
+            RanUI_ScrollableAt ( g_gesture.x, g_gesture.y, &parkX, &parkY )) {
+            //  Mostly vertical and it started on a list: scroll it, like a
+            //  phone list, instead of pressing a button (2026-10-04). The
+            //  travel so far is applied at once so the content is under the
+            //  finger from the first frame.
+            g_gesture.scrolling = true;
+            g_gesture.moved = true;
+            RanPlat_Log ( RANLOG_INFO, "RanTouch", "GESTURE scroll at (%d,%d)",
+                          g_gesture.x, g_gesture.y );
+            RanInput_PointerMove ( parkX, parkY );
+            RanUI_ScrollAt ( g_gesture.x, g_gesture.y, (float)dy );
+            g_gesture.lastY = y;
+            g_fling.n = 0;
+            flingSample ( g_gesture.y, g_gesture.downMs );
+            flingSample ( y, nowMs () );
+            return;
+        }
         if (dx * dx + dy * dy > kDragSlop * kDragSlop) {
             //  Moved far enough to be a drag. What that means depends on what
             //  is under the finger:
@@ -190,6 +281,19 @@ extern "C" void RanGesture_Move ( int x, int y ) {
 }
 
 extern "C" void RanGesture_Up ( int x, int y ) {
+    //  The end of a scroll: no click, and a fling if the finger was moving.
+    if (g_gesture.active && g_gesture.scrolling) {
+        const int64_t now = nowMs ();
+        g_fling.v = flingVelocity ( now );
+        g_fling.x = g_gesture.x; g_fling.y = g_gesture.y;
+        g_fling.lastMs = now;
+        g_fling.on = fabsf ( g_fling.v ) >= 150.0f;
+        g_gesture.active = false;
+        g_gesture.pressed = false;
+        g_gesture.scrolling = false;
+        return;
+    }
+
     //  Lifted before the hold expired and without moving: an ordinary tap, so
     //  the left click happens now, at the point the finger went down rather
     //  than the pixel it left from. The shim holds the release back until the

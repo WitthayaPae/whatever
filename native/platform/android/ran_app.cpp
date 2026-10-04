@@ -49,6 +49,7 @@
 #define LOGE(...) RanPlat_Log(RANLOG_ERROR, "RanApp", __VA_ARGS__)
 
 extern "C" void RanShim_SetModulePath(const char *p);
+extern "C" int RanPath_HealCaseTwins(const char *root);
 extern "C" void RanShim_SetClientSize(int w, int h);
 extern "C" void RanD3D_LogStats(void);
 extern "C" void RanD3D_ReportBuffers(unsigned frames);
@@ -251,6 +252,11 @@ extern "C" int RanApp_Boot(const char *dataRoot, int width, int height) {
 
     strncpy(g_appPath, dataRoot ? dataRoot : "", MAX_PATH - 1);
     RanShim_SetModulePath(g_appPath);
+
+    //  A "Data" made beside the data root's "data" hides every file under it,
+    //  and the boot fails with no way back for the player (2026-10-04, see
+    //  RanPath_HealCaseTwins). Undone here, before anything is opened.
+    RanPath_HealCaseTwins(g_appPath);
 
     //  The client writes per-character options and its error log under the
     //  "Documents" folder, which on device is the data root; it uses fopen("wt")

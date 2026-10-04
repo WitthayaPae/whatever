@@ -75,6 +75,25 @@ float fontSuperSample() {
 int ATLAS_W = 1024;
 int ATLAS_H = 1024;
 
+//  Text inside a magnified window (RanGLR_SetUiMagnify) is drawn larger than
+//  the UI scale, so a glyph rasterised for the UI scale would be stretched -
+//  soft, and blocky where the art snap takes it. Each font keeps a second set
+//  of glyphs for that, rasterised at the magnified size. Made only when a font
+//  is first drawn magnified, so fonts that never are cost nothing.
+//  2.0 is RanMobileUiMagnifyTarget (Lib_ClientUI/Interface/InventoryPage.cpp):
+//  the largest a window is drawn at.
+extern "C" float RanGLR_UiMagnify(void);
+const float kUiMagnifyTarget = 2.0f;
+float magnifiedSuperSample() {
+    //  Up to 6: a glyph drawn larger than it was rasterised falls into the art
+    //  snap in the interface shader (texels bigger than 1.33 px) and comes out
+    //  in blocks. The emulator's 3x UI at 2x magnify needs all 6; phones (UI
+    //  scale ~1.7-1.85) need ~3.7. Only fonts drawn magnified pay for it.
+    float ss = RanGL_UIScale() * kUiMagnifyTarget;
+    if (ss > 6.0f) ss = 6.0f;
+    return ss;
+}
+
 struct Glyph {
     float u0, v0, u1, v1;
     //  In logical pixels - the size the quad is drawn at, not the size the
@@ -124,6 +143,20 @@ public:
     //  larger than the one it owns - writing past the end of the locked bits.
     int m_atlasW = 0, m_atlasH = 0;
     std::map<unsigned, Glyph> m_glyphs;
+
+    //  The other tier's glyph store (see magnifiedSuperSample). The members
+    //  above always hold the ACTIVE tier; selectTier swaps the two, which is
+    //  a handful of pointer swaps, so every glyph path below stays as it was.
+    struct TierStore {
+        IDirect3DTexture9 *atlas = NULL;
+        int penX = 1, penY = 1, rowH = 0, atlasW = 0, atlasH = 0;
+        std::map<unsigned, Glyph> glyphs;
+        std::vector<const Glyph *> idxMain, idxFall;
+    };
+    TierStore m_otherTier;
+    int m_tier = 0;
+    void  selectTier(int t);
+    float tierSS() const { return m_tier ? magnifiedSuperSample() : fontSuperSample(); }
     HDC m_dc = NULL;
 
     RanD3DXFont(IDirect3DDevice9 *dev, const D3DXFONT_DESCA *desc);
@@ -448,19 +481,42 @@ RanD3DXFont::RanD3DXFont(IDirect3DDevice9 *dev, const D3DXFONT_DESCA *desc) : m_
     }
 }
 
+void RanD3DXFont::selectTier(int t) {
+    if (t == m_tier) return;
+    std::swap(m_atlas, m_otherTier.atlas);
+    std::swap(m_penX, m_otherTier.penX);
+    std::swap(m_penY, m_otherTier.penY);
+    std::swap(m_rowH, m_otherTier.rowH);
+    std::swap(m_atlasW, m_otherTier.atlasW);
+    std::swap(m_atlasH, m_otherTier.atlasH);
+    m_glyphs.swap(m_otherTier.glyphs);
+    m_glyphIdxMain.swap(m_otherTier.idxMain);
+    m_glyphIdxFall.swap(m_otherTier.idxFall);
+    m_tier = t;
+}
+
 RanD3DXFont::~RanD3DXFont() {
+    if (m_otherTier.atlas) m_otherTier.atlas->Release();
     if (m_atlas) m_atlas->Release();
     if (m_dc) DeleteDC(m_dc);
 }
 
 void RanD3DXFont::ensureAtlas() {
     if (m_atlas || !m_device) return;
-    {
+    if (m_tier) {
+        //  The magnified tier is sized on its own and never moves the global:
+        //  that only grows, and every later normal atlas would grow with it.
+        //  1024 holds a font's working set at 3 texels a pixel; scale from
+        //  there, in 256 steps.
+        int side = (int)ceil(1024.0 * magnifiedSuperSample() / 3.0 / 256.0) * 256;
+        if (side < 1024) side = 1024;
+        m_atlasW = m_atlasH = side;
+    } else {
         const int want = 1024 * (int)ceil(fontSuperSample());
         if (want > ATLAS_W) { ATLAS_W = want; ATLAS_H = want; }
+        m_atlasW = ATLAS_W;
+        m_atlasH = ATLAS_H;
     }
-    m_atlasW = ATLAS_W;
-    m_atlasH = ATLAS_H;
     //  A8: coverage only. Every glyph is white with its coverage as alpha and
     //  the vertex colour tints it, so the RGB bytes were always 0xFFFFFF and
     //  carried nothing. They were not free, though: every font has its own
@@ -601,7 +657,7 @@ const Glyph *RanD3DXFont::glyphFor(TtfFace *face, int gid) {
     //  emPixels(), not m_pixelSize: a positive D3DXFONT_DESC.Height is a cell
     //  height and has to be converted before it can scale an outline.
     const float scale = (float)emPixels() / (float)face->UnitsPerEm();
-    const float ss    = fontSuperSample();
+    const float ss    = tierSS();
     if (!face->Rasterise(gid, scale * ss, m_italic ? 0.2f : 0.0f,
                          m_bold ? (int)lroundf(ss) : 0, gb))
         return NULL;
@@ -701,7 +757,7 @@ const Glyph *RanD3DXFont::outlineFor(const Glyph *g, int r) {
     TtfGlyphBitmap gb;
     //  Exactly the rasterisation glyphFor used, so the mask lines up with it.
     const float scale = (float)emPixels() / (float)g->face->UnitsPerEm();
-    const float ss    = fontSuperSample();
+    const float ss    = tierSS();
     if (!g->face->Rasterise(g->gid, scale * ss, m_italic ? 0.2f : 0.0f,
                             m_bold ? (int)lroundf(ss) : 0, gb))
         return NULL;
@@ -858,6 +914,10 @@ INT RanD3DXFont::drawRun(const WCHAR *s, INT count, LPRECT pRect, DWORD Format,
         return lineH;
     }
 
+    //  Drawn inside a magnified window: the glyphs rasterised for that size,
+    //  if they would be any sharper than the normal ones.
+    selectTier((RanGLR_UiMagnify() > 1.01f && magnifiedSuperSample() > fontSuperSample() + 0.01f) ? 1 : 0);
+
     if (!m_device || !m_atlas) {
         // Touch every glyph so the atlas exists on the next call even if this
         // one cannot draw yet.
@@ -927,7 +987,7 @@ INT RanD3DXFont::drawRun(const WCHAR *s, INT count, LPRECT pRect, DWORD Format,
                 //  logical pixels, so the quad grows by the same amount.
                 //  The pad outlineFor used, back in logical pixels: r at a whole
                 //  scale, a hair off r at a fractional one (it rounds to texels).
-                const float ssq = fontSuperSample();
+                const float ssq = tierSS();
                 const float r = (float)lroundf((float)outlineR * ssq) / ssq;
                 gx -= r; gy -= r; gw += 2.0f * r; gh += 2.0f * r;
                 u0 = g->ou0; v0 = g->ov0; u1 = g->ou1; v1 = g->ov1;
