@@ -59,6 +59,16 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-05 (13) — Aimed skills / auto-lock skipped duel opponents
+
+- Report: in a party fight, a dragged (aimed) skill found no target unless the
+  player tapped the enemy first. A confront (one-on-one, party, club) is not PK:
+  PC click asks GetCONFT_TAR before IsPK_TAR, but MobileAimPick and
+  MobileFindNearestPvP asked only IsPK_TAR, which says no outside a PK zone.
+- Fix: both accept ISCONFRONT_TAR first; MobileFindNearestAuto also searches
+  players while a confront is running (nearest of mob / opponent).
+- Built MSVC + both mobile ABIs. Not tested in a live duel.
+
 ## 2026-10-05 (12) — Window-mode toggle removed on mobile
 
 - FULLSCREEN_OUTER (login pages) and MINIMAP_FULLSCREEN (in game) are no longer
