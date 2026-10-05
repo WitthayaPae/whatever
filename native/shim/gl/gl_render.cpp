@@ -32,6 +32,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <vector>
+#include <mutex>
 
 #include "gl_context.h"
 #include "gl_render.h"
@@ -2204,6 +2205,9 @@ extern "C" unsigned RanGLR_CreateEmptyTexture(void) {
 }
 
 extern "C" void RanGLR_ForgetRenderTarget(unsigned glTex) {
+    //  Off the context's thread this is left to RanGLR_DeleteTexture's queue,
+    //  which forgets the target too when it gets to the texture.
+    if (!RanGLR_OnRenderThread()) return;
     std::map<GLuint, RanRT>::iterator it = g_rts.find(glTex);
     if (it == g_rts.end()) return;
     if (it->second.fbo)   glDeleteFramebuffers(1, &it->second.fbo);
@@ -2242,7 +2246,8 @@ extern "C" void RanGLR_ClearRectOff(void) {
 //  The frame is over: the next one starts on a buffer of unknown content.
 extern "C" int RanGLR_FrameDrawCount(void) { return g_frameDraw; }
 
-extern "C" void RanGLR_FrameEnd(void) { g_frameClearedColor = false; ++g_rtFrame; }
+static void drainDeadTextures(void);
+extern "C" void RanGLR_FrameEnd(void) { g_frameClearedColor = false; ++g_rtFrame; drainDeadTextures(); }
 
 extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil) {
     if (!g_inited) return;
@@ -5120,7 +5125,22 @@ extern "C" void RanGLR_LogTextureStats(void) {
                         g_texUploads, g_texBytes, g_texLastError);
 }
 
-extern "C" void RanGLR_DeleteTexture(unsigned tex) {
+//  Texture deletes from a thread that does not hold the context.
+//
+//  A map change frees the old map's textures on the main thread while the
+//  loading screen draws from its own thread, which holds the context then.
+//  Deleting there edited g_texSampler and the other per-texture tables at the
+//  same moment the drawing thread was inserting into them - a corrupted
+//  std::map and a SIGSEGV in RanGLR_DeleteTexture (crash report 2026-10-05,
+//  OPPO CPH2483, DxResponseMan::DoInterimClean in MoveActiveMap) - and its
+//  glDeleteTextures went to no context at all. Uploads already wait for the
+//  context's thread (RanTexture::GLTex); deletes now do too: queued here, done
+//  by whichever thread holds the context at its next present or delete. The
+//  GL name stays allocated until then, so it cannot be handed out again early.
+static std::mutex          g_deadTexLock;
+static std::vector<GLuint> g_deadTex;
+
+static void deleteTextureNow(GLuint tex) {
     {
         auto it = g_texGpuLevels.find((GLuint)tex);
         if (it != g_texGpuLevels.end()) {
@@ -5133,6 +5153,28 @@ extern "C" void RanGLR_DeleteTexture(unsigned tex) {
     g_texDims.erase((GLuint)tex);
     forgetTex2D((GLuint)tex);
     if (tex) { GLuint t = tex; glDeleteTextures(1, &t); }
+}
+
+static void drainDeadTextures(void) {
+    std::vector<GLuint> dead;
+    {
+        std::lock_guard<std::mutex> lk(g_deadTexLock);
+        if (g_deadTex.empty()) return;
+        dead.swap(g_deadTex);
+    }
+    for (size_t i = 0; i < dead.size(); ++i) {
+        RanGLR_ForgetRenderTarget(dead[i]);
+        deleteTextureNow(dead[i]);
+    }
+}
+
+extern "C" void RanGLR_DeleteTexture(unsigned tex) {
+    if (!RanGLR_OnRenderThread()) {
+        if (tex) { std::lock_guard<std::mutex> lk(g_deadTexLock); g_deadTex.push_back((GLuint)tex); }
+        return;
+    }
+    drainDeadTextures();
+    deleteTextureNow((GLuint)tex);
 }
 
 //  --- texture readback probe -------------------------------------------

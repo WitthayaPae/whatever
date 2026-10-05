@@ -59,6 +59,21 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-05 (16) — Texture deletes off the context thread (map-change crash)
+
+- Crash (OPPO CPH2483, v201): SIGSEGV in RanGLR_DeleteTexture erasing
+  g_texSampler, from DxResponseMan::DoInterimClean in MoveActiveMap. The loading
+  screen draws from its own thread (holding the context) while the main thread
+  frees the old map's textures; ~RanTexture deleted from the main thread anyway
+  - two threads editing the same std::map, and glDeleteTextures with no context.
+- Fix (shim/gl/gl_render.cpp, both platforms): off the context's thread,
+  RanGLR_DeleteTexture queues the name; RanGLR_FrameEnd (every present) and the
+  next on-thread delete drain the queue. ForgetRenderTarget off-thread is left
+  to the same queue. Booted to the login page on LDPlayer, no fault; map change
+  not exercised (test login password stale).
+- Also: website android/RanLegacyM.apk was 63,377,719 B (new APK + tail of an
+  older one) - the upload overwrites without truncating. Re-uploaded, hash ok.
+
 ## 2026-10-05 (15) — Patch failures found; two crash fixes
 
 - patchfail reports: "oversize body" on fresh installs = blob aec1d325... 
