@@ -59,6 +59,25 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-05 (14) — Patch-page failures are reported to the crash list
+
+- Report: some phones sit on "เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้ (Exception)". A bare
+  "Exception" is one of the launcher's own checks (not network/SSL/HTTP), and
+  the screen could not say which; the crash list never saw it because the game
+  never started. Checked: live manifest 638 + sig consistent, all 30 big blobs
+  present at the right size. Cause still unknown.
+- Android RanLauncher + iOS ran_ios_main.mm: the first failure of a run is sent
+  to /crash/upload.php as kind "patchfail" (error, stack, free space, data root,
+  local patch version, device); resent only if the send failed. The screen adds
+  a short code for own checks (OLD/SIG/SHA/IO/SIZE/MANIFEST/APK; iOS gained OLD).
+- RAN/crash/index.php shows patchfail rows (blue pill, shown code + error).
+  Needs uploading to the web server.
+- Tested on LDPlayer: forced .patchver 9999 -> screen "Exception OLD", report
+  arrived (HTTP 200) with the full message; .patchver restored to 638.
+  iOS not run on a device.
+- Only reaches phones that get as far as the APK offer (after the manifest
+  verifies); a phone failing before that keeps the old launcher.
+
 ## 2026-10-05 (13) — Aimed skills / auto-lock skipped duel opponents
 
 - Report: in a party fight, a dragged (aimed) skill found no target unless the

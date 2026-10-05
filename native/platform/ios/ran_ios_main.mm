@@ -13,6 +13,7 @@
 #import <QuartzCore/QuartzCore.h>
 #include <mach/mach.h>
 #include <os/proc.h>
+#include <sys/utsname.h>
 #include <vector>
 #import <QuartzCore/CAEAGLLayer.h>
 #import <OpenGLES/EAGL.h>
@@ -833,6 +834,7 @@ static NSString *RanPatchReasonCode ( NSString *error )
                                                  range:NSMakeRange ( 0, error.length )];
     if (m) return [@"HTTP " stringByAppendingString:[error substringWithRange:[m rangeAtIndex:1]]];
     NSString *lower = error.lowercaseString;
+    if ([lower containsString:@"older than the installed"])                return @"OLD";
     if ([lower containsString:@"signature"])                               return @"SIG";
     if ([lower containsString:@"checksum"] || [lower containsString:@"hash"]) return @"SHA";
     if ([lower containsString:@"cannot write"] || [lower containsString:@"cannot create"] ||
@@ -842,6 +844,71 @@ static NSString *RanPatchReasonCode ( NSString *error )
         [lower containsString:@"timed out"] || [lower containsString:@"offline"] ||
         [lower containsString:@"connection"])                              return @"NET";
     return @"ERR";
+}
+
+//  A failed patch, sent to the crash list (ran-legacy-m.com/crash/).
+//
+//  The game reports its own crashes, but a phone stuck on the patch page never
+//  reaches the game, so these failures were invisible - all anyone had was a
+//  screenshot of the short code. This sends the whole message, free space and
+//  versions to the admin-only list, never to the screen. Once per run (the
+//  retry loop would otherwise send one every few seconds); a send that does not
+//  get through is tried again on the next failure. Same report as Android's
+//  RanLauncher.reportPatchFailure.
+static BOOL s_patchFailReported = NO;
+
+static void RanPatchReportFailure ( NSString *error, NSString *code )
+{
+    if (s_patchFailReported) return;
+    s_patchFailReported = YES;
+
+    NSString *app = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"?";
+    NSString *root = [@(RanIOS_DataRoot()) stringByStandardizingPath];
+    NSString *ver = [NSString stringWithContentsOfFile:[root stringByAppendingPathComponent:@".patchver"]
+                                              encoding:NSUTF8StringEncoding error:NULL];
+    NSNumber *free = [[NSFileManager.defaultManager attributesOfFileSystemForPath:root error:NULL]
+                         objectForKey:NSFileSystemFreeSize];
+    struct utsname u;
+    uname ( &u );
+    NSDateFormatter *df = [NSDateFormatter new];
+    df.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    df.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+    NSString *now = [df stringFromDate:NSDate.date];
+
+    NSMutableString *b = [NSMutableString string];
+    [b appendString:@"RAN LEGACY M crash report\n"];
+    [b appendString:@"kind: patchfail\n"];
+    [b appendString:@"note: the launcher could not apply the patch; the game never started\n"];
+    [b appendFormat:@"patch: %d\n", ver ? ver.intValue : -1];
+    [b appendFormat:@"platform: ios %@ arm64\n", UIDevice.currentDevice.systemVersion];
+    [b appendFormat:@"device: Apple %s\n", u.machine];
+    [b appendFormat:@"run started: %@\nreported: %@\n", now, now];
+    [b appendString:@"\n--- patch failure ---\n"];
+    [b appendFormat:@"shown: %@\n", code ?: @"?"];
+    [b appendFormat:@"error: %@\n", error ?: @"(none)"];
+    [b appendFormat:@"data root: %@\n", root];
+    [b appendFormat:@"free space: %@\n",
+        free ? [NSString stringWithFormat:@"%.1f MB", free.doubleValue / 1048576.0] : @"?"];
+
+    NSMutableURLRequest *r =
+        [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://ran-legacy-m.com/crash/upload.php"]
+                                cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                            timeoutInterval:20];
+    r.HTTPMethod = @"POST";
+    [r setValue:@"text/plain; charset=utf-8" forHTTPHeaderField:@"Content-Type"];
+    [r setValue:@"1" forHTTPHeaderField:@"X-Ran-Crash"];
+    [r setValue:app forHTTPHeaderField:@"X-Ran-App"];
+    NSURLSession *session =
+        [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.ephemeralSessionConfiguration];
+    [[session uploadTaskWithRequest:r fromData:[b dataUsingEncoding:NSUTF8StringEncoding]
+                  completionHandler:^( NSData *data, NSURLResponse *resp, NSError *err ) {
+        NSInteger st = 0;
+        if ( !err && [resp isKindOfClass:NSHTTPURLResponse.class] )
+            st = ((NSHTTPURLResponse *) resp).statusCode;
+        if ( st != 200 ) s_patchFailReported = NO;
+        RanPlat_Log ( RANLOG_INFO, "RanPatch", "patch failure reported -> HTTP %ld", (long) st );
+    }] resume];
+    [session finishTasksAndInvalidate];
 }
 
 @interface RanPatchViewController : UIViewController
@@ -1077,7 +1144,9 @@ static NSString *RanPatchReasonCode ( NSString *error )
                     return;
                 }
 
-                [me countdown:me->_retryWait reason:RanPatchReasonCode ( error )];
+                NSString *why = RanPatchReasonCode ( error );
+                RanPatchReportFailure ( error, why );
+                [me countdown:me->_retryWait reason:why];
                 if (me->_retryWait < 30) me->_retryWait += 5;
             });
         });

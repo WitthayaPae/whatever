@@ -539,6 +539,7 @@ public class RanLauncher extends Activity {
                 Log.e(TAG, "patch failed", t);
                 if (mFatal) return;            //  fail() has already spoken
                 final String why = reasonCode(t);
+                reportPatchFailure(t, why);
                 for (int left = wait; left > 0; --left) {
                     say("เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้",
                         "จะลองใหม่ใน " + left + " วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (" + why + ")", -1);
@@ -1199,10 +1200,108 @@ public class RanLauncher extends Activity {
                 java.util.regex.Matcher mm =
                     java.util.regex.Pattern.compile("HTTP (\\d{3})").matcher(msg);
                 if (mm.find()) sb.append(' ').append(mm.group(1));
+                /*  A bare "Exception" is one of this launcher's own checks, and
+                 *  the class name alone does not say which (2026-10-05: phones
+                 *  sat on "Exception" with nothing to tell the checks apart).
+                 *  The same short codes iOS shows (RanPatchReasonCode).        */
+                else if (c.getClass() == Exception.class) sb.append(' ').append(ownCode(msg));
             }
             c = c.getCause();
         }
         return sb.toString();
+    }
+
+    private static String ownCode(String msg) {
+        String m = msg.toLowerCase(java.util.Locale.ROOT);
+        if (m.contains("older than the installed"))                 return "OLD";
+        if (m.contains("signature"))                                return "SIG";
+        if (m.contains("checksum") || m.contains("hash"))           return "SHA";
+        if (m.contains("cannot create") || m.contains("cannot replace") ||
+            m.contains("cannot rename"))                            return "IO";
+        if (m.contains("oversize") || m.contains("larger than") ||
+            m.contains("short") || m.contains("add up"))            return "SIZE";
+        if (m.contains("path") || m.contains("manifest"))           return "MANIFEST";
+        if (m.contains("apk too old"))                              return "APK";
+        return "ERR";
+    }
+
+    /*  A failed patch, sent to the crash list (ran-legacy-m.com/crash/).
+     *
+     *  The game reports its own crashes, but a phone stuck here never reaches
+     *  the game, so these failures were invisible: all anyone had was a
+     *  screenshot of the class name. This sends the whole thing - message,
+     *  stack, free space, versions - to the admin-only list, never to the
+     *  screen. Once per run: the retry loop would otherwise send one every few
+     *  seconds, and the server allows 20 an hour per address. iOS:
+     *  ran_ios_patch.mm RanPatchReportFailure.                                */
+    private volatile boolean mFailReported = false;
+    private static final String CRASH_URL = "https://ran-legacy-m.com/crash/upload.php";
+
+    private void reportPatchFailure(Throwable t, String code) {
+        if (mFailReported) return;
+        mFailReported = true;
+
+        String app = "?";
+        try {
+            app = String.valueOf(getPackageManager().getPackageInfo(getPackageName(), 0).versionCode);
+        } catch (Throwable e) { /* keep "?" */ }
+        int local = -1;
+        try { local = readVersion(); } catch (Throwable e) { /* keep -1 */ }
+        long free = -1;
+        try { free = new File(ROOT).getUsableSpace(); } catch (Throwable e) { /* keep -1 */ }
+        String abi = (Build.SUPPORTED_ABIS != null && Build.SUPPORTED_ABIS.length > 0)
+                   ? Build.SUPPORTED_ABIS[0] : "?";
+        String now = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT)
+                         .format(new java.util.Date());
+        java.io.StringWriter st = new java.io.StringWriter();
+        t.printStackTrace(new java.io.PrintWriter(st));
+
+        StringBuilder b = new StringBuilder();
+        b.append("RAN LEGACY M crash report\n");
+        b.append("kind: patchfail\n");
+        b.append("note: the launcher could not apply the patch; the game never started\n");
+        b.append("patch: ").append(local).append('\n');
+        b.append("platform: android ").append(Build.VERSION.RELEASE)
+         .append(" (API ").append(Build.VERSION.SDK_INT).append(") ").append(abi).append('\n');
+        b.append("device: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n');
+        b.append("run started: ").append(now).append("\nreported: ").append(now).append('\n');
+        b.append("\n--- patch failure ---\n");
+        b.append("shown: ").append(code).append('\n');
+        b.append("error: ").append(String.valueOf(t)).append('\n');
+        b.append("data root: ").append(ROOT).append('\n');
+        b.append("free space: ").append(free < 0 ? "?" : mb(free)).append('\n');
+        b.append('\n').append(st.toString());
+
+        final byte[] body;
+        try { body = b.toString().getBytes("UTF-8"); } catch (Exception e) { return; }
+        final String appVer = app;
+        new Thread(new Runnable() { public void run() {
+            HttpURLConnection c = null;
+            try {
+                c = (HttpURLConnection) new URL(CRASH_URL).openConnection();
+                c.setConnectTimeout(15000);
+                c.setReadTimeout(20000);
+                c.setDoOutput(true);
+                c.setRequestMethod("POST");
+                c.setRequestProperty("Content-Type", "text/plain; charset=utf-8");
+                c.setRequestProperty("X-Ran-Crash", "1");
+                c.setRequestProperty("X-Ran-App", appVer);
+                c.setFixedLengthStreamingMode(body.length);
+                OutputStream out = c.getOutputStream();
+                out.write(body);
+                out.close();
+                int code = c.getResponseCode();
+                if (code != 200) mFailReported = false;
+                Log.i(TAG, "patch failure reported -> HTTP " + code);
+            } catch (Throwable e) {
+                //  No network is the likeliest failure of all; try once more
+                //  on the next failure rather than never.
+                mFailReported = false;
+                Log.w(TAG, "patch failure report not sent: " + e);
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        }}, "RanPatchReport").start();
     }
 
     /*  Set by fail(): this run is over, and the retry loop must not restart it. */
