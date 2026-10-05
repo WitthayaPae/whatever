@@ -207,6 +207,18 @@ def glyph(kind, n):
         for x in (-30, -6, 18, 42):
             d.line([(c + x * u, c + 22 * u), (c + (x - 4) * u, c + 52 * u)], fill=0, width=max(2, int(3 * u)))
         d.rectangle((c - 22 * u, c + 66 * u, c + 40 * u, c + 94 * u), fill=W)
+    elif kind == 'bot':
+        # robot head: antenna, rounded head, two eyes, mouth grille, ears
+        d.line([(c, c - 92 * u), (c, c - 62 * u)], fill=W, width=int(9 * u))
+        d.ellipse((c - 13 * u, c - 106 * u, c + 13 * u, c - 80 * u), fill=W)
+        d.rounded_rectangle((c - 62 * u, c - 60 * u, c + 62 * u, c + 52 * u), int(26 * u), fill=W)
+        d.rounded_rectangle((c - 82 * u, c - 26 * u, c - 62 * u, c + 20 * u), int(8 * u), fill=W)
+        d.rounded_rectangle((c + 62 * u, c - 26 * u, c + 82 * u, c + 20 * u), int(8 * u), fill=W)
+        for sx in (-1, 1):
+            d.ellipse((c + (sx * 28 - 15) * u, c - 30 * u, c + (sx * 28 + 15) * u, c), fill=0)
+        d.rounded_rectangle((c - 34 * u, c + 16 * u, c + 34 * u, c + 34 * u), int(6 * u), fill=0)
+        for k in (-17, 0, 17):
+            d.line([(c + k * u, c + 16 * u), (c + k * u, c + 34 * u)], fill=W, width=max(2, int(4 * u)))
     elif kind == 'bike':
         for s in (-1, 1):
             d.ellipse((c + (52 * s - 28) * u, c + 4 * u, c + (52 * s + 28) * u, c + 60 * u), outline=W, width=int(12 * u))

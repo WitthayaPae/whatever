@@ -66,6 +66,10 @@ extern "C" int RanTouch_ConsumeButton(int *outSlot);
 //  Peace / battle mode - what the X key toggles. Lit in battle mode; the client
 //  sets that from the character's own state (RanTouch_SetToggle).
 #define RANTOUCH_SLOT_FIST        (-13)
+//  Auto-hunt (the bot). Shown only while the client says the server allows it
+//  (RanTouch_SetBot); lit while hunting, with a ring of today's time left.
+#define RANTOUCH_SLOT_BOT         (-14)
+extern "C" void RanTouch_SetBot(int show, float leftFrac);
 
 //  Where the client put its quick-skill slots, as fractions of the surface, so
 //  the overlay can draw a round rim over each one.

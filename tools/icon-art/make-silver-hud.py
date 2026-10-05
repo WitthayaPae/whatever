@@ -33,6 +33,8 @@ def hud():
         A.button('chat', N),             A.fold_plate(N),
         A.button('fist', N),             A.button('fist', N, lit=True),
         A.skill_frame(None, N),          # 26: skill-slot ring
+        A.button('bot', N),              # 27: auto-hunt
+        A.button('bot', N, lit=True),    # 28: auto-hunt, running
     ]
     W, H = N * 5, N * 6
     sheet = Image.new('RGBA', (W, H), (0, 0, 0, 0))

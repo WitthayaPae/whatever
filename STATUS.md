@@ -40,6 +40,38 @@ If anything here disagrees with another file, this file wins.
   - Verified: login x2, character select x1.27, start into the world.
 - PC client, Emulator and both servers build with 0 errors.
 
+## 2026-10-05 (7) — Auto-hunt (the PC F5 bot) on mobile, 4 h/day per account
+
+The bot is the PC client's own AutoPilot (FrameMoveBot), unchanged - same
+defaults as F5 (no loot, no support, lock spot). The user rejected my first
+version, which turned loot/support on and rewired the loot timer: "follow the
+bot F5 in PC version, just enable and add the condition". Reverted; the PC bot
+code has no deleted lines.
+
+- **Condition (agent, per ACCOUNT per calendar day, server local time):** start
+  only after `dwAutoHuntNeedOnlineMin` (30) minutes online today; stop at
+  `dwAutoHuntDailyMin` (240). `bFeatureAutoHunt` default ON. Counted in
+  GLCharAG::AutoHuntFrameMove into GLAgentServer::m_mapAutoHunt (survives
+  relog / character change), saved to table AutoHuntDaily (logout + every 5
+  min; loaded at agent start). SQL: MOBILE/server/autohunt_daily.sql - must be
+  run on the game DB, else counters reset on agent restart (console says so).
+- **Messages:** 3940 AUTOHUNT_REQ (client->agent), 3941 AUTOHUNT_INFO
+  (agent->client: unasked at join+5 s then every 60 s, and replies), 3942
+  AUTOHUNT_STATE_AF (agent->fields every 20 s while hunting). The client shows
+  the button only after an INFO, so it never sends 3940 to an older agent.
+- **Anti-bot:** while the agent says hunting, the field skips the question
+  (m_fAutoHuntExempt, 60 s, renewed every 20 s, lapses on silence).
+- **Button:** RANTOUCH_SLOT_BOT under AUTO in the right column, cells 27/28 of
+  mobile_hud3.dds (robot), lit while running, ring = today's time left, HUD
+  editor group kGrpBot (saved last; fMobileHud 134, 130/118/110 still load).
+- Also fixed: the overlay rebuilt its (empty) shape cache every frame since the
+  silver set (60 rebuilds/s -> 0); `g_cacheBuilt` instead of `g_cacheVerts==0`.
+- Verified on LDPlayer with diag `huntfake` (fakes the agent's yes, sends
+  nothing): button shows, tap = one start, tap = one stop, bot fights, leaves
+  drops alone like PC. NOT verified: the agent/field side live (needs the new
+  ServerAgent/ServerField + SQL) - 30-min gate, 4-h stop, anti-bot skip.
+- iOS: same SOURCE/shim; not run on an iPhone.
+
 ## 2026-10-05 (6) — F1-F4 apart in the HUD editor, friendly skills on self, create-screen zoom/rotate
 
 - **Frenzy Attack (SN_014_014) did nothing.** It is TAR_SPEC + SIDE_ANYBODY
