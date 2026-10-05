@@ -23,6 +23,8 @@
    Run step 1 first and look at the numbers.
    ========================================================================= */
 
+USE [RanGame1];   -- game database (ServerAgent/ServerField cfg: game_odbc_database)
+GO
 SET NOCOUNT ON;
 GO
 
@@ -132,6 +134,8 @@ GO
    (select from the next line to the end and execute).
    ========================================================================= */
 
+USE [RanGame1];
+GO
 /* ----------------------------------------------------------------- 2 BACKUP */
 IF OBJECT_ID('dbo.Bak20261005_ChaItems')   IS NULL SELECT ChaNum, ChaPutOnItems, ChaInven INTO dbo.Bak20261005_ChaItems FROM ChaInfo;
 IF OBJECT_ID('dbo.Bak20261005_UserInven')  IS NULL SELECT UserNum, UserInven INTO dbo.Bak20261005_UserInven FROM UserInven;

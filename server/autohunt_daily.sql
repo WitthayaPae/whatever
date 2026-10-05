@@ -3,6 +3,8 @@
 -- One row per account: today's online seconds and bot seconds. The agent reads
 -- today's rows when it starts and writes a row on logout and every 5 minutes.
 -- Safe to run again: it does nothing if the table already exists.
+USE [RanGame1];   -- game database (ServerAgent/ServerField cfg: game_odbc_database)
+GO
 IF OBJECT_ID('dbo.AutoHuntDaily', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.AutoHuntDaily (
