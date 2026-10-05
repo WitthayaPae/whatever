@@ -40,6 +40,25 @@ If anything here disagrees with another file, this file wins.
   - Verified: login x2, character select x1.27, start into the world.
 - PC client, Emulator and both servers build with 0 errors.
 
+## 2026-10-05 (10) — Mobile corner/login clean-up, menu text, GM cell
+
+- Window-mode toggle hidden on mobile: login (`FULLSCREEN_OUTER`, forced off in
+  COuterInterface::FrameMove) and in game (`MINIMAP_FULLSCREEN`; CMiniMap forced
+  bFULL_SCREEN_ON_WINDOW false - it re-showed the button every frame).
+- Login emblem (`LOGIN_MARK`) not shown on mobile - it sat under the
+  magnified login window.
+- Bonus-time gauge placed every frame under the corner icons (Q box, mini
+  party), right-aligned to them (DxGameStage::MobileArrangeMenu); the old
+  edge-pass move to its PC spot is gone.
+- Menu labels (gameword MOBILE_MENULABEL): 9 ของจากเว็บ -> ของจากช็อป,
+  17 ร้านค้า -> ไอเท็มช็อป. Gui.rcc repacked.
+- GM cell: MOBILE_GM_BUTTON (mobile_icons.dds cell 128,384, label 20 "GM") in
+  the menu grid for USER_MASTER only; tap opens GMGENITEM_WINDOW (the PC's Y).
+  The grid stops at 20 cells, so the GM cell needs a free one.
+- Verified on LDPlayer with test01 (not a GM): login has no emblem and no
+  toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
+  cell. NOT verified: the GM cell on a Master account (user to check).
+
 ## 2026-10-05 (9) — +8/+9 clean-up SQL, enhance stone in the announcement, auto-pot spam
 
 - **SQL MOBILE/server/enhance_cap_7.sql** (user wanted SQL, not code - a
@@ -287,6 +306,10 @@ the new pad icons are "too much", not classic. Players want classic.
 - [x] HUD editor: F1-F4 move/size one at a time (2026-10-05, section (6)).
 - [x] Self-target skills (Frenzy Attack) usable with nothing selected (2026-10-05, section (6)).
 - [x] Character create: pinch zoom + drag rotate on the face/hair step (2026-10-05, section (6)).
+- [x] Remove the window minimize/maximize button on mobile (2026-10-05, section (10)).
+- [x] Login page: remove the logo that overlaps the login window (2026-10-05, section (10)).
+- [x] Bonus-time display overlaps the Q box and the mini party (2026-10-05, section (10)).
+- [x] Menu text: ร้านค้า -> ไอเท็มช็อป, ของจากเว็บ -> ของจากช็อป (2026-10-05, section (10)).
 
 ## 2026-10-04 (3) — Talk-to-NPC button: v183 "1.1.3", patch 612 (Android + iOS)
 

@@ -72,6 +72,29 @@ CLASSIC = {
     (0, 384):   ('q_icon.dds', 140, 35, 35, 35),            # mini party
 }
 
+def gm_tile(size=128):
+    """GM menu cell: a bevelled sepia tile like the classic PC icons, 'GM' on it."""
+    from PIL import ImageDraw, ImageFont, ImageFilter
+    S = 4; n = size * S
+    im = Image.new('RGBA', (n, n), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    m = 6 * S
+    d.rounded_rectangle((m, m, n - m, n - m), 10 * S, fill=(30, 22, 14, 255))
+    for k in range(10 * S):
+        t = k / (10 * S)
+        c = (int(210 - 90 * t), int(170 - 80 * t), int(110 - 60 * t), 255)
+        d.rounded_rectangle((m + k, m + k, n - m - k, n - m - k), max(1, 10 * S - k), outline=c)
+    inner = Image.new('RGBA', (n, n), (0, 0, 0, 0)); di = ImageDraw.Draw(inner)
+    di.rounded_rectangle((m + 10 * S, m + 10 * S, n - m - 10 * S, n - m - 10 * S), 4 * S, fill=(92, 62, 34, 255))
+    im.alpha_composite(inner)
+    f = ImageFont.truetype('georgiab.ttf', int(n * 0.40))
+    b = d.textbbox((0, 0), 'GM', font=f)
+    x = (n - (b[2] - b[0])) / 2 - b[0]; y = (n - (b[3] - b[1])) / 2 - b[1]
+    sh = Image.new('L', (n, n), 0); ImageDraw.Draw(sh).text((x + 2 * S, y + 3 * S), 'GM', font=f, fill=200)
+    im.paste((0, 0, 0, 255), (0, 0), sh.filter(ImageFilter.GaussianBlur(2 * S)))
+    d = ImageDraw.Draw(im)
+    d.text((x, y), 'GM', font=f, fill=(250, 226, 160, 255), stroke_width=2 * S, stroke_fill=(60, 36, 12, 255))
+    return im.resize((size, size), Image.LANCZOS)
+
 def classic(weights):
     import torch
     from spandrel import ModelLoader
@@ -91,6 +114,7 @@ def classic(weights):
         s = 128 / max(w, h) / 4
         im = big.resize((max(1, round(w * 4 * s)), max(1, round(h * 4 * s))), Image.LANCZOS)
         sheet.paste(im, (cx + (128 - im.size[0]) // 2, cy + (128 - im.size[1]) // 2))
+    sheet.paste(gm_tile(), (128, 384))     # GM menu (Master only), MOBILE_GM_BUTTON
     out = os.path.join(HERE, 'icons_classic.png'); sheet.save(out); print('icons', len(CLASSIC), 'cells ->', out)
 
 if __name__ == '__main__':
