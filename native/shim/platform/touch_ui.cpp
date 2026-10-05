@@ -231,6 +231,7 @@ Button g_buttons[kButtonCount];
 struct SkillCircle { float x, y, r; bool filled; float cool; float press; };
 SkillCircle g_skillCircles[RANTOUCH_MAX_SKILL_CIRCLES];
 int         g_skillCircleCount = 0;
+float skillHitRadius(const SkillCircle &c);     //  the ring as drawn; defined with the bezel constants
 
 //  --- skill aim (RoV-style) ------------------------------------------------
 //
@@ -1361,7 +1362,7 @@ int groupAt(float x, float y) {
         if (g == -2) {
             //  A slot, not the arc: each one moves on its own.
             for (int i = 0; i < g_skillCircleCount && i < RANTOUCH_MAX_SKILL_CIRCLES; ++i)
-                if (len(x - g_skillCircles[i].x, y - g_skillCircles[i].y) <= g_skillCircles[i].r * 1.3f) {
+                if (len(x - g_skillCircles[i].x, y - g_skillCircles[i].y) <= skillHitRadius(g_skillCircles[i])) {
                     g_editSlot = i;
                     return kGrpSkill;
                 }
@@ -1748,16 +1749,34 @@ int RanTouch_PointerDown(int id, float x, float y) {
     //  A skill button, ahead of the window rule below: the slots ARE controls
     //  (the tray's), so that rule would hand every skill press to the client.
     //  A real window over the arc still wins - asked with the tray left out.
+    //
+    //  The touch area is the whole ring as drawn (skillHitRadius), the nearest
+    //  slot winning, and an empty slot takes its press too (2026-10-05). It was
+    //  c.r - the tray slot's half-width - while the silver HUD draws the ring
+    //  1.62 times that: the outer part of every ring the player could see was
+    //  nobody's, and an unclaimed finger turns the camera, so a press on the
+    //  rim swung the view instead (measured on LDPlayer: 34 units from slot 6's
+    //  centre, inside its ring, logged GESTURE middle(camera)). RoV likewise
+    //  answers a press anywhere on the button art. An empty slot's press does
+    //  nothing (the client finds no skill there), but it no longer turns the
+    //  camera either.
     if (g_aim.ptr < 0 && !g_skillCarry) {
+        int best = -1;
+        float bestD = 0.0f;
         for (int i = 0; i < g_skillCircleCount; ++i) {
-            SkillCircle &c = g_skillCircles[i];
-            if (!c.filled || len(x - c.x, y - c.y) > c.r) continue;
-            if (RanUI_PointInWindowOverSkill && RanUI_PointInWindowOverSkill((int)x, (int)y)) break;
-            g_aim.ptr = id; g_aim.slot = i;
+            const SkillCircle &c = g_skillCircles[i];
+            const float d = len(x - c.x, y - c.y);
+            if (d > skillHitRadius(c)) continue;
+            if (best < 0 || d < bestD) { best = i; bestD = d; }
+        }
+        if (best >= 0 &&
+            !(RanUI_PointInWindowOverSkill && RanUI_PointInWindowOverSkill((int)x, (int)y))) {
+            SkillCircle &c = g_skillCircles[best];
+            g_aim.ptr = id; g_aim.slot = best;
             g_aim.ox = g_aim.fx = x; g_aim.oy = g_aim.fy = y;
             g_aim.aiming = false; g_aim.overCancel = false;
             c.press = 0.0f;
-            botNoteTap(x, y);
+            if (c.filled) botNoteTap(x, y);
             Touch *ts = addTouch(id, x, y);
             if (ts) ts->claimed = true;
             return 1;
@@ -1905,6 +1924,7 @@ int RanTouch_PointerMove(int id, float x, float y) {
     if (g_aim.ptr == id) {
         g_aim.fx = x; g_aim.fy = y;
         if (g_aimOn && !g_aim.aiming && g_aim.slot < g_skillCircleCount &&
+            g_skillCircles[g_aim.slot].filled &&            //  an empty slot only holds the finger
             len(x - g_aim.ox, y - g_aim.oy) > skillAimDead(g_skillCircles[g_aim.slot].r))
             g_aim.aiming = true;
         if (g_aim.aiming) {
@@ -1986,7 +2006,10 @@ int RanTouch_PointerUp(int id, float x, float y) {
         const float r = (g_aim.slot < g_skillCircleCount) ? g_skillCircles[g_aim.slot].r : 1.0f;
         const float dx = x - g_aim.ox, dy = y - g_aim.oy;
         const float d = len(dx, dy);
-        if (!g_aim.aiming)
+        const bool filled = g_aim.slot < g_skillCircleCount && g_skillCircles[g_aim.slot].filled;
+        if (!filled)
+            ;                                       //  an empty slot: the finger was only held
+        else if (!g_aim.aiming)
             skillEvtPush(g_aim.slot, 0, 0.0f, 0.0f, 0.0f);
         else if (g_aim.overCancel)
             LOGI("skill %d: aim cancelled", g_aim.slot);
@@ -2699,6 +2722,15 @@ const Col kIronL  = { 0.541f, 0.588f, 0.635f, 1.0f };
 const Col kIronD  = { 0.200f, 0.231f, 0.267f, 1.0f };
 
 const float kRimIn = 0.88f;
+
+//  How far from its centre a skill slot answers a press: the ring as it is
+//  drawn - the painted bezel (c.r * kBezelSize) with the silver sheet, the
+//  plain rim (c.r * 1.30) without it - and a tenth more, so a thumb just off
+//  the rim still lands on the skill. Where two rings' areas meet, the press
+//  goes to the nearer slot (RanTouch_PointerDown).
+float skillHitRadius(const SkillCircle &c) {
+    return (hudSheet() ? c.r * kBezelSize : c.r * 1.30f) * 1.10f;
+}
 
 //  A bevel: the rim lit from the top left and shadowed at the bottom right.
 //  Two arcs, and it is most of what separates a button from a flat circle.
@@ -3750,7 +3782,7 @@ void RanTouch_Render(void) {
     //  while aiming the cancel circle. Live, over the icon, at full opacity
     //  whatever the arc's - it is what the thumb is doing right now.
     g_drawAlpha = 1.0f;
-    if (g_aim.ptr >= 0 && g_aim.slot < g_skillCircleCount) {
+    if (g_aim.ptr >= 0 && g_aim.slot < g_skillCircleCount && g_skillCircles[g_aim.slot].filled) {
         const SkillCircle &c = g_skillCircles[g_aim.slot];
         const float mx = skillAimMax(c.r);
         drawFan(c.x, c.y, mx, 0.0f, 0.0f, 0.0f, 0.30f);
@@ -3970,6 +4002,7 @@ extern "C" int RanTouch_ConsumeButton(int *outSlot) {
 extern "C" int RanTouch_GetSkillAim(int *slot, int *aimed, float *dx, float *dy,
                                     float *mag, int *cancel) {
     if (!g_inited || !g_active || g_aim.ptr < 0 || g_aim.slot >= g_skillCircleCount) return 0;
+    if (!g_skillCircles[g_aim.slot].filled) return 0;
     const float r = g_skillCircles[g_aim.slot].r;
     const float ddx = g_aim.fx - g_aim.ox, ddy = g_aim.fy - g_aim.oy;
     const float d = len(ddx, ddy);

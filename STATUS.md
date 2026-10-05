@@ -59,6 +59,24 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-05 (18) — Skill slot touch area; NPC shop beside the bag
+
+- Skill slots: a press counted only within c.r (the tray slot's half-width),
+  while the silver HUD draws the ring at c.r * 1.62 - the outer part of every
+  visible ring went to the camera. Now skillHitRadius = the ring as drawn
+  (c.r*kBezelSize, or c.r*1.30 without the sheet) * 1.10, nearest slot wins;
+  empty slots take the press (no aim, ring or cast) so the camera stays still;
+  the HUD editor picks by the same radius. LDPlayer, slot 6 (ring ~32 units):
+  rim 28u three sides and 34u just past the ring -> no camera; 45u and open
+  ground -> GESTURE middle(camera); rim tap on slot 1 -> "RanSkill: cast".
+- NPC shop: MARKET_WINDOW (287..526) and the bag (526..) were each magnified 2x
+  about their own centres and grew into each other. Now when a shop or locker
+  opens with the bag, MobileSetBeside puts it 8 units left of what the bag
+  draws and MobileMagnifyDrawnGroup enlarges the pair with one factor and
+  anchor. LDPlayer: "window 18 set beside 19: moved by (-8,14)", both x1.94,
+  side by side, buy prompt opens; bag alone still x2.00 with its doll.
+- Test login: native/.login updated (gitignored).
+
 ## 2026-10-05 (17) — Per-file download retry in the launcher
 
 - Six patchfail reports today were network drops mid-download (SocketTimeout,
