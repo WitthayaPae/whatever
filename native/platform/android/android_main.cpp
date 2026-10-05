@@ -1032,7 +1032,14 @@ extern "C" void android_main(android_app *app) {
                 //  SIGSEGV in ALooper_pollOnce from DxStaticMesh::EndThread).
                 //  Nothing is pumped from here on.
                 g_loopThreadSet = false;
-                exit(0);
+                //  And no static destructors at all: _exit, not exit. Even
+                //  without the pump, running the client's teardown (2.4 s of
+                //  it, measured) while Android's own UI threads are alive
+                //  killed one of them - SIGABRT in hwuiTask1 on a realme
+                //  RMX5085, v203. The run is already marked clean above, the
+                //  kernel closes the socket (the server sees a disconnect),
+                //  and nothing here is waiting to be written.
+                _exit(0);
             }
         }
         while (ALooper_pollOnce(timeout, NULL, &events, (void **)&source) >= 0) {

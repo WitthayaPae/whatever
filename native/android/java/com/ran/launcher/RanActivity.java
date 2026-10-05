@@ -165,6 +165,101 @@ public class RanActivity extends NativeActivity {
      *  order, same rules.                                                   */
     private static final String CRASH_URL = "https://ran-legacy-m.com/crash/upload.php";
 
+    /*  What Android itself says ended the last runs (API 30+), for the reports.
+     *
+     *  A "killed" report only knows the game stopped on screen with no crash
+     *  signal: a player swiping it away and the system reclaiming memory look
+     *  the same (2026-10-05: one vivo "killed" four times in two minutes). The
+     *  system keeps the answer - the reason, the memory the process held - and
+     *  for a native crash its tombstone, which carries the abort message our
+     *  own handler cannot see (the Samsung SM-A576B BLASTBufferQueue aborts).
+     *  Appended once to each pending report; the strings from a tombstone are
+     *  only the readable runs in it, the abort message among them.          */
+    private String exitInfoText() {
+        if (android.os.Build.VERSION.SDK_INT < 30) return "";
+        StringBuilder b = new StringBuilder();
+        try {
+            android.app.ActivityManager am =
+                (android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            java.util.List<android.app.ApplicationExitInfo> list =
+                am.getHistoricalProcessExitReasons(getPackageName(), 0, 4);
+            java.text.SimpleDateFormat fmt =
+                new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT);
+            for (android.app.ApplicationExitInfo e : list) {
+                b.append(fmt.format(new java.util.Date(e.getTimestamp())))
+                 .append("  reason ").append(e.getReason()).append(' ').append(exitReasonName(e.getReason()))
+                 .append("  status ").append(e.getStatus())
+                 .append("  importance ").append(e.getImportance())
+                 .append("  pss ").append(e.getPss() / 1024).append(" MB")
+                 .append("  rss ").append(e.getRss() / 1024).append(" MB")
+                 .append("  \"").append(String.valueOf(e.getDescription())).append("\"\n");
+                if (e.getReason() == android.app.ApplicationExitInfo.REASON_CRASH_NATIVE) {
+                    try {
+                        java.io.InputStream in = e.getTraceInputStream();
+                        if (in != null) {
+                            byte[] buf = new byte[256 * 1024];
+                            int got = 0, k;
+                            while (got < buf.length && (k = in.read(buf, got, buf.length - got)) > 0) got += k;
+                            in.close();
+                            int shown = 0, start = -1;
+                            for (int i = 0; i <= got && shown < 12; ++i) {
+                                boolean pr = i < got && buf[i] >= 0x20 && buf[i] < 0x7f;
+                                if (pr && start < 0) start = i;
+                                if (!pr && start >= 0) {
+                                    if (i - start >= 24) {
+                                        b.append("    tombstone: ").append(new String(buf, start, Math.min(i - start, 300), "US-ASCII")).append('\n');
+                                        ++shown;
+                                    }
+                                    start = -1;
+                                }
+                            }
+                        }
+                    } catch (Throwable t) { b.append("    (tombstone not readable: ").append(t).append(")\n"); }
+                }
+            }
+        } catch (Throwable t) {
+            b.append("(exit info not available: ").append(t).append(")\n");
+        }
+        return b.toString();
+    }
+
+    private static String exitReasonName(int r) {
+        switch (r) {
+            case 1:  return "EXIT_SELF";
+            case 2:  return "SIGNALED";
+            case 3:  return "LOW_MEMORY";
+            case 4:  return "CRASH";
+            case 5:  return "CRASH_NATIVE";
+            case 6:  return "ANR";
+            case 7:  return "INITIALIZATION_FAILURE";
+            case 8:  return "PERMISSION_CHANGE";
+            case 9:  return "EXCESSIVE_RESOURCE_USAGE";
+            case 10: return "USER_REQUESTED";
+            case 11: return "USER_STOPPED";
+            case 12: return "DEPENDENCY_DIED";
+            case 13: return "OTHER";
+            case 14: return "FREEZER";
+            case 15: return "PACKAGE_STATE_CHANGE";
+            case 16: return "PACKAGE_UPDATED";
+            default: return "UNKNOWN";
+        }
+    }
+
+    private static void appendExitInfo(File f, String info) {
+        if (info == null || info.length() == 0) return;
+        try {
+            byte[] head = new byte[(int) Math.min(f.length(), 600 * 1024)];
+            FileInputStream in = new FileInputStream(f);
+            int got = 0, k;
+            while (got < head.length && (k = in.read(head, got, head.length - got)) > 0) got += k;
+            in.close();
+            if (new String(head, 0, got, "UTF-8").contains("--- android exit info ---")) return;
+            java.io.FileOutputStream out = new java.io.FileOutputStream(f, true);
+            out.write(("\n--- android exit info ---\n" + info).getBytes("UTF-8"));
+            out.close();
+        } catch (Throwable t) { Log.w("RanCrash", "exit info not appended: " + t); }
+    }
+
     public void ranUploadCrashReports(final String dir) {
         String app = "?";
         try {
@@ -175,8 +270,10 @@ public class RanActivity extends NativeActivity {
             File[] files = new File(dir).listFiles();
             if (files == null || files.length == 0) return;
             java.util.Arrays.sort(files);
+            final String exitInfo = exitInfoText();
             for (File f : files) {
                 if (!f.getName().endsWith(".txt")) continue;
+                appendExitInfo(f, exitInfo);
                 HttpURLConnection c = null;
                 try {
                     byte[] body = new byte[(int) Math.min(f.length(), 600 * 1024)];

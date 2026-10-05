@@ -128,6 +128,7 @@ public class RanLauncher extends Activity {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        sCurrent = this;
 
         /*  The game's own loading screen, as the patch screen.
          *
@@ -294,6 +295,11 @@ public class RanLauncher extends Activity {
         }
     }
     private boolean started = false;
+    private static final Object PATCH_LOCK = new Object();
+    /*  The newest launcher screen. Only it starts the game: an older one whose
+     *  patch thread finishes after the player reopened the app just closes,
+     *  or the game would be started twice in one process.                    */
+    private static volatile RanLauncher sCurrent;
 
     /*  The page, kept so it can be handed to the game as a picture. */
     private FrameLayout mPage;
@@ -524,8 +530,18 @@ public class RanLauncher extends Activity {
         int wait = 5;
         for (;;) {
             try {
-                adoptPrivateRoot();
-                patch();
+                /*  One patch at a time in the whole process (2026-10-05).
+                 *  "started" belongs to one launcher screen: leave the launcher
+                 *  mid-download and open the game again, and Android makes a new
+                 *  screen in the same process, which started a second patch
+                 *  thread. Both wrote the same .tmp files and deleted each
+                 *  other's - a HUAWEI PPA-LX2 reported ENOENT on a .tmp between
+                 *  download and hash, then a checksum failure, 33 s apart. The
+                 *  second now waits for the first and finds the work done.     */
+                synchronized (PATCH_LOCK) {
+                    adoptPrivateRoot();
+                    patch();
+                }
                 break;
             } catch (Throwable t) {
                 /*  The reason goes to the log, not to the screen. It carries
@@ -1563,6 +1579,11 @@ public class RanLauncher extends Activity {
     /* ---------------------------------------------------------------- play */
 
     private void play() {
+        if (sCurrent != this) {
+            Log.i(TAG, "an older launcher finished its patch; the newer one starts the game");
+            finish();
+            return;
+        }
         //  A bare Intent plus setComponent. Intent(Context, Class) builds the
         //  ComponentName from the class immediately, so passing null there
         //  throws before setComponent can replace it.

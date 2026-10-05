@@ -59,6 +59,44 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-05 (20) — Crash round: two patchers, exit teardown, BLAST reject; enhance name
+
+- HUAWEI PPA-LX2 patchfail (ENOENT on a .tmp between download and hash, then
+  checksum failed): the "started" guard was per launcher screen, so reopening
+  the app mid-download started a second patch thread on the same .tmp files.
+  RanLauncher: patch() under a static PATCH_LOCK; only the newest launcher
+  (sCurrent) starts the game. Android only (iOS has one patcher).
+- realme RMX5085 v203 SIGABRT in hwuiTask1 after "background grace over":
+  exit() ran 2.4 s of static teardown beside Android's UI threads. Now _exit(0)
+  after RanCrash_CleanExit. LDPlayer bggrace30: closed, no report on relaunch.
+- Samsung SM-A576B v202 x3: SIGABRT in BLASTBufferQueue::acquireNextBufferLocked
+  under eglSwapBuffers (Samsung GL-over-Vulkan, Android 16), mid-play. The stack
+  has acquireNextBufferLocked calling itself - in AOSP only the rejectBuffer
+  retry, i.e. a buffer whose size does not match the window (FREEZE scaling).
+  We pinned buffers to the start-up panel size, also onto the window that
+  replaces the old one after the background. gl_context: geometry 0x0 (buffers
+  follow the window) unless the renderscale divisor is set; a window size change
+  is logged. Not reproduced here; the next report will say (see exit info).
+- Reports carry Android's own exit record (API 30+): reason, pss/rss, and for a
+  native crash the readable strings of the tombstone (abort message). LDPlayer:
+  "reason 10 USER_REQUESTED ... [FORCE STOP]", pss 756 MB.
+- Enhance window: gold "name +N" line under the slots (MOBILE_ENHANCE_NAME,
+  window 154 -> 172, status 114, buttons 136), refreshed every frame. LDPlayer:
+  "กระบอง +0". Gui.rcc repacked (108 entries).
+- "killed" reports (vivo, Xiaomi, OPPO, Samsung): no cause yet - the exit info
+  above will name it from this build on.
+
+## 2026-10-05 (19) — Item exchange NPC ("Spender") beside the bag
+
+- NPC_ITEM_EXCHANGE_WINDOW (358x410 at 0,0) opens the bag itself
+  (SetNPCItemExchangeWindowOpen) but was in neither list: the doll stayed up and
+  the pair was magnified separately. Added to MobileInventoryWearFrame (doll
+  off) and MobileNpcBesideBag (placed beside the bag, magnified as one set).
+- LDPlayer, พนักงานแลกเปลี่ยนกาชา -> แลก: window titled "Spender", "window 164
+  set beside 19: moved by (179,41)", both x1.69, side by side, doll hidden, page
+  arrow 1 -> 2. Exchange itself not pressed (live server).
+- NPC point shop (NPC_SHOP_WINDOW) does not open the bag; not added.
+
 ## 2026-10-05 (18) — Skill slot touch area; NPC shop beside the bag
 
 - Skill slots: a press counted only within c.r (the tray slot's half-width),

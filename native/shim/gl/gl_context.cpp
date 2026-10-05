@@ -54,11 +54,36 @@ bool g_ready = false;
 //  The real panel, and how much smaller the frame is drawn than the panel.
 //  Touch events arrive in panel pixels; everything else works in frame pixels.
 int  g_panelWidth = 0, g_panelHeight = 0;
+
+
 float g_renderScale = 1.0f;
 //  Panel pixels per drawn pixel. 1 is the full panel; 2 halves the buffer and
 //  lets the display stretch it. Separate from g_renderScale, which is only ever
 //  about how large the GUI is laid out.
 int  g_bufferDiv = 1;
+
+//  The window's buffer size, and whether to pin it (2026-10-05).
+//
+//  Pinning (non-zero width/height) makes every buffer that size whatever the
+//  window is. The window's own queue (BLASTBufferQueue) REJECTS a buffer whose
+//  size does not match the window while the scaling mode is the default
+//  FREEZE - so after any change of window size (coming back from the
+//  background into a different window, a system bar, the maker's game panel)
+//  every frame we sent was thrown away. On a Samsung SM-A576B (Android 16,
+//  GL-over-Vulkan driver) that rejection path aborted inside eglSwapBuffers,
+//  three times in an hour: the crash stack has acquireNextBufferLocked calling
+//  itself, which in AOSP is only ever the reject-and-retry.
+//
+//  At the normal divisor of 1 the pinned size WAS the window's size, so
+//  pinning bought nothing: 0x0 lets the buffers follow the window, with only
+//  the format set. Pinned only for the developer's renderscale divisor, where
+//  the smaller buffer is the point.
+static ANativeWindow *g_geomWindow = NULL;
+static void RanGL_SetWindowGeometry(ANativeWindow *win, int w, int h, int format) {
+    g_geomWindow = win;
+    if (g_bufferDiv > 1) ANativeWindow_setBuffersGeometry(win, w, h, format);
+    else                 ANativeWindow_setBuffersGeometry(win, 0, 0, format);
+}
 bool g_swapPreserved = false;
 //  Counts frames, for anything that must happen once a frame and no more.
 unsigned g_frameIndex = 0;
@@ -242,7 +267,7 @@ extern "C" int RanGL_Init(void *nativeWindow) {
 
     const int bufferW = g_panelWidth  / g_bufferDiv;
     const int bufferH = g_panelHeight / g_bufferDiv;
-    ANativeWindow_setBuffersGeometry(win, bufferW, bufferH, nativeVisual);
+    RanGL_SetWindowGeometry(win, bufferW, bufferH, nativeVisual);
     LOGI("panel %dx%d, drawing %dx%d, laid out %dx%d (UI scale %.4f, buffer divisor %d)",
          g_panelWidth, g_panelHeight, bufferW, bufferH,
          (int)lroundf(g_panelWidth / g_renderScale), (int)lroundf(g_panelHeight / g_renderScale),
@@ -341,6 +366,7 @@ extern "C" int RanGL_Init(void *nativeWindow) {
 //  Unbound first: EGL keeps a destroyed surface alive for as long as it is
 //  current, and the next eglMakeCurrent would fail with BAD_SURFACE.
 extern "C" void RanGL_SurfaceLost(void) {
+    g_geomWindow = NULL;            //  the window is going; the size check must not touch it
     if (g_display == EGL_NO_DISPLAY) return;
 
     eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -375,7 +401,7 @@ extern "C" int RanGL_SurfaceRestore(void *nativeWindow) {
     //  size - this is the same display - so the numbers still hold.
     const int bufferW = g_panelWidth  / g_bufferDiv;
     const int bufferH = g_panelHeight / g_bufferDiv;
-    ANativeWindow_setBuffersGeometry(win, bufferW, bufferH, g_nativeVisual);
+    RanGL_SetWindowGeometry(win, bufferW, bufferH, g_nativeVisual);
 
     g_surface = eglCreateWindowSurface(g_display, g_config, win, NULL);
     if (g_surface == EGL_NO_SURFACE) {
@@ -503,6 +529,18 @@ extern "C" unsigned RanGL_FrameIndex(void) { return g_frameIndex; }
 extern "C" void RanGL_Present(void) {
     if (!g_ready) return;
     ++g_frameIndex;
+    //  A window that changes size while the game runs, on record: the buffers
+    //  follow it now (RanGL_SetWindowGeometry), but the game still lays itself
+    //  out for the size it started with.
+    if (g_bufferDiv == 1 && g_geomWindow && (g_frameIndex % 120) == 0) {
+        static int s_lastW = 0, s_lastH = 0;
+        const int w = ANativeWindow_getWidth(g_geomWindow), h = ANativeWindow_getHeight(g_geomWindow);
+        if ((w != s_lastW || h != s_lastH) && w > 0 && h > 0) {
+            if (s_lastW) LOGI("window size changed %dx%d -> %dx%d (laid out for %dx%d)",
+                              s_lastW, s_lastH, w, h, g_panelWidth, g_panelHeight);
+            s_lastW = w; s_lastH = h;
+        }
+    }
     //  Temporary: with /sdcard/ran/presentlog present, say who presented each
     //  frame and how much it drew, for a bounded burst.
     {
