@@ -59,6 +59,29 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (2) — Crash round from the new exit info: ANRs, sound set, help tree
+
+- Exit info showed most "killed" are ANR "Input dispatching timed out" (9
+  phones). In each the game's log stops 8-20 s before the kill: a frozen game
+  thread, not a slow one, and the lock watchdog (RanStall) logged nothing.
+  * Frame watchdog (ran_plat.cpp): 4 s without a frame on screen -> SIGUSR2 to
+    the game thread, which writes its own stack into the report (3 per run).
+    RanApp_Frame ticks it; "hangtest" freezes the game thread 6 s once. LDPlayer:
+    report shows "hang: ... nanosleep <- RanApp_Frame <- android_main".
+  * Loading-time ANRs (13 s after start): ran_fopen now pumps input like Sleep.
+    LDPlayer: 25 taps during the map load, no ANR.
+  * Log floods before freezes: missing game text (QN_1202_000 etc.) reported once
+    per keyword; RanTarget tap log once per target or per second.
+- OPPO CPH2483 x4: CStaticSoundMan::LoadSet error message passed two floats to
+  "[%s]{m:%d M:%d}" (fault addr = "wav") on a map whose sound has min > max
+  range, and "break" left the rest of the list unread. Name + ints now, and only
+  that sound is skipped.
+- OPPO CPH2641: CHelpWindow topic tap - CBasicTreeNode stored its node pointer
+  through a DWORD (fault 0xa44f3898 = low 32 bits). Now a DWORD_PTR member.
+  Not exercised on device (could not reach the help window by key).
+- Not ours / old: vivo V2332 abort in InputChannel during the APK install;
+  vivo V2229A run from the 10-04 build; sdk_gphone64 emulator on app v186.
+
 ## 2026-10-06 (1) — Bot icon never appeared; club-war certifier name plate
 
 - Bot: the agent (new ServerAgent, Config.ini bFeatureAutoHunt = 1 - the

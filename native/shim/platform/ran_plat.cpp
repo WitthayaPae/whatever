@@ -657,6 +657,90 @@ void OnCrashSignal ( int sig, siginfo_t *si, void *ucv )
     if ( !si || si->si_code <= 0 ) raise ( sig );
 }
 
+//  --- the frame watchdog (2026-10-06) ----------------------------------------
+//
+//  Android's exit records showed most "killed" reports were ANRs: the game's
+//  own log stops dead and the system kills it 8-20 s later for not reading a
+//  touch. The stall watchdog in win_impl.cpp only covers lock waits and said
+//  nothing, so the game thread was spinning or stuck in a system / driver call.
+//  This catches that: a thread watches the frame counter, and when the game
+//  thread has made no frame for 4 s while on screen it is sent SIGUSR2 and
+//  writes its own stack into the report (at most 3 times a run - a long
+//  loading screen is a stall too, and must not use them all up).
+#ifndef SA_RESTART
+#define SA_RESTART 0x10000000     //  Linux value; some header set here hides it
+#endif
+volatile uint32_t g_hangTick    = 0;
+pthread_t         g_hangThread;
+volatile int      g_hangThreadSet = 0;
+volatile int      g_hangDumps   = 0;
+volatile int      g_hangSecs    = 0;
+
+void OnHangSignal ( int, siginfo_t *, void *ucv )
+{
+    if ( !g_run || g_inCrash ) return;
+    CW ( "\nhang: the game thread made no frame for " ); CWDec ( g_hangSecs ); CW ( " s - its stack:\n" );
+    uintptr_t pc = 0, lr = 0, sp = 0, fp = 0;
+#if defined(__ANDROID__) && defined(__aarch64__)
+    const ucontext_t *uc = (const ucontext_t *) ucv;
+    pc = uc->uc_mcontext.pc; lr = uc->uc_mcontext.regs[30];
+    fp = uc->uc_mcontext.regs[29]; sp = uc->uc_mcontext.sp;
+#elif defined(__ANDROID__) && defined(__x86_64__)
+    const ucontext_t *uc = (const ucontext_t *) ucv;
+    pc = uc->uc_mcontext.gregs[REG_RIP]; fp = uc->uc_mcontext.gregs[REG_RBP]; sp = uc->uc_mcontext.gregs[REG_RSP];
+#else
+    (void) ucv;
+#endif
+    if ( pc ) { CWFrame ( 0, pc ); if ( lr ) CWFrame ( 1, lr ); }
+#if defined(__ANDROID__) && defined(__aarch64__)
+    if ( fp ) {
+        CW ( "frame chain:\n" );
+        uintptr_t cur = fp;
+        for ( int i = 0; i < 24 && cur && ( cur & 15 ) == 0 && cur >= sp; ++i ) {
+            uintptr_t rec[2];
+            if ( !SafeRead ( cur, rec, sizeof(rec) ) ) break;
+            if ( rec[1] ) CWFrame ( i, rec[1] );
+            if ( rec[0] <= cur || rec[0] - cur > 1024 * 1024 ) break;
+            cur = rec[0];
+        }
+    }
+#else
+    uintptr_t pcs[24];
+    int n = 0;
+#if defined(__ANDROID__)
+    UnwindState st = { pcs, 0, 24 };
+    _Unwind_Backtrace ( UnwindStep, &st );
+    n = st.n;
+#elif defined(__APPLE__)
+    n = backtrace ( (void **) pcs, 24 );
+#endif
+    for ( int i = 0; i < n; ++i ) CWFrame ( i, pcs[i] );
+#endif
+}
+
+void *HangWatch ( void * )
+{
+    uint32_t last = g_hangTick;
+    int still = 0, dumped = 0;
+    for ( ;; ) {
+        sleep ( 1 );
+        const uint32_t now = g_hangTick;
+        if ( !g_run || g_run->state != RUN_FOREGROUND || now != last ) {
+            last = now; still = 0; dumped = 0;
+            continue;
+        }
+        ++still;
+        if ( still >= 4 && !dumped && g_hangThreadSet && g_hangDumps < 3 ) {
+            dumped = 1;
+            ++g_hangDumps;
+            g_hangSecs = still;
+            RanPlat_Log ( RANLOG_WARN, "RanHang", "the game thread made no frame for %d s - recording its stack", still );
+            pthread_kill ( g_hangThread, SIGUSR2 );
+        }
+    }
+    return NULL;
+}
+
 void InstallCrashHandlers ()
 {
     //  Its own stack, so a stack overflow can still be reported. Only the
@@ -676,6 +760,19 @@ void InstallCrashHandlers ()
     sigemptyset ( &sa.sa_mask );
     for ( size_t i = 0; i < sizeof(kCrashSignals) / sizeof(kCrashSignals[0]); ++i )
         sigaction ( kCrashSignals[i], &sa, &g_oldAct[kCrashSignals[i]] );
+
+    //  The frame watchdog: Begin runs on the game thread, so this is the one
+    //  it watches.
+    struct sigaction sh;
+    memset ( &sh, 0, sizeof(sh) );
+    sh.sa_sigaction = OnHangSignal;
+    sh.sa_flags     = SA_SIGINFO | SA_ONSTACK | SA_RESTART;
+    sigemptyset ( &sh.sa_mask );
+    sigaction ( SIGUSR2, &sh, NULL );
+    g_hangThread = pthread_self ();
+    g_hangThreadSet = 1;
+    pthread_t t;
+    if ( pthread_create ( &t, NULL, HangWatch, NULL ) == 0 ) pthread_detach ( t );
 }
 
 //  --- the report, built on the next boot (ordinary code from here on) --------
@@ -1010,6 +1107,8 @@ extern "C" void RanCrash_Begin ( void )
 
     RanPlat_UploadCrashReports ( RanPlat_DiagPath ( "crash_pending" ) );
 }
+
+extern "C" void RanHang_Frame ( void ) { ++g_hangTick; }
 
 extern "C" void RanCrash_SetForeground ( int foreground )
 {

@@ -326,8 +326,22 @@ extern "C" int RanApp_Boot(const char *dataRoot, int width, int height) {
     return 1;
 }
 
+extern "C" void RanHang_Frame(void);     //  ran_plat.cpp: the frame watchdog's counter
+
 // One iteration of the PC message loop's idle path.
 extern "C" int RanApp_Frame(void) {
+    RanHang_Frame();
+    //  Diagnostic "hangtest": freeze the game thread once for 6 s, to see the
+    //  frame watchdog record its stack. Looked for every 300 frames only.
+    {
+        static unsigned s_n = 0;
+        if ((++s_n % 300) == 0 && RanPlat_DiagExists("hangtest")) {
+            unlink(RanPlat_DiagPath("hangtest"));
+            LOGI("hangtest: freezing the game thread for 6 s");
+            struct timespec ts = { 6, 0 };
+            nanosleep(&ts, NULL);
+        }
+    }
     if (!g_app || !g_app->m_created) return 0;
     if (FAILED(g_app->Render3DEnvironment())) return 0;
     return 1;
