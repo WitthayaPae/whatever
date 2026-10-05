@@ -40,6 +40,28 @@ If anything here disagrees with another file, this file wins.
   - Verified: login x2, character select x1.27, start into the world.
 - PC client, Emulator and both servers build with 0 errors.
 
+## 2026-10-05 (3) — Android 9 emulator crash at boot: v190 "1.1.9", patch 624
+
+- Crash reports (ran-legacy-m.com/crash/): every Android 9 x86_64 device
+  (LDPlayer 9 style: vivo V2229A, samsung SM-N9860) crashed in
+  SCHARDATA2::LOADFILE (GLCharDataLoad.cpp:192, strlen(NULL)) during boot,
+  after hundreds of GLogic parse errors healthy devices never log
+  (classconst strHAIR_CPS, pandorabox/busstation "wrong size", charset).
+- Cause: CStringMemory::Open slid the decoded buffer over its 4-byte version
+  header with memcpy (overlapping, undefined). Newer bionic and MSVC copy
+  forward; Android 9 x86_64 does not, so GLogic text came out with damaged
+  lines. Then the PutOnItems loop compared past the 14 names of strBodyPart
+  into NULL.
+- Fix (SOURCE 567e14c): memmove; slot loop stops at the table end.
+- Verified: LDPlayer (Android 14 x86_64) boots to login with zero
+  classconst/charset/"wrong size" errors (none before either). NOT verified on
+  Android 9 - no Android 9 emulator here; confirm when the crash list stops
+  showing API 28 reports.
+- iOS: CI run 37249881202 built from SOURCE 567e14c, published via
+  make-ios-source (minIos 190). Not run on an iPhone.
+- Other "killed" x86_64 reports: OnePlus PHB110 = our own LDPlayer; Google
+  sdk_gphone (patch ?) had no game data (Club_Tex.dat missing) - not a code bug.
+
 ## 2026-10-05 (2) — Enhance announcement + background grace: v189 "1.1.8", patch 620
 
 - **Enhance announcement** (server, GLCharInvenMsg.cpp MsgReqInvenGrinding):
