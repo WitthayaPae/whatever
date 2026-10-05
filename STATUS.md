@@ -141,7 +141,7 @@ the new pad icons are "too much", not classic. Players want classic.
        font tier-1 atlas;
      - input inverse-mapped in UpdateList and PointInList;
      - CheckBoundary, AlignMainControl and the edge sweep use the magnified size.
-- [ ] Icons back to classic (lower priority).
+- [ ] Icons back to classic + RoV-style translucent HUD (2026-10-05: mockup out/hud_mockup.png sent, waiting for approval).
 
 ## 2026-10-04 (3) — Talk-to-NPC button: v183 "1.1.3", patch 612 (Android + iOS)
 
