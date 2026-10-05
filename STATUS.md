@@ -40,6 +40,31 @@ If anything here disagrees with another file, this file wins.
   - Verified: login x2, character select x1.27, start into the world.
 - PC client, Emulator and both servers build with 0 errors.
 
+## 2026-10-05 (6) — F1-F4 apart in the HUD editor, friendly skills on self, create-screen zoom/rotate
+
+- **Frenzy Attack (SN_014_014) did nothing.** It is TAR_SPEC + SIDE_ANYBODY
+  (one target, anybody). MobileCastRunSkill required a live selected target
+  of the right side; with nothing (or a monster) selected it returned. The PC
+  casts these on whoever is clicked, including yourself, never on a monster.
+  Now: TAR_SPEC with SIDE_OUR/ANYBODY goes to the selected friendly player,
+  else to the caster; auto-select is not run for them. Verified on LDPlayer
+  with the Lv150 Shaman: tap with nothing selected - buff icon up, MP 795->700.
+- **HUD editor F1-F4.** Each page button has its own offset and size
+  (g_pageAdj), picked and outlined on its own; the group still exists. Saved
+  after everything else: fMobileHud 118 -> 130 floats, 118 and 110 still load.
+  Verified: dragged F3 alone, the others stayed; cancel restored it.
+- **Character create.** On the face/hair step: finger drag (middle button) or
+  right-drag turns the character (m_fMobileYaw), pinch zooms toward the head
+  (m_fMobileZoom 0..1, head from the character's box, eye to 35% distance).
+  Pinch reaches the client as the wheel only on that step
+  (RanTouch_SetLobbyPinch, shim lobby pinch while the pad is down).
+  Verified on LDPlayer: drag turned the character to its back; full zoom
+  (diag `createzoom`) frames face, hair and shoulders. A real two-finger pinch
+  could not be injected on the emulator - not verified on a phone.
+  Diag `createpreview` opens the create page on an account with no create card
+  (the server still refuses the create).
+- iOS: same shim/SOURCE code; not run on an iPhone.
+
 ## 2026-10-05 (5) — Silver see-through HUD + classic menu icons
 
 Approved from design/hud_mockup6.png (the user: "perfect", silver not gold, art
@@ -194,6 +219,9 @@ the new pad icons are "too much", not classic. Players want classic.
      - input inverse-mapped in UpdateList and PointInList;
      - CheckBoundary, AlignMainControl and the edge sweep use the magnified size.
 - [x] Silver see-through HUD + classic icons (2026-10-05, see section (5)).
+- [x] HUD editor: F1-F4 move/size one at a time (2026-10-05, section (6)).
+- [x] Self-target skills (Frenzy Attack) usable with nothing selected (2026-10-05, section (6)).
+- [x] Character create: pinch zoom + drag rotate on the face/hair step (2026-10-05, section (6)).
 
 ## 2026-10-04 (3) — Talk-to-NPC button: v183 "1.1.3", patch 612 (Android + iOS)
 

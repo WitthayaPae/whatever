@@ -118,6 +118,10 @@ SlotAdj g_slotAdj[RANTOUCH_MAX_SKILL_CIRCLES];
 //  slots do: six buttons in a fixed row is a layout, not an arrangement.
 const int kPotMax = 8;
 SlotAdj g_potAdj[kPotMax];
+//  And each page button (F1-F4) on its own, on top of the row's group: the
+//  player asked for them apart (2026-10-05). The group still moves the row.
+const int kPageMax = 4;
+SlotAdj g_pageAdj[kPageMax];
 
 //  The quest box and the small party frame, which stay out of the menu grid
 //  and so are placed by the client in the top right corner. It hands over the
@@ -297,6 +301,42 @@ int unclaimedCount() {
     int n = 0;
     for (int i = 0; i < kMaxPointers; ++i) if (g_touch[i].id >= 0 && !g_touch[i].claimed) ++n;
     return n;
+}
+
+//  Pinch with the pad down (2026-10-05): the character-create screen zooms
+//  on it. The client turns this on only for the pages that want it
+//  (RanTouch_SetLobbyPinch), so the login windows never see a stray wheel.
+bool g_lobbyPinch = false;
+void lobbyPinchDown(int id, float x, float y) {
+    if (!findTouch(id)) addTouch(id, x, y);
+    if (!g_lobbyPinch || unclaimedCount() != 2) return;
+    int ids[2], k = 0;
+    for (int i = 0; i < kMaxPointers && k < 2; ++i)
+        if (g_touch[i].id >= 0 && !g_touch[i].claimed) ids[k++] = i;
+    if (k != 2) return;
+    g_pinch.a = g_touch[ids[0]].id;
+    g_pinch.b = g_touch[ids[1]].id;
+    g_pinch.startDist = hypotf(g_touch[ids[0]].x - g_touch[ids[1]].x, g_touch[ids[0]].y - g_touch[ids[1]].y);
+    g_pinch.lastDist = g_pinch.startDist;
+}
+void lobbyPinchMove(int id, float x, float y) {
+    Touch *t = findTouch(id);
+    if (t) { t->x = x; t->y = y; }
+    if (g_pinch.a < 0 || (id != g_pinch.a && id != g_pinch.b)) return;
+    Touch *ta = findTouch(g_pinch.a), *tb = findTouch(g_pinch.b);
+    if (!ta || !tb) return;
+    const float d = hypotf(ta->x - tb->x, ta->y - tb->y);
+    const float delta = d - g_pinch.lastDist;
+    const float kPixelsPerNotch = 12.0f;               //  as the in-world pinch
+    if (fabsf(delta) >= kPixelsPerNotch) {
+        const int notches = (int)(delta / kPixelsPerNotch);
+        RanInput_PointerWheel(notches * 120);
+        g_pinch.lastDist += (float)notches * kPixelsPerNotch;
+    }
+}
+void lobbyPinchUp(int id) {
+    removeTouch(id);
+    if (id == g_pinch.a || id == g_pinch.b) g_pinch.a = g_pinch.b = -1;
 }
 
 // ------------------------------------------------------------------- GL
@@ -1110,10 +1150,16 @@ void placePageRow() {
     const int slot[4] = { kSlotF1, kSlotF2, kSlotF3, kSlotF4 };
     for (int k = 0; k < 4; ++k) {
         Button &b  = g_buttons[col[k]];
+        const SlotAdj &p = g_pageAdj[k];
         b.slot     = slot[k];
-        b.radius   = r;
-        b.centre.x = cx + ((float)k - 1.5f) * step;
-        b.centre.y = cy;
+        b.radius   = r * p.scale;
+        b.centre.x = cx + ((float)k - 1.5f) * step + p.dx * g_unit;
+        b.centre.y = cy + p.dy * g_unit;
+        //  One button dragged on its own still has to stay on the screen.
+        if (b.centre.x < b.radius)     b.centre.x = b.radius;
+        if (b.centre.x > W - b.radius) b.centre.x = W - b.radius;
+        if (b.centre.y < b.radius)     b.centre.y = b.radius;
+        if (b.centre.y > H - b.radius) b.centre.y = H - b.radius;
     }
 }
 
@@ -1157,6 +1203,7 @@ HudAdj g_editBefore[kGrpCount];     //  for cancel
 int    g_hudSavedGen = 0;           //  bumped on save; the client polls it
 SlotAdj g_slotBefore[RANTOUCH_MAX_SKILL_CIRCLES];
 SlotAdj g_potBefore[kPotMax];
+SlotAdj g_pageBefore[kPageMax];
 
 //  The toolbar across the top: cancel, reset all, size -, size +, opacity -,
 //  opacity +, save. Positions in surface pixels, recomputed from the unit.
@@ -1321,10 +1368,14 @@ int groupAt(float x, float y) {
             //  the row. That circle is half the row wide, so it reached up over
             //  skill slot 1: a press just beside the slot took the whole page
             //  row, and the outline drew slot 1 inside the page group as if the
-            //  two were one control. The four still move together.
+            //  two were one control. Each button is picked on its own now, the
+            //  way a skill slot is.
             for (int k = 0; k < 4; ++k) {
                 const Button &b = g_buttons[kPageBtn[k]];
-                if (b.radius > 0.0f && hit(b.centre, b.radius * 1.3f, x, y)) return g;
+                if (b.radius > 0.0f && hit(b.centre, b.radius * 1.3f, x, y)) {
+                    g_editSlot = k;
+                    return g;
+                }
             }
             continue;
         }
@@ -1341,6 +1392,9 @@ void editDefaultsAll() {
     }
     for (int i = 0; i < kPotMax; ++i) {
         g_potAdj[i].dx = g_potAdj[i].dy = 0.0f; g_potAdj[i].scale = 1.0f;
+    }
+    for (int i = 0; i < kPageMax; ++i) {
+        g_pageAdj[i].dx = g_pageAdj[i].dy = 0.0f; g_pageAdj[i].scale = 1.0f;
     }
     //  The corner icons too.
     //
@@ -1551,7 +1605,8 @@ int RanTouch_PointerDown(int id, float x, float y) {
     //  would only be noise.
     if (g_inited && !g_edit) tapFxPush(x, y);
 
-    if (!g_inited || !g_active) return 0;
+    if (!g_inited) return 0;
+    if (!g_active) { lobbyPinchDown(id, x, y); return 0; }
 
     //  Editing the HUD: every touch is the editor's. Nothing reaches the game,
     //  so dragging a skill slot moves it instead of casting it.
@@ -1571,6 +1626,8 @@ int RanTouch_PointerDown(int id, float x, float y) {
                     pScale = &g_slotAdj[g_editSlot].scale;
                 else if (g_editSel == kGrpPotion && g_editSlot < kPotMax)
                     pScale = &g_potAdj[g_editSlot].scale;
+                else if (g_editSel == kGrpPage && g_editSlot < kPageMax)
+                    pScale = &g_pageAdj[g_editSlot].scale;
                 else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax)
                     pScale = &g_cornerAdj[g_editSlot].scale;
             }
@@ -1580,6 +1637,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
                     memcpy(g_slotAdj, g_slotBefore, sizeof(g_slotAdj));
                     memcpy(g_potAdj,  g_potBefore,  sizeof(g_potAdj));
                     memcpy(g_cornerAdj, g_cornerBefore, sizeof(g_cornerAdj));
+                    memcpy(g_pageAdj, g_pageBefore, sizeof(g_pageAdj));
                     editEnd();
                     break;
                 case kToolReset:  editDefaultsAll(); break;
@@ -1767,7 +1825,8 @@ int RanTouch_PointerDown(int id, float x, float y) {
 }
 
 int RanTouch_PointerMove(int id, float x, float y) {
-    if (!g_inited || !g_active) return 0;
+    if (!g_inited) return 0;
+    if (!g_active) { lobbyPinchMove(id, x, y); return 0; }
     if (g_edit) {
         if (id == g_editPtr && g_editBar) {
             g_toolDX += x - g_editLastX;
@@ -1791,6 +1850,9 @@ int RanTouch_PointerMove(int id, float x, float y) {
             } else if (g_editSel == kGrpPotion && g_editSlot >= 0) {
                 g_potAdj[g_editSlot].dx += mdx;
                 g_potAdj[g_editSlot].dy += mdy;
+            } else if (g_editSel == kGrpPage && g_editSlot >= 0 && g_editSlot < kPageMax) {
+                g_pageAdj[g_editSlot].dx += mdx;
+                g_pageAdj[g_editSlot].dy += mdy;
             } else if (g_editSel == kGrpCorner && g_editSlot >= 0) {
                 //  One corner icon, not the pair: they are picked separately,
                 //  so they have to move separately too - dragging the quest box
@@ -1882,6 +1944,7 @@ int RanTouch_PointerMove(int id, float x, float y) {
 
 int RanTouch_PointerUp(int id, float x, float y) {
     if (!g_inited) { removeTouch(id); return 0; }
+    if (!g_active) { lobbyPinchUp(id); return 0; }
     if (g_edit) {
         if (id == g_editPtr) g_editPtr = -1;
         removeTouch(id);
@@ -3038,14 +3101,13 @@ void drawEditor() {
                      kInk.r, kInk.g, kInk.b, 0.5f);
         }
     }
-    //  The page buttons: a ring each, all four lit together when the row is
-    //  selected - it is one group, but drawn as one big circle it enclosed
-    //  skill slot 1 and the two read as joined.
+    //  The page buttons: a ring each, and only the one picked is lit - each
+    //  moves and sizes on its own.
     for (int k = 0; k < 4; ++k) {
         const Button &b = g_buttons[kPageBtn[k]];
         if (b.radius <= 0.0f) continue;
         const float rr = b.radius * 1.3f;
-        if (g_editSel == kGrpPage)
+        if (g_editSel == kGrpPage && g_editSlot == k)
             drawRing(b.centre.x, b.centre.y, rr - u * 0.016f, rr, kAmber.r, kAmber.g, kAmber.b, 0.95f);
         else
             drawRing(b.centre.x, b.centre.y, rr - u * 0.018f, rr, kInk.r, kInk.g, kInk.b, 0.5f);
@@ -3123,6 +3185,8 @@ void drawEditor() {
                 vScale = g_slotAdj[g_editSlot].scale;
             else if (g_editSel == kGrpPotion && g_editSlot < kPotMax)
                 vScale = g_potAdj[g_editSlot].scale;
+            else if (g_editSel == kGrpPage && g_editSlot < kPageMax)
+                vScale = g_pageAdj[g_editSlot].scale;
             else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax)
                 vScale = g_cornerAdj[g_editSlot].scale;
         }
@@ -3816,6 +3880,11 @@ extern "C" void RanTouch_SetSkillPage(int page) {
     }
 }
 
+extern "C" void RanTouch_SetLobbyPinch(int on) {
+    g_lobbyPinch = (on != 0);
+    if (!g_lobbyPinch && !g_active) g_pinch.a = g_pinch.b = -1;
+}
+
 extern "C" int RanTouch_IsPinching(void) {
     return (g_pinch.a >= 0 && g_pinch.b >= 0) ? 1 : 0;
 }
@@ -3891,6 +3960,7 @@ extern "C" void RanTouch_SetEditMode(int on) {
         memcpy(g_slotBefore, g_slotAdj, sizeof(g_slotAdj));
         memcpy(g_potBefore,  g_potAdj,  sizeof(g_potAdj));
         memcpy(g_cornerBefore, g_cornerAdj, sizeof(g_cornerAdj));
+        memcpy(g_pageBefore, g_pageAdj, sizeof(g_pageAdj));
         g_stick.pointer = -1; g_stick.held = false; g_stick.magnitude = 0.0f;
         g_stick.knob = g_stick.origin = g_stick.centre;
         for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; g_buttons[i].pressedEdge = false; }
@@ -3920,7 +3990,8 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     //  move every slot, and a saved file would load them scrambled.
     const int n = kGrpLegacy * 4
                 + (RANTOUCH_MAX_SKILL_CIRCLES + kPotMax + kCornerMax) * 3
-                + (kGrpCount - kGrpLegacy) * 4;
+                + (kGrpCount - kGrpLegacy) * 4
+                + kPageMax * 3;                         //  F1-F4, appended 2026-10-05
     if (!out || max < n) return n;
     for (int i = 0; i < kGrpLegacy; ++i) {
         out[i * 4]     = g_adj[i].dx;    out[i * 4 + 1] = g_adj[i].dy;
@@ -3935,6 +4006,9 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     for (int i = kGrpLegacy; i < kGrpCount; ++i) {
         out[w++] = g_adj[i].dx;    out[w++] = g_adj[i].dy;
         out[w++] = g_adj[i].scale; out[w++] = g_adj[i].alpha;
+    }
+    for (int i = 0; i < kPageMax; ++i) {
+        out[w++] = g_pageAdj[i].dx; out[w++] = g_pageAdj[i].dy; out[w++] = g_pageAdj[i].scale;
     }
     return n;
 }
@@ -3978,6 +4052,16 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (!(sc >= 0.6f && sc <= 1.6f)) sc = 1.0f;
             if (!(al >= 0.2f && al <= 1.0f)) al = 1.0f;
             g_adj[i].dx = dx; g_adj[i].dy = dy; g_adj[i].scale = sc; g_adj[i].alpha = al;
+        }
+        //  The page buttons' own places. An older file stops before them, or
+        //  carries zeros: a zero size is out of range and resets to 1.
+        for (int i = 0; i < kPageMax; ++i) {
+            float dx = 0.0f, dy = 0.0f, sc = 1.0f;
+            if (r + 2 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; }
+            if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
+            if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
+            if (!(sc >= 0.6f && sc <= 1.6f))  sc = 1.0f;
+            g_pageAdj[i].dx = dx; g_pageAdj[i].dy = dy; g_pageAdj[i].scale = sc;
         }
     }
     if (g_inited) layout();

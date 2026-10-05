@@ -198,6 +198,8 @@ extern "C" void RanTouch_GetAttackCircle(float *cx, float *cy, float *r);
 //  drag gesture would otherwise read that movement as a camera drag - so zooming
 //  rotated the view at the same time.
 extern "C" int RanTouch_IsPinching(void);
+//  Pinch-to-wheel while the pad is down: on for the character-create screen.
+extern "C" void RanTouch_SetLobbyPinch(int on);
 
 //  Whether the controls should be shown at all. They are hidden outside the
 //  world - there is nothing to steer on the login screen, and a stick sitting
