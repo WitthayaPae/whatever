@@ -59,6 +59,23 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (1) — Bot icon never appeared; club-war certifier name plate
+
+- Bot: the agent (new ServerAgent, Config.ini bFeatureAutoHunt = 1 - the
+  server's file decoded and checked) sent NET_MSG_GCTRL_AUTOHUNT_INFO every
+  minute, but DxGlobalStage::MsgProcessFrame did not list it, and its default
+  drops a message as "not classified". Listed with the GLGaeaClient group
+  (RAN_MOBILE). huntfake had shown the icon because it bypasses the message.
+  LDPlayer, live server, no switch: icon up within 70 s; tap -> "ต้องออนไลน์
+  วันนี้อีก 4 นาที"; after 4 min -> "ระบบออโต้เริ่มทำงาน เหลือเวลาวันนี้ 4:00";
+  tap -> stopped, 3:59 left.
+- Club-war CD certifier ("เสียบแผ่น"): NameDisplay never gave m_pNameLineBoxCD its
+  art - CreateBaseBoxNameCD was commented out since the first commit (shared,
+  so PC builds from this source lacked it too). Restored; visibility set before
+  the club check. Art BASIC_LINE_BOX_EX_BODY_NAME_CD = translucent gold.
+  Diagnostic "cdname" marks my own name as a certifier. LDPlayer: gold plate.
+  Also covers the open item "คนเสียบแผ่นห้องคอมชื่อไม่ขึ้นสีขาว" (same plate).
+
 ## 2026-10-05 (20) — Crash round: two patchers, exit teardown, BLAST reject; enhance name
 
 - HUAWEI PPA-LX2 patchfail (ENOENT on a .tmp between download and hash, then
