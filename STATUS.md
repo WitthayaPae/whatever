@@ -40,6 +40,26 @@ If anything here disagrees with another file, this file wins.
   - Verified: login x2, character select x1.27, start into the world.
 - PC client, Emulator and both servers build with 0 errors.
 
+## 2026-10-05 (9) — +8/+9 clean-up SQL, enhance stone in the announcement, auto-pot spam
+
+- **SQL MOBILE/server/enhance_cap_7.sql** (user wanted SQL, not code - a
+  load-time clamp I started was reverted unbuilt). Item lists are raw
+  struct arrays: header version 0x0202 / record size / count; worn records 80
+  bytes (cDAMAGE at 37), bag/locker/club 88 (SINVENITEM_SAVE, item at 8, so 45);
+  locker and club = DWORD page count + 5 lists. dbo.fnRanGradeCap counts or
+  patches cDAMAGE/cDEFENSE > 7; lists with another version/size are left alone
+  and counted. Steps: preview, backup (Bak20261005_*), fix in a transaction,
+  check; undo statements at the end. Tested on local SQLEXPRESS (tempdb) with
+  synthetic blobs: bag 2, worn 1, locker 2 fixed, old-format list skipped,
+  bytes equal to the expected patch. NOT run on the live DB.
+- **Announcement** names the stone: format arg 4 = pHold->GetName(),
+  servertext ENHANCE_TOP_SUCCESS "... +%d ด้วย %s"; Gui.rcc repacked.
+- **Auto-pot chat spam** ("still on cooldown"): RunAutoPots runs every 0.01 s
+  and the item cooldown only exists after the server's reply, so a pot was
+  requested many times per drink. Per-slot 1 s wait after a request
+  (m_fAutoPotWait). Not tested in game yet.
+- Always build the PC Emulator with SOURCE changes (user tests there).
+
 ## 2026-10-05 (8) — Joystick walked back and forth on bridges / overpasses
 
 - Cause: the stick's ground rays ran from 600 above the target point, and
