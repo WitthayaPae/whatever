@@ -40,6 +40,30 @@ If anything here disagrees with another file, this file wins.
   - Verified: login x2, character select x1.27, start into the world.
 - PC client, Emulator and both servers build with 0 errors.
 
+## 2026-10-05 (4) — Enhance cap leak (+9 on a +7 server): v191 "1.1.10", patch 626
+
+- Report: server cap is +7 but players reach +9.
+- Cause: GLogicDataLoad.cpp raised wGRADE_MAX and wGRADE_MAX_REGI to
+  GRADE_HIGH (9) whenever default.charclass set less. "wGRADE_MAX 7" therefore
+  became 9 on server and client, and MsgReqInvenGrinding / DOGRINDING accepted
+  +7 -> +8 -> +9 (rates 80% / 70%). No hack needed; the normal client did it.
+- Fix (SOURCE 46bec03): the configured cap is the cap (only 0 corrected).
+  Resist grade getters clamped against wGRADE_MAX but assigned wGRADE_MAX_REGI;
+  they compare against REGI now.
+- Effect on items already +8/+9: attack/defence stats are computed at most
+  +7 (GETGRADE_DAMAGE/DEFENSE clamp to wGRADE_MAX); the name still shows +8/+9.
+- wGRADE_MAX_REGI is not in default.charclass, so resist enhancing stays at the
+  code default +9 unless a line is added.
+- Audit "other config values the code overrides": every getflag in Lib_Client,
+  Lib_Engine, Lib_Network, Lib_ClientUI checked for a reassignment right after
+  load. Only upper-bound array guards remain (school count, club rank 5..10,
+  head/hair counts, reward count); all configured values sit inside them. Level
+  cap (wMAX_LEVEL 150) is enforced from config in VALID_LEVELUP. GM rate events
+  are gated (USER_MASTER on the agent, agent-only on the field).
+- Deploy: ServerField.exe + ServerAgent.exe (_Bin/Tool 10:22). Mobile v191 on
+  both platforms (iOS CI 37259276590 from 46bec03, not run on an iPhone).
+  Not tested live.
+
 ## 2026-10-05 (3) — Android 9 emulator crash at boot: v190 "1.1.9", patch 624
 
 - Crash reports (ran-legacy-m.com/crash/): every Android 9 x86_64 device
