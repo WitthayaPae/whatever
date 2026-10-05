@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-04
+- **Last updated:** 2026-10-05
 - **Approach:** compile the real PC client (`SOURCE/`) for mobile. Decided 2026-08-24.
 - **Current phase:** 1 complete · 2 complete · **3 in progress — login works end to end; character-select scene and models remain**
 - **Builds:** `cd MOBILE/native && ./build.sh` → 0 errors, produces `out/arm64-v8a/libran.so`
@@ -58,6 +58,29 @@ If anything here disagrees with another file, this file wins.
 - Verified on LDPlayer with test01 (not a GM): login has no emblem and no
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
+
+## 2026-10-05 (12) — Window-mode toggle removed on mobile
+
+- FULLSCREEN_OUTER (login pages) and MINIMAP_FULLSCREEN (in game) are no longer
+  created under RAN_MOBILE; every use is NULL-guarded. PC unchanged.
+- Built: MSVC and both mobile ABIs. On LDPlayer, the login page has no toggle.
+  The in-game check is not done: the test login was refused (wrong id/password),
+  so I stopped there rather than retry against the live server.
+
+## 2026-10-05 (11) — Auto-pot cooldown spam, second pass
+
+- Still spammed after (9) on 1-second-delay potions. Cause: the server's
+  refusal (NET_MSG_GCTRL_ITEM_COOLTIME_ERROR). The client's cooldown is whole
+  seconds against its own copy of the server clock, which runs slightly ahead,
+  so as a 1 s potion comes off cooldown on the client the server still refuses.
+  The pet's auto-potion skill (GLPetClientSkill EMFOR_PET_AUTOMEDISON) had the
+  same gap with no wait at all, asking once a frame.
+- Fix (shared SOURCE, both platforms + PC): GLCharacter::ReqAutoDrug, used by
+  RunAutoPots and the pet skill. One request per potion per second, and the
+  server's refusal of a potion auto-asked in the last 3 s is not printed. Taps
+  by the player still print it.
+- Built: MSVC (MiniA, Emulator, Agent, Field) and both mobile ABIs. Not tested
+  in game yet.
 
 ## 2026-10-05 (9) — +8/+9 clean-up SQL, enhance stone in the announcement, auto-pot spam
 
