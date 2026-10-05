@@ -59,6 +59,17 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (4) — Endless loading on the Tiger basement 2 map (my sound-set change)
+
+- w_4school_under02 (ชั้นใต้ดิน2Tiger) never finished loading: DxCamAniMan::Load
+  looped on "Version Error" / "file read error" with a garbage count. Cause: the
+  v209 sound-set fix READ ON after a bad sound (0669.wav {m:150 M:0}); the next
+  "record" was garbage ([]{m:-2147483648}) - after a bad sound the data is the
+  next section, which the original break keeps in step. Back to break; the
+  corrected message (no %s on a float) stays, so no crash either.
+- LDPlayer, admin account, entering that map: loads, 0 camera errors, the one
+  sound error logged. Affected 660 (live) and 662 (never uploaded).
+
 ## 2026-10-06 (3) — v209 broke the stick and camera; fixed
 
 - v209 made ran_fopen call RanPlat_PumpEvents (for loading-screen ANRs). That
