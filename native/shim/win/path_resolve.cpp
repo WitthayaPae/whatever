@@ -280,15 +280,25 @@ extern "C" void RanPath_LogStats(void) {
 // how this recursed into itself the first time.
 #undef fopen
 extern "C" void RanPlat_PumpEvents(void);
+extern "C" int  RanHang_MsSinceFrame(void);
 
 extern "C" FILE *ran_fopen(const char *path, const char *mode) {
-    //  Read pending touches on the way (2026-10-06). A loading screen opens
-    //  files on the main thread for many seconds without a frame or a Sleep,
-    //  and touches were then not read at all: after 5 s Android declared the
-    //  game "not responding" (ANR reports at 13 s after start, vivo V2310 /
-    //  V2543). Sleep already does this; it acts only on the looper's own
-    //  thread, never recursively, and costs a zero-timeout poll.
-    RanPlat_PumpEvents();
+    //  Read pending touches on the way - but ONLY in a real load, when the
+    //  game has made no frame for 1.5 s (2026-10-06).
+    //
+    //  A loading screen opens files on the main thread for many seconds with
+    //  no frame and no Sleep; touches were then not read at all, and after 5 s
+    //  Android declared the game "not responding" (vivo V2310 / V2543).
+    //
+    //  Pumping on EVERY open was v209, and it broke walking: the pump is the
+    //  stage-change one, which deliberately SWALLOWS what it reads
+    //  (onInputEvent: "if (g_pumpBlocking) return 1"), and during play files
+    //  are opened all the time as textures and sounds stream in - so stick
+    //  moves and releases and camera drags that arrived during an open were
+    //  thrown away. In play a frame is never 1.5 s apart, so nothing is
+    //  swallowed there; in a load nothing is listening anyway.
+    if (RanHang_MsSinceFrame() > 1500)
+        RanPlat_PumpEvents();
     const char *real = RanPath_Resolve(path);
     FILE *f = fopen(real, mode);
 

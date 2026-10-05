@@ -1108,7 +1108,24 @@ extern "C" void RanCrash_Begin ( void )
     RanPlat_UploadCrashReports ( RanPlat_DiagPath ( "crash_pending" ) );
 }
 
-extern "C" void RanHang_Frame ( void ) { ++g_hangTick; }
+static volatile int64_t g_lastFrameMs = 0;
+
+static int64_t RanMonoMs ()
+{
+    struct timespec ts;
+    clock_gettime ( CLOCK_MONOTONIC, &ts );
+    return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+extern "C" void RanHang_Frame ( void ) { ++g_hangTick; g_lastFrameMs = RanMonoMs (); }
+
+//  How long since the game thread last started a frame (0 before the first).
+extern "C" int RanHang_MsSinceFrame ( void )
+{
+    if ( !g_lastFrameMs ) return 0;
+    const int64_t d = RanMonoMs () - g_lastFrameMs;
+    return d > 0x7fffffff ? 0x7fffffff : (int) d;
+}
 
 extern "C" void RanCrash_SetForeground ( int foreground )
 {

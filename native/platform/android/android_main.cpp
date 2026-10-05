@@ -786,7 +786,18 @@ int32_t onInputEvent(android_app *app, AInputEvent *event) {
     //  handing it a tap then is asking for a crash; the point of reading them
     //  at all is only to tell Android they were delivered. Returning 1 is what
     //  finishes the event.
-    if (g_pumpBlocking) return 1;
+    if (g_pumpBlocking) {
+        //  Counted, so swallowing during play can never hide again (it did
+        //  in v209 - walking and the camera lost moves). Said once a second.
+        static int s_n = 0; static int64_t s_t = 0;
+        ++s_n;
+        const int64_t now = nowMsMonotonic();
+        if (now - s_t >= 1000) {
+            LOGI("input: swallowed %d event(s) while the frame loop was blocked", s_n);
+            s_n = 0; s_t = now;
+        }
+        return 1;
+    }
     const int32_t type = AInputEvent_getType(event);
 
     if (type == AINPUT_EVENT_TYPE_MOTION) {

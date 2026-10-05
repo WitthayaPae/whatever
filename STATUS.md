@@ -59,6 +59,20 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (3) — v209 broke the stick and camera; fixed
+
+- v209 made ran_fopen call RanPlat_PumpEvents (for loading-screen ANRs). That
+  pump SWALLOWS what it reads (onInputEvent: "if (g_pumpBlocking) return 1"),
+  and in play files open constantly (texture/sound streaming) - stick moves,
+  releases and camera drags were thrown away: kept walking after letting go,
+  camera turns lost. User report: "let go of the joystick, it does not stop".
+- A/B on LDPlayer, 10 x (walk, release, camera drag): v209 -> swallowed events
+  every round, 0/10 camera gestures, 276 stick steps (kept walking); fixed -> 0
+  swallowed, 10/10 camera, 93 steps (stopped at every release). User confirmed.
+- Fix: ran_fopen pumps only when no frame for 1.5 s (RanHang_MsSinceFrame) - a
+  real load, where nothing listens. Swallowed events are now counted in the log.
+- Patch 660 (contains v209) was never uploaded; superseded by this one.
+
 ## 2026-10-06 (2) — Crash round from the new exit info: ANRs, sound set, help tree
 
 - Exit info showed most "killed" are ANR "Input dispatching timed out" (9
