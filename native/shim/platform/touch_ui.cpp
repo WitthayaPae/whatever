@@ -2194,8 +2194,10 @@ enum {
     //  on its frame that folds it away. The plate is the one cell that is not
     //  round art - see the draw below.
     kCellChat,      kCellChatClose, kCellFist,
-    //  Sixth row: the peace / battle (X) button's lit state.
-    kCellFistOn,
+    //  Sixth row: the peace / battle (X) button's lit state, and the skill
+    //  slots' own round bezel (silver set, 2026-10-05) - they borrowed the
+    //  stick's seat before.
+    kCellFistOn,    kCellSlotRing,
 };
 
 bool hudSheet() { return g_hudTex != 0 && g_hudTexW > 1.0f; }
@@ -2299,11 +2301,16 @@ int hudCellFor(int slot, bool on) {
 //  offset (half their difference). Sizing a picture to the SMALLEST of the
 //  four - which is what one number did - left it short of the frame on the
 //  other three sides: the gap between the frame and the icon on both rows.
-const float kFrameWinX  = 0.616f;   //  skillframe.png
-const float kFrameWinY  = 0.561f;
-const float kFrameWinUp = 0.027f;
-const float kSeatWin    = 0.620f;   //  stick_base.png, a circle
-const float kSeatUp     = 0.032f;
+//
+//  The silver set (2026-10-05, tools/icon-art/make-silver-hud.py) is drawn
+//  centred and symmetric. Measured the same way off hud_silver.png, to the
+//  bezel's inner black line: potion frame 0.773-0.781 every way, skill ring
+//  0.859-0.867. The picture stops just inside each.
+const float kFrameWinX  = 0.760f;   //  potion frame (cell 2)
+const float kFrameWinY  = 0.760f;
+const float kFrameWinUp = 0.0f;
+const float kSeatWin    = 0.850f;   //  skill ring (cell 26), a circle
+const float kSeatUp     = 0.0f;
 
 //  Both bezels are drawn at this much of the slot's half-width.
 const float kBezelSize  = 1.62f;
@@ -3315,6 +3322,8 @@ void RanTouch_Render(void) {
         //  holes where buttons should be. At about a third strength the arc
         //  still reads as a row of slots.
         if (!c.filled) {
+            //  The silver set paints empty slots itself (the ring's glass).
+            if (hudSheet()) continue;
             discGrad(c.x, c.y, fr * kRimIn, alpha(kFace, 0.34f), alpha(kFaceE, 0.34f));
             bevel(c.x, c.y, fr * kRimIn, fr, 0.34f);
             for (int k = 0; k < 6; ++k) {
@@ -3384,7 +3393,8 @@ void RanTouch_Render(void) {
 
         //  A mode that is on fills with its own colour and takes a bloom, so
         //  auto-target and PK are readable at the edge of vision instead of
-        //  being two near-identical dark discs.
+        //  being two near-identical dark discs. (Drawn shapes only: the
+        //  silver art carries its own lit state.)
         const bool pk  = (b.slot == kSlotPK);
         const bool loot = (b.slot == kSlotPickup);
         //  A lit page button is amber: it is saying where you ARE, which is
@@ -3400,9 +3410,8 @@ void RanTouch_Render(void) {
         //  pass after the cache is replayed; all that is left here is the
         //  bloom under a lit toggle, which is flat colour and caches happily.
         if (hudSheet() && hudCellFor(b.slot, b.toggled) >= 0) {
-            //  Not under the fist: its lit cell is painted with its own fire,
-            //  and a flat bloom on top washed out half of it.
-            if (b.toggled && b.slot != kSlotFist) bloom(b.centre.x, b.centre.y, R, state, 0.26f);
+            //  No bloom: the silver set's lit cells are the lit state, and a
+            //  coloured glow under see-through glass tinted the whole button.
             continue;
         }
 
@@ -3510,11 +3519,9 @@ void RanTouch_Render(void) {
         const float sa = g_adj[kGrpSkill].alpha;
         for (int i = 0; i < g_skillCircleCount; ++i) {
             const SkillCircle &c = g_skillCircles[i];
-            //  The stick's seat, not the square frame that came with the
-            //  set: these slots are circles, and a square bezel round a round
-            //  icon leaves its corners hanging in the air. The seat is the
-            //  one round bezel in the sheet.
-            drawHudCell(kCellStickBase, c.x, c.y, c.r * 1.62f, sa);
+            //  The slots' own round bezel: glass and a chrome rim, the
+            //  picture laid inside it below.
+            drawHudCell(kCellSlotRing, c.x, c.y, c.r * kBezelSize, sa);
         }
     }
 
@@ -3522,9 +3529,7 @@ void RanTouch_Render(void) {
     if (hudSheet() && g_potCount > 0) {
         const float pa = g_adj[kGrpPotion].alpha;
         for (int i = 0; i < g_potCount; ++i)
-            //  skillframe.png, which had been packed since the set arrived and
-            //  drawn by nothing. A potion picture is square, and the frame is
-            //  the square one in the sheet.
+            //  The square frame (cell 2): a potion picture is square.
             drawHudCell(kCellSkillFrame, g_potX[i], g_potY[i], g_potRad[i] * 1.62f, pa);
         ensureTexProg();
         if (g_texProg) {
@@ -3594,30 +3599,34 @@ void RanTouch_Render(void) {
         Vec2 tc; float tr;
         talkCircle(tc, tr);
         const bool dn = g_talkDown && g_talkPtr >= 0;
-        drawHalo(tc.x, tc.y, tr, rgba(1.0f, 0.85f, 0.45f, dn ? 0.55f : 0.30f), 0.35f);
-        float gy = tc.y;
         if (hudSheet()) {
-            //  A dark seat first, in case the bezel's window is clear.
-            discGrad(tc.x, tc.y - tr * kBezelSize * kSeatUp, tr * kBezelSize * kSeatWin,
-                     rgba(0.18f, 0.14f, 0.09f, 0.92f), rgba(0.07f, 0.05f, 0.03f, 0.92f));
+            //  The silver set paints the whole button - glass, rim and bubble
+            //  (the chat cell). A soft white lift while it is held.
+            if (dn) drawHalo(tc.x, tc.y, tr, rgba(1.0f, 1.0f, 1.0f, 0.35f), 0.35f);
             emit();
-            drawHudCell(kCellStickBase, tc.x, tc.y, tr * kBezelSize, 1.0f);
-            gy = tc.y - tr * kBezelSize * kSeatUp;
-        } else {
+            drawHudCell(kCellChat, tc.x, tc.y, tr * kBezelSize, 1.0f);
+            glUseProgram(g_prog);
+            glBindVertexArray(g_vao);
+            glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
+            glUniform2f(uViewport, (float)g_width, (float)g_height);
+        }
+        float gy = tc.y;
+        if (!hudSheet()) {
+            drawHalo(tc.x, tc.y, tr, rgba(1.0f, 0.85f, 0.45f, dn ? 0.55f : 0.30f), 0.35f);
             discGrad(tc.x, tc.y, tr, rgba(0.16f, 0.13f, 0.09f, 0.90f), rgba(0.06f, 0.05f, 0.04f, 0.90f));
             drawRing(tc.x, tc.y, tr * 0.86f, tr * 0.98f, 0.93f, 0.74f, 0.36f, 0.95f);
+            //  The bubble: a round body, a tail to the lower left, three dots.
+            const Col cb = dn ? rgba(1.0f, 0.92f, 0.62f, 1.0f) : rgba(1.0f, 0.97f, 0.88f, 0.96f);
+            const float bx = tc.x, by = gy - tr * 0.05f, br = tr * 0.40f;
+            discGrad(bx, by, br, cb, cb);
+            const float tail[] = { bx - br * 0.55f, by + br * 0.55f,
+                                   bx - br * 0.95f, by + br * 1.15f,
+                                   bx - br * 0.05f, by + br * 0.85f };
+            drawPoly(tail, 3, cb);
+            const Col cd = rgba(0.22f, 0.16f, 0.08f, 1.0f);
+            for (int k = -1; k <= 1; ++k)
+                discGrad(bx + (float)k * br * 0.42f, by, br * 0.13f, cd, cd);
         }
-        //  The bubble: a round body, a tail to the lower left, three dots.
-        const Col cb = dn ? rgba(1.0f, 0.92f, 0.62f, 1.0f) : rgba(1.0f, 0.97f, 0.88f, 0.96f);
-        const float bx = tc.x, by = gy - tr * 0.05f, br = tr * 0.40f;
-        discGrad(bx, by, br, cb, cb);
-        const float tail[] = { bx - br * 0.55f, by + br * 0.55f,
-                               bx - br * 0.95f, by + br * 1.15f,
-                               bx - br * 0.05f, by + br * 0.85f };
-        drawPoly(tail, 3, cb);
-        const Col cd = rgba(0.22f, 0.16f, 0.08f, 1.0f);
-        for (int k = -1; k <= 1; ++k)
-            discGrad(bx + (float)k * br * 0.42f, by, br * 0.13f, cd, cd);
     }
 
     //  The skill under the thumb: the pad the knob travels in, the knob, and

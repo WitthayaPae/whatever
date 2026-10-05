@@ -40,6 +40,34 @@ If anything here disagrees with another file, this file wins.
   - Verified: login x2, character select x1.27, start into the world.
 - PC client, Emulator and both servers build with 0 errors.
 
+## 2026-10-05 (5) — Silver see-through HUD + classic menu icons
+
+Approved from design/hud_mockup6.png (the user: "perfect", silver not gold, art
+in the style of the game's own GUI, pickup = loot sack).
+- Art: tools/icon-art/silver_art.py (generator) + make-silver-hud.py (packs).
+  `python make-silver-hud.py ../icon-hd/RealESRGAN_x4plus.pth` writes
+  hud_silver.png (27 cells, hud-pack.js order + cell 26 skill ring) and
+  icons_classic.png; `node topdds.js <dds> <png>` for each.
+  - mobile_hud3.dds (NEW file, keyword MOBILE_HUD_SHEET3 in uiinnercfg02.xml,
+    Gui.rcc repacked 108 entries): glass discs (~30% dark), chrome rim like the
+    GUI's tab/OK buttons, white glyphs outlined black. mobile_hud.dds /
+    mobile_hud2.dds untouched so older APKs keep their own art.
+  - mobile_icons.dds rebuilt in place (same cells, no XML change): each menu
+    control's ORIGINAL PC art (read from Gui.rcc.bak_pre_itemsheet XML),
+    upscaled 4x with Real-ESRGAN. Old APKs get the classic icons too.
+- Code (shim touch_ui.cpp, both platforms): skill slots use the new ring
+  (kCellSlotRing) instead of the stick's seat; icon windows re-measured off the
+  art (skill 0.850, potion 0.760, no offset); talk button = the chat cell (no
+  gold halo/vector bubble); no coloured bloom under lit buttons; empty skill
+  slots lose the drawn steel ticks. SOURCE MobileMenuWindow.cpp loads SHEET3.
+- Verified on LDPlayer (launcher skips the file check when local version ==
+  server version, so pushed data survives): stick, attack, 10 slots (2 with
+  skills), F1-F4 with F2 then F1 lit, potion row, fist/bike/pickup, right
+  column, talk button, chat fold plate, classic Q/party, menu grid with 16
+  classic icons. Fist lit after a tap; it did not go back to peace in the
+  school town - same with keyboard X, input untouched.
+- iOS: not run on an iPhone.
+
 ## 2026-10-05 (4) — Enhance cap leak (+9 on a +7 server): v191 "1.1.10", patch 626
 
 - Report: server cap is +7 but players reach +9.
@@ -165,7 +193,7 @@ the new pad icons are "too much", not classic. Players want classic.
        font tier-1 atlas;
      - input inverse-mapped in UpdateList and PointInList;
      - CheckBoundary, AlignMainControl and the edge sweep use the magnified size.
-- [ ] Icons back to classic + RoV-style translucent HUD (2026-10-05: mockup out/hud_mockup.png sent, waiting for approval).
+- [x] Silver see-through HUD + classic icons (2026-10-05, see section (5)).
 
 ## 2026-10-04 (3) — Talk-to-NPC button: v183 "1.1.3", patch 612 (Android + iOS)
 
