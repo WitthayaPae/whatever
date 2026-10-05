@@ -59,6 +59,26 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-05 (15) — Patch failures found; two crash fixes
+
+- patchfail reports: "oversize body" on fresh installs = blob aec1d325... 
+  (textures/gui_hd/k-ran_event.png) was 5.79 GB on the server instead of
+  818,946 B (uploaded 16:25). Full HEAD scan of 22,038 blobs: the only bad one.
+  User re-uploaded; now 818,946. android/RanLegacyM.apk was stale in Cloudflare.
+  Two SocketTimeoutException reports (download stalled 30 s) - watch for more.
+- Crash (vivo V2310, v201): fdsan SIGABRT in CNetClient::CloseConnect from
+  ConnectServer. Every failure path in ConnectServer closed the socket but kept
+  the number (one path even closed -1 and leaked the real one), so the retry's
+  CloseConnect closed it again - by then another file's fd. Fix: forget the
+  handle after each close (s_NetClient.cpp, unguarded - correct on PC too).
+- Crash (Xiaomi v201, realme v197): SIGABRT/SIGSEGV in ALooper_pollOnce from
+  Sleep <- DxStaticMesh::EndThread during exit() after the background grace.
+  Fix: android_main stops pumping (g_loopThreadSet = false) before exit(0).
+  iOS pumps nothing (no change). LDPlayer bggrace30: closed with no signal (the
+  crash was not reproduced before the fix either).
+- Crash (Samsung SM-N9860, Android 9 x86_64): run from build 10-04 21:22, before
+  the memmove fix (567e14c) - already fixed.
+
 ## 2026-10-05 (14) — Patch-page failures are reported to the crash list
 
 - Report: some phones sit on "เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้ (Exception)". A bare

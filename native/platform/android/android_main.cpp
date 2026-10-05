@@ -1026,6 +1026,12 @@ extern "C" void android_main(android_app *app) {
             if (nowMsMonotonic() - g_bgSinceMs > s_grace) {
                 LOGI("background grace over - closing");
                 RanCrash_CleanExit();
+                //  exit() runs the static destructors, and some wait on their
+                //  worker threads with Sleep - which pumps this looper while
+                //  it is being torn down (crash reports 2026-10-05: SIGABRT /
+                //  SIGSEGV in ALooper_pollOnce from DxStaticMesh::EndThread).
+                //  Nothing is pumped from here on.
+                g_loopThreadSet = false;
                 exit(0);
             }
         }
