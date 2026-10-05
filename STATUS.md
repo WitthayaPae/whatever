@@ -40,6 +40,19 @@ If anything here disagrees with another file, this file wins.
   - Verified: login x2, character select x1.27, start into the world.
 - PC client, Emulator and both servers build with 0 errors.
 
+## 2026-10-05 (8) — Joystick walked back and forth on bridges / overpasses
+
+- Cause: the stick's ground rays ran from 600 above the target point, and
+  NavigationMesh::IsCollision returns the hit nearest the ray START - so where
+  floors are stacked it picked the upper one, ActionMoveTo routed there, and
+  the character turned round; the next step picked the right floor again.
+- Fix (SOURCE DxGameStage.cpp, MobileFloorNear): every floor under the point,
+  top down, and the one nearest the character's height wins - for "here" and
+  for each candidate; ActionMoveTo gets a +-5 window round the chosen floor.
+  Diag `sticklog` logs each step (RanStick: pos, try, chosen floor y, cells).
+- Verified by the user on LDPlayer on the ศูนย์การค้า ramp/bridge: "look good".
+  iOS: same code, not run on an iPhone.
+
 ## 2026-10-05 (7) — Auto-hunt (the PC F5 bot) on mobile, 4 h/day per account
 
 The bot is the PC client's own AutoPilot (FrameMoveBot), unchanged - same
