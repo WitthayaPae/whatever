@@ -48,11 +48,15 @@ If anything here disagrees with another file, this file wins.
     drop.
   - Text is ENHANCE_TOP_SUCCESS in servertext.xml ("[ตีบวก] ยินดีด้วย! %s ตีบวก
     %s สำเร็จเป็น +%d"). Silent if the key is missing.
-  - The user must deploy ServerField.exe (_Bin/Tool, 02:19) and servertext.xml.
+  - servertext.xml is read from Gui.rcc (server and client), so Gui.rcc was
+    repacked (108 entries, verified with RccArchive; backup in scratchpad).
+    Deploy ServerField.exe + ServerAgent.exe (_Bin/Tool, 07:14) and
+    CLIENT/data/gui/Gui.rcc to the server.
+  - Cap: default.charclass says wGRADE_MAX 7 and the user confirms the live
+    cap is +7. The loader floors wGRADE_MAX at GRADE_HIGH (9), so the notice
+    now uses wGRADE_MAX_SET (the value as configured) and fires at +6/+7 (and
+    anything higher). SOURCE 4bb9e2f.
   - Not tested live (needs the new server).
-  - FINDING: default.charclass says wGRADE_MAX 7, but GLogicDataLoad.cpp:138
-    raises anything below GRADE_HIGH (9) to 9, so the real cap is +9 (rate
-    +7->+8 = 80%). Asked the user.
 - **Background grace** (both platforms, 10 minutes):
   - Android: the connection already survives the background (the net thread
     answers the heartbeat). Added kBackgroundGraceMs: the looper wakes each
