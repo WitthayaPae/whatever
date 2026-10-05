@@ -986,6 +986,30 @@ public class RanLauncher extends Activity {
     /*  From the bucket first; a blob it does not have (not uploaded yet) or
      *  serves wrong comes from the store, which has every one.                 */
     private void downloadOne(File rootDir, String blobBase, String[] t) throws Exception {
+        /*  Three tries per file before the whole update gives up (2026-10-05).
+         *  On mobile data one of the eight connections stalls now and then
+         *  (SocketTimeoutException, "unexpected end of stream", connection
+         *  reset - six crash-list reports in a day, every file on the server
+         *  correct). One stall used to stop all eight and put the player on the
+         *  "cannot reach the update server" countdown. A retry resumes from the
+         *  bytes already on disk. iOS: ran_ios_patch.mm DownloadOne, the same. */
+        Exception last = null;
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            if (attempt > 0) {
+                Log.w(TAG, "retry " + attempt + " for " + t[0] + " after " + last);
+                sleep(2000L * attempt);
+            }
+            try {
+                downloadOneOnce(rootDir, blobBase, t);
+                return;
+            } catch (Exception e) {
+                last = e;
+            }
+        }
+        throw last;
+    }
+
+    private void downloadOneOnce(File rootDir, String blobBase, String[] t) throws Exception {
         try {
             downloadOneFrom(rootDir, blobBase, t);
         } catch (Exception e) {

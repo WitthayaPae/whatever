@@ -417,11 +417,30 @@ static NSString *DownloadOneFrom ( NSString *root, NSString *blobBase, NSArray *
 
 //  From the bucket first; a blob it does not have (not uploaded yet) or serves
 //  wrong comes from the store, which has every one.
-static NSString *DownloadOne ( NSString *root, NSString *blobBase, NSString *storeBase, NSArray *t )
+static NSString *DownloadOneOnce ( NSString *root, NSString *blobBase, NSString *storeBase, NSArray *t )
 {
     NSString *fe = DownloadOneFrom ( root, blobBase, t );
     if (fe && ![blobBase isEqualToString:storeBase])
         fe = DownloadOneFrom ( root, storeBase, t );
+    return fe;
+}
+
+//  Three tries per file before the whole update gives up (2026-10-05): on
+//  mobile data one connection stalls now and then, and one stall used to stop
+//  every download and put the player on the "cannot reach the update server"
+//  countdown. Same as RanLauncher.downloadOne on Android: 2 s, then 4 s.
+static NSString *DownloadOne ( NSString *root, NSString *blobBase, NSString *storeBase, NSArray *t )
+{
+    NSString *fe = nil;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        if (attempt > 0) {
+            RanPlat_Log ( RANLOG_WARN, "RanPatch", "retry %d for %s after %s",
+                          attempt, [t[0] description].UTF8String, fe.UTF8String );
+            [NSThread sleepForTimeInterval:2.0 * attempt];
+        }
+        fe = DownloadOneOnce ( root, blobBase, storeBase, t );
+        if (!fe) return nil;
+    }
     return fe;
 }
 

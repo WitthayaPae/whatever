@@ -59,6 +59,21 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-05 (17) — Per-file download retry in the launcher
+
+- Six patchfail reports today were network drops mid-download (SocketTimeout,
+  connection reset, unexpected end of stream); all 150 large blobs are
+  Cloudflare HITs (~0.04 s to first byte) and every blob hashes right. One
+  stalled connection out of eight stopped the whole update and put the player
+  on the countdown; iOS also restarted that file from zero.
+- RanLauncher.downloadOne / ran_ios_patch.mm DownloadOne: three tries per file,
+  2 s then 4 s apart, before the update gives up (Android resumes the bytes
+  already on disk).
+- LDPlayer: deleted mobile_icons.dds and set .patchver 649 - re-downloaded,
+  2,097,280 B, version 650. The retry itself was not exercised (no way to stall
+  the emulator's network without changing its settings).
+- Patch 650 upload verified by hash (all files ok).
+
 ## 2026-10-05 (16) — Texture deletes off the context thread (map-change crash)
 
 - Crash (OPPO CPH2483, v201): SIGSEGV in RanGLR_DeleteTexture erasing
