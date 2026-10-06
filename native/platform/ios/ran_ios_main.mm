@@ -834,6 +834,19 @@ static NSString *RanPatchReasonCode ( NSString *error )
                                                  range:NSMakeRange ( 0, error.length )];
     if (m) return [@"HTTP " stringByAppendingString:[error substringWithRange:[m rangeAtIndex:1]]];
     NSString *lower = error.lowercaseString;
+    //  Out of storage (POSIX ENOSPC, or Cocoa's "isn't enough space"): its own
+    //  page, not "check the internet" - see -countdown:reason:.
+    if ([lower containsString:@"no space left"] || [lower containsString:@"enough space"] ||
+        [lower containsString:@"enospc"])                                  return @"SPACE";
+    //  The patcher's own "cannot create / write / replace" carries no reason;
+    //  on a nearly full volume that is the reason.
+    if ([lower containsString:@"cannot write"] || [lower containsString:@"cannot create"] ||
+        [lower containsString:@"cannot replace"]) {
+        NSString *root = [@(RanIOS_DataRoot()) stringByStandardizingPath];
+        NSNumber *free = [[NSFileManager.defaultManager attributesOfFileSystemForPath:root error:NULL]
+                             objectForKey:NSFileSystemFreeSize];
+        if (free && free.longLongValue < (64LL << 20))                     return @"SPACE";
+    }
     if ([lower containsString:@"older than the installed"])                return @"OLD";
     if ([lower containsString:@"signature"])                               return @"SIG";
     if ([lower containsString:@"checksum"] || [lower containsString:@"hash"]) return @"SHA";
@@ -1164,9 +1177,22 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
         [self attempt];
         return;
     }
-    self.status.text = @"เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้";
-    self.detail.text = [NSString stringWithFormat:
-        @"จะลองใหม่ใน %d วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (%@)", left, why];
+    if ([why isEqualToString:@"SPACE"]) {
+        //  A full phone said "check the internet" (2026-10-06, ENOSPC on a vivo
+        //  V2130). Same strings as RanLauncher; it keeps retrying, so freeing
+        //  space is all it takes.
+        NSString *root = [@(RanIOS_DataRoot()) stringByStandardizingPath];
+        NSNumber *free = [[NSFileManager.defaultManager attributesOfFileSystemForPath:root error:NULL]
+                             objectForKey:NSFileSystemFreeSize];
+        self.status.text = @"พื้นที่ในเครื่องเต็ม";
+        self.detail.text = [NSString stringWithFormat:
+            @"กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน %d วินาที%@", left,
+            free ? [NSString stringWithFormat:@"  (ว่าง %.1f MB)", free.doubleValue / 1048576.0] : @""];
+    } else {
+        self.status.text = @"เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้";
+        self.detail.text = [NSString stringWithFormat:
+            @"จะลองใหม่ใน %d วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (%@)", left, why];
+    }
     self.bar.permille = -1;
     __weak RanPatchViewController *weakSelf = self;
     dispatch_after ( dispatch_time ( DISPATCH_TIME_NOW, NSEC_PER_SEC ),

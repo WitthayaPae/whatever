@@ -59,6 +59,25 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (11) — Patch page: a full phone said "check the internet"
+
+- Reports after 677: three patchfail from one vivo V2130 on a fresh install,
+  ENOSPC with 0.0 MB free. Not a patch fault - but the page read "cannot
+  reach the update server, check the internet (IOException /
+  ErrnoException)", so the player had no way to know.
+- Android (RanLauncher): isNoSpace() walks the cause chain for ENOSPC / "No
+  space left"; the retry countdown then reads "พื้นที่ในเครื่องเต็ม" /
+  "กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน N วินาที (ว่าง X MB)" and keeps
+  retrying. Diag file diag_nospace in the data root fakes the failure.
+- iOS (ran_ios_main.mm): RanPatchReasonCode returns SPACE for "no space
+  left" / "enough space" / ENOSPC, or for the patcher's own cannot
+  create/write/replace when the volume has < 64 MB free; -countdown shows
+  the same two lines with NSFileSystemFreeSize.
+- Verified LDPlayer: diag_nospace -> the new page (screenshot); file removed
+  -> next retry patched to 677 and the game booted. The test sent one fake
+  patchfail report (OnePlus PHB110). iOS page not run on an iPhone.
+- The two "killed" reports in the same batch are LDPlayer (my reinstalls).
+
 ## 2026-10-06 (10) — Auto bot cast skills from out of range (no damage)
 
 - Report: the bot walks to the target and casts at max range; no damage.

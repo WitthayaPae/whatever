@@ -540,6 +540,11 @@ public class RanLauncher extends Activity {
                  *  second now waits for the first and finds the work done.     */
                 synchronized (PATCH_LOCK) {
                     adoptPrivateRoot();
+                    /*  Diagnostic: the full-phone failure on demand (a vivo
+                     *  V2130's ENOSPC), to see its page without filling a disk.
+                     *  Gone when the file is.                                */
+                    if (new File(ROOT, "diag_nospace").exists())
+                        throw new java.io.IOException("write failed: ENOSPC (No space left on device)");
                     patch();
                 }
                 break;
@@ -556,9 +561,23 @@ public class RanLauncher extends Activity {
                 if (mFatal) return;            //  fail() has already spoken
                 final String why = reasonCode(t);
                 reportPatchFailure(t, why);
+                /*  A full phone said "cannot reach the update server, check the
+                 *  internet" (2026-10-06, vivo V2130: ENOSPC, 0.0 MB free, three
+                 *  reports and a player who gave up). It names the real problem
+                 *  now and keeps retrying, so freeing space is all it takes.
+                 *  iOS: RanPatchViewController countdown, same strings.       */
+                final boolean noSpace = isNoSpace(t);
                 for (int left = wait; left > 0; --left) {
-                    say("เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้",
-                        "จะลองใหม่ใน " + left + " วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (" + why + ")", -1);
+                    if (noSpace) {
+                        long free = -1;
+                        try { free = new File(ROOT).getUsableSpace(); } catch (Throwable e) { /* unknown */ }
+                        say("พื้นที่ในเครื่องเต็ม",
+                            "กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน " + left + " วินาที"
+                            + (free >= 0 ? "  (ว่าง " + mb(free) + ")" : ""), -1);
+                    } else {
+                        say("เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้",
+                            "จะลองใหม่ใน " + left + " วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (" + why + ")", -1);
+                    }
                     sleep(1000);
                 }
                 say("กำลังเชื่อมต่ออีกครั้ง", null, -1);
@@ -1249,6 +1268,15 @@ public class RanLauncher extends Activity {
             c = c.getCause();
         }
         return sb.toString();
+    }
+
+    /*  Out of storage, anywhere in the cause chain (ENOSPC / "No space left"). */
+    private static boolean isNoSpace(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            String m = c.getMessage();
+            if (m != null && (m.contains("ENOSPC") || m.contains("No space left"))) return true;
+        }
+        return false;
     }
 
     private static String ownCode(String msg) {
