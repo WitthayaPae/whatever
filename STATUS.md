@@ -59,6 +59,35 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (12) — 59 EP1 quests ported into EP9 (converted, all verified)
+
+- Missing = EP1 quest.lst entries whose id and file EP9 does not have: 59 (EP1
+  lists 688, EP9 629; the 629 match EP1 exactly in id+file, 627 byte-identical;
+  no id or name clashes). EP1's 252 unlisted .qst are not loaded even in EP1 -
+  left out.
+- All 59 are GLQUEST 0x0202, and EP9 changed 0x0202's layout without a new
+  number: m_sAttendanceOption after the start options, two bools after
+  m_dwLimitTime, and SITEMCUSTOM grew 72 -> 80 bytes (isBoxLock, sSkillLinkID)
+  - quest and step rewards are raw SITEMCUSTOM records. Read as-is, the first
+  one (00001S, id 0) made GLQUEST_STEP read a count of 0x3fffffff (RanAlloc).
+- Converter (scratchpad qconv2.py; logic in this entry): inserts the attendance
+  block exactly as EP9's editor saves a default one (A0030/00015B), bools 0,
+  items upgraded like SITEMCUSTOM::Assign (isBoxLock true, sSkillLinkID NULL);
+  walks every input to its last byte under EP1 rules and every output under
+  EP9 rules. The EP9 model was first proven on 899 original EP9 0x0202 quests
+  (questEo9Bak) with 1,139 reward items - all to the last byte.
+- Verified with EP9's own loader on LDPlayer (temporary questcheck diag that
+  force-loaded every quest and logged bytes left / over-read): 688 / 688 read
+  exactly to the end, incl. all 59; game booted. Diag code removed.
+- Installed: CLIENT/data/glogic/quest (+59 .qst, quest.lst 688 lines,
+  Quest.rcc 896 entries) and Ran/data/glogic/quest/Quest.rcc. Backup:
+  CLIENT/data/glogic/quest_backup_before_ep1port_261006. 00015B.qst inside
+  Quest.rcc left as it was (the loose one is the user's newer edit).
+- SERVER: the field/agent servers load quests from their own
+  data/glogic/quest - they need the same 59 files + quest.lst.
+- Not checked: whether the NPC dialogs (npctalk) that offer these quests
+  exist in EP9, and whether every item/NPC/map id they reference exists.
+
 ## 2026-10-06 (11) — Patch page: a full phone said "check the internet"
 
 - Reports after 677: three patchfail from one vivo V2130 on a fresh install,
