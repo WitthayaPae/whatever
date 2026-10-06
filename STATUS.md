@@ -124,6 +124,21 @@ If anything here disagrees with another file, this file wins.
       * HP labels lost rows: the saved layout had the HP at 90%; game windows
         are grow-only now (100-160%), older 90% loads as 100%. At exactly
         100% the scale walk no longer runs.
+- [x] 2026-10-07 round 3 - chat input finished (user: "not aligned, button
+      over the box, no GM, no # $ % in the line"). Measured rects: input row
+      only 19 units for a 19-unit line; back hung to y705 (chat 697); edit
+      kept its protected 410 width past the chat's right edge. Now
+      CBasicChatRightBody::MobileLayoutInputRow (authored units, at create):
+      tab row up G=6, message area shorter by G, input row 23 tall inside
+      the chat, box after the channel button, A button centred; protect set
+      after the resize. Channel is STATE (m_nMobileChannel): the line shows
+      only words in the channel colour, the symbol is added on send, no mode
+      lines; deleting the text keeps the channel; whisper prefills the last
+      name. GM ('&', dxincommand global, USER_MASTER) in the list for Masters.
+      Verified on LDPlayer: alignment, long text, GM shown, party picked,
+      delete-all keeps party, send -> "[admin]:hi" in party colour (Enter
+      tapped via a temporary diag: LDPlayer's pinyin IME eats adb Enter).
+      Patch 225 in out/upload is OBSOLETE (built before this) - do not upload.
 
 ## 2026-10-06 (13) — Five user reports: vehicle buffs, sell price, white mob, bot HP, potion count
 
