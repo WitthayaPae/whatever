@@ -59,6 +59,22 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (10) — Auto bot cast skills from out of range (no damage)
+
+- Report: the bot walks to the target and casts at max range; no damage.
+- Cause: BotSkillReaction walked to targetBody + myBody + skillRange + 2 and
+  cast from up to +4. The server applies the hit only within myBody +
+  skillRange + applyRange + 20 of the caster (GLChar.cpp ~4555) - the
+  target's body is not in it - so against any mob with body radius above
+  ~16 the hit was dropped. A tapped skill (SkillReaction) stops 15 inside
+  the reach and casts within reach-13, which is why manual play hits.
+- Fix (GLCharacter.cpp, BotSkillReaction, TAR_SPEC / TAR_SELF_TOSPEC): the
+  same approach distance as SkillReaction, with an unsigned-wrap guard.
+  Only the bot's approach distance changes.
+- Verified LDPlayer x86_64, test01, PHX: bot started, buffed, killed a
+  Little Vulgarian (drops on the ground, MP 63 -> 49). No old-build A/B run.
+  iOS: shared SOURCE, not run on an iPhone.
+
 ## 2026-10-06 (9) — Crash: weapon/effect trail overflowed the dynamic VB
 
 - Two reports on patch 673 (Xiaomi 25078RA3EA), identical: SIGSEGV code 2 in
