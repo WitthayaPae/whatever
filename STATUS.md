@@ -59,6 +59,27 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (8) — Crash: gate OK below the map's level requirement
+
+- Crash report (patch 671, Xiaomi 25078RA3EA): SIGSEGV fault addr 0x19 in
+  vsnprintf <- PrintMsgTextDlg <- GLCharacter::ReqGateOut. The gate's
+  "level required" line passed (level, sign) unless emSERVICE_TYPE ==
+  THAILAND - and no build defines TH_PARAM - into the shipped text
+  "%s '%d'", so level 25 (0x19) was read as a string. EMREQUIRE_LIVING and
+  _BRIGHT had the same mismatch (their texts have a single %s); _SCHOOL
+  passed a std::string object through "...". PC had the same bug.
+- Fix (GLCharactorReq.cpp, all three copies): ReqPrintSignValue reads the
+  text's conversions and passes the arguments in that order ("ds", "sd",
+  "d", or one "%s" given "N sign"); _SCHOOL passes .c_str(). A text that
+  already matched its call prints exactly as before.
+- Verified: the helper's parser compiled from the patched source, run on
+  LDPlayer against the shipped gameintext.xml texts: LEVEL -> "ต้องมีเลเวล UP
+  '25' ...", LIVING/BRIGHT print "25 UP", edge cases (%%, trailing %, no
+  conversions, old "%d %s" order) correct. Not reproduced in game (needs a
+  gate above test01's level 150). iOS: shared SOURCE, not run on an iPhone.
+- Also on the list, not changed: vivo V2310 ANR during the first item-data
+  load at boot (known loading-freeze issue).
+
 ## 2026-10-06 (7) — Bag: drop question on the doll; tiny carried icon
 
 - "Drag and drop in the equipment, it asks should I drop the item" - the doll
