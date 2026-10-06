@@ -1729,7 +1729,11 @@ int RanTouch_PointerDown(int id, float x, float y) {
                     editEnd();
                     break;
                 case kToolReset:  editDefaultsAll(); break;
-                case kToolSizeDn: if (pScale) { *pScale -= 0.1f; if (*pScale < 0.6f) *pScale = 0.6f; } break;
+                case kToolSizeDn: if (pScale) {
+                    //  A game window only grows: its art is pixel art, and below
+                    //  100% rows of it drop out (the HP labels at 90%, 2026-10-07).
+                    const float fMin = (g_editSel == kGrpWin) ? 1.0f : 0.6f;
+                    *pScale -= 0.1f; if (*pScale < fMin) *pScale = fMin; } break;
                 case kToolSizeUp: if (pScale) { *pScale += 0.1f; if (*pScale > 1.6f) *pScale = 1.6f; } break;
                 case kToolAlphaDn: if (a) { a->alpha -= 0.1f; if (a->alpha < 0.2f) a->alpha = 0.2f; } break;
                 case kToolAlphaUp: if (a) { a->alpha += 0.1f; if (a->alpha > 1.0f) a->alpha = 1.0f; } break;
@@ -4287,7 +4291,8 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (r + 2 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; }
             if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
             if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
-            if (!(sc >= 0.6f && sc <= 1.6f))  sc = 1.0f;
+            //  Grow-only (see kToolSizeDn): an older layout's 90% loads as 100%.
+            if (!(sc >= 1.0f && sc <= 1.6f))  sc = 1.0f;
             g_winAdj[i].dx = dx; g_winAdj[i].dy = dy; g_winAdj[i].scale = sc;
         }
     }

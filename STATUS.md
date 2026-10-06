@@ -104,6 +104,26 @@ If anything here disagrees with another file, this file wins.
       12-unit strip: strip + back grow 6 units. Minimap is heading-up (map
       turns with the camera, arrow points up, party marks turned to match).
       Editor toolbar now starts a third of the way down. All on LDPlayer.
+- [x] 2026-10-07 round 2 (user, all measured on LDPlayer):
+      * Typed chat text out of the box: font line 19 units vs 18-unit box,
+        text drawn from the box top (logged). Strip sized from the measured
+        line + 4, text and caret centred (CUIEditBox::MobileCenterLine),
+        chat lifted by what hangs below it. Long text + descenders inside.
+      * Channel picker is now one button at the front of the input line
+        (always shown with the chat) that opens the channels upward; a pick
+        starts typing in that channel. The chat (focus list) took every
+        press before the top list - CUIMan::MobileKeepFront keeps the button
+        ahead of it without taking focus. Duplicate "mode" line: the type
+        watch now sees the new type (CLASSIFY_CHATTYPE after BEGIN_*).
+      * HP section no longer drags outside the editor (CBasicInfoView drag
+        off on mobile); the level box only moved because it rides the HP.
+      * Editor outlines only what draws (empty buff row / quest helper were
+        the unlabelled boxes). Minimap + clock removed from the editor; top
+        right movable: Q-box, party icon, bonus time - bonus hangs from the
+        icons' default spots now, its own slot (verified: party drag leaves it).
+      * HP labels lost rows: the saved layout had the HP at 90%; game windows
+        are grow-only now (100-160%), older 90% loads as 100%. At exactly
+        100% the scale walk no longer runs.
 
 ## 2026-10-06 (13) — Five user reports: vehicle buffs, sell price, white mob, bot HP, potion count
 
