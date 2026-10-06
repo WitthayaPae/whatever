@@ -76,6 +76,12 @@ If anything here disagrees with another file, this file wins.
   RanBlur lines). NOT verified: the runaway itself (mob unknown). iOS:
   shared SOURCE, not run on an iPhone.
 - Same phone's other report (patch 671 run) is the gate crash fixed in 673.
+- Open, watching (reports read 15:40): OPPO CPH2625 (Mali) ANR on patch 673
+  at 27 min in play, rss 1.3 GB - the game thread sat 4 s+ in
+  eglSwapBuffers -> BufferQueueProducer::dequeueBuffer (libGLES_mali), i.e.
+  the GPU did not return a buffer; ~5 s after a tap that opened window 19
+  (x2 magnify). One report - not enough to name a cause, nothing changed.
+  The Xiaomi blur crash recurred on 673 (3 min in) before it updated to 675.
 
 ## 2026-10-06 (8) — Crash: gate OK below the map's level requirement
 
