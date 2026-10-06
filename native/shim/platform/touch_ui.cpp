@@ -139,7 +139,11 @@ SlotAdj g_pageAdj[kPageMax];
 //  The quest box and the small party frame sit side by side and the player
 //  reaches for them separately, so each carries its own offset and its own
 //  size - like a skill slot, not like the page arrows.
-const int kCornerMax = 4;
+//  Eight since 2026-10-07 (the bag, the item mall and the web items joined the
+//  quest box and the party icon). The first four are saved where they always
+//  were; the rest are appended at the end of the saved arrangement.
+const int kCornerMax = 8;
+const int kCornerSaved = 4;
 struct CornerBox { float x, y, r; bool has; };
 CornerBox g_cornerBox[kCornerMax] = { };
 int       g_cornerCount = 0;
@@ -4192,11 +4196,12 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     //  written, the client's 134-float buffer was refused, and no arrangement
     //  saved from 2026-10-05 until this was found (2026-10-06).
     const int n = kGrpLegacy * 4
-                + (RANTOUCH_MAX_SKILL_CIRCLES + kPotMax + kCornerMax) * 3
+                + (RANTOUCH_MAX_SKILL_CIRCLES + kPotMax + kCornerSaved) * 3
                 + (kGrpPreBot - kGrpLegacy) * 4
                 + kPageMax * 3                          //  F1-F4, appended 2026-10-05
                 + (kGrpCount - kGrpPreBot) * 4          //  auto-hunt button, appended 2026-10-05
-                + kWinMax * 3;                          //  HUD windows, appended 2026-10-06
+                + kWinMax * 3                           //  HUD windows, appended 2026-10-06
+                + (kCornerMax - kCornerSaved) * 3;      //  corner icons 5-8, appended 2026-10-07
     if (!out || max < n) return n;
     for (int i = 0; i < kGrpLegacy; ++i) {
         out[i * 4]     = g_adj[i].dx;    out[i * 4 + 1] = g_adj[i].dy;
@@ -4206,7 +4211,7 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     #define PUT(A, N) for (int i = 0; i < (N); ++i) {         out[w++] = (A)[i].dx; out[w++] = (A)[i].dy; out[w++] = (A)[i].scale; }
     PUT(g_slotAdj,   RANTOUCH_MAX_SKILL_CIRCLES)
     PUT(g_potAdj,    kPotMax)
-    PUT(g_cornerAdj, kCornerMax)
+    PUT(g_cornerAdj, kCornerSaved)
     #undef PUT
     for (int i = kGrpLegacy; i < kGrpPreBot; ++i) {
         out[w++] = g_adj[i].dx;    out[w++] = g_adj[i].dy;
@@ -4221,6 +4226,9 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     }
     for (int i = 0; i < kWinMax; ++i) {
         out[w++] = g_winAdj[i].dx; out[w++] = g_winAdj[i].dy; out[w++] = g_winAdj[i].scale;
+    }
+    for (int i = kCornerSaved; i < kCornerMax; ++i) {
+        out[w++] = g_cornerAdj[i].dx; out[w++] = g_cornerAdj[i].dy; out[w++] = g_cornerAdj[i].scale;
     }
     return n;
 }
@@ -4250,7 +4258,7 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
         #define TAKE(A, N) for (int i = 0; i < (N); ++i) {             if (r + 2 >= n) break;             float dx = in[r++], dy = in[r++], sc = in[r++];             if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;             if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;             if (!(sc >= 0.6f && sc <= 1.6f))  sc = 1.0f;             (A)[i].dx = dx; (A)[i].dy = dy; (A)[i].scale = sc; }
         TAKE(g_slotAdj,   RANTOUCH_MAX_SKILL_CIRCLES)
         TAKE(g_potAdj,    kPotMax)
-        TAKE(g_cornerAdj, kCornerMax)
+        TAKE(g_cornerAdj, kCornerSaved)
         #undef TAKE
         //  The groups added after the slots. A file written before them ends
         //  here, or carries zeros (the client's array is zero-filled); either
@@ -4294,6 +4302,15 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             //  Grow-only (see kToolSizeDn): an older layout's 90% loads as 100%.
             if (!(sc >= 1.0f && sc <= 1.6f))  sc = 1.0f;
             g_winAdj[i].dx = dx; g_winAdj[i].dy = dy; g_winAdj[i].scale = sc;
+        }
+        //  Corner icons 5-8. Older files stop before them.
+        for (int i = kCornerSaved; i < kCornerMax; ++i) {
+            float dx = 0.0f, dy = 0.0f, sc = 1.0f;
+            if (r + 2 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; }
+            if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
+            if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
+            if (!(sc >= 0.6f && sc <= 1.6f))  sc = 1.0f;
+            g_cornerAdj[i].dx = dx; g_cornerAdj[i].dy = dy; g_cornerAdj[i].scale = sc;
         }
     }
     if (g_inited) layout();
