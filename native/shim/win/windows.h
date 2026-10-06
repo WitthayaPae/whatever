@@ -783,7 +783,15 @@ typedef struct tagBITMAPINFOHEADER {
     DWORD biClrUsed, biClrImportant;
 } BITMAPINFOHEADER, *LPBITMAPINFOHEADER;
 typedef struct tagBITMAPINFO { BITMAPINFOHEADER bmiHeader; RGBQUAD bmiColors[1]; } BITMAPINFO, *LPBITMAPINFO;
+//  Packed to 2 as in wingdi.h: it is read straight out of .bmp files, which
+//  store it as 14 bytes. Natural alignment made it 16, every field after
+//  bfType came from the wrong bytes, and DxClubMan::LoadBMPFile rejected the
+//  default club mark - leaking its FILE each time, once per frame, until the
+//  process ran out of descriptors and every open failed (2026-10-06).
+#pragma pack(push, 2)
 typedef struct tagBITMAPFILEHEADER { WORD bfType; DWORD bfSize; WORD bfReserved1, bfReserved2; DWORD bfOffBits; } BITMAPFILEHEADER;
+#pragma pack(pop)
+static_assert(sizeof(BITMAPFILEHEADER) == 14, "BITMAPFILEHEADER must match the 14-byte file layout");
 struct IStream : public IUnknown {
     virtual HRESULT Read(void *, ULONG, ULONG *) = 0;
     virtual HRESULT Write(const void *, ULONG, ULONG *) = 0;

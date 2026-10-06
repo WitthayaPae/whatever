@@ -1117,7 +1117,59 @@ static int64_t RanMonoMs ()
     return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-extern "C" void RanHang_Frame ( void ) { ++g_hangTick; g_lastFrameMs = RanMonoMs (); }
+//  Open file descriptors, counted once a minute; when there are many, the
+//  paths holding most of them. A leak shows up nowhere else: the process runs
+//  on until an open fails, and then whatever needed that file quietly does
+//  nothing (2026-10-06: FDSize 32768, the gate's level file "not found").
+static void RanFd_Census ( void )
+{
+#if defined(__ANDROID__)
+    DIR *d = opendir ( "/proc/self/fd" );
+    if ( !d ) return;
+    struct Top { char path[96]; int n; } top[48];
+    int nTop = 0, nAll = 0;
+    const bool bDetail = true;
+    struct dirent *e;
+    while ( ( e = readdir ( d ) ) != NULL )
+    {
+        if ( e->d_name[0] == '.' ) continue;
+        ++nAll;
+        if ( !bDetail ) continue;
+        char lnk[64], tgt[96];
+        snprintf ( lnk, sizeof lnk, "/proc/self/fd/%s", e->d_name );
+        const ssize_t k = readlink ( lnk, tgt, sizeof tgt - 1 );
+        if ( k <= 0 ) continue;
+        tgt[k] = 0;
+        //  Group by kind: "socket:[123]" / "pipe:[456]" / "/dev/dri/.." each
+        //  name one object, so a leak of them never repeats a path.
+        if ( char *b = strchr ( tgt, '[' ) ) *b = 0;
+        else if ( tgt[0] == '/' && strncmp ( tgt, "/dev/", 5 ) )
+        {   //  a file: its folder, so many different files in one place add up
+            if ( char *sl = strrchr ( tgt, '/' ) ) if ( sl != tgt ) sl[1] = 0;
+        }
+        int i = 0;
+        for ( ; i < nTop; ++i ) if ( !strcmp ( top[i].path, tgt ) ) { ++top[i].n; break; }
+        if ( i == nTop && nTop < 48 ) { strcpy ( top[nTop].path, tgt ); top[nTop].n = 1; ++nTop; }
+    }
+    closedir ( d );
+    static int s_last = 0;
+    if ( nAll > 300 || nAll > s_last + 50 || nAll < s_last - 50 )
+    {
+        char line[900]; int o = snprintf ( line, sizeof line, "open fds %d:", nAll );
+        for ( int i = 0; i < nTop && o < (int) sizeof line - 120; ++i )
+            if ( top[i].n > 2 ) o += snprintf ( line + o, sizeof line - o, " %dx %s", top[i].n, top[i].path );
+        RanPlat_Log ( RANLOG_INFO, "RanFd", "%s", line );
+    }
+    s_last = nAll;
+#endif
+}
+
+extern "C" void RanHang_Frame ( void )
+{
+    ++g_hangTick; g_lastFrameMs = RanMonoMs ();
+    static int64_t s_fdNext = 0;
+    if ( g_lastFrameMs >= s_fdNext ) { s_fdNext = g_lastFrameMs + 60000; RanFd_Census (); }
+}
 
 //  How long since the game thread last started a frame (0 before the first).
 extern "C" int RanHang_MsSinceFrame ( void )

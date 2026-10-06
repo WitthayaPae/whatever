@@ -59,6 +59,30 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (6) — File-descriptor leak: gate OK did nothing after ~10 min
+
+- Report: "I can not teleport, I click ตกลง nothing happen" (test01, after
+  fighting). Not auto-target. ReqGateOut ran and returned at the level file:
+  `file not found by GLLevelFile::LoadFile: w_tradezone1.lev` - the file is in
+  Level.rcc; the OPEN failed. /proc/<pid>/status: FDSize 32768.
+- Census (new, RanFd in RanHang_Frame, once a minute, logs on change):
+  117 -> 1,297 -> 4,608 fds per minute, all in textures/club/; open trace:
+  Club_NoMark.bmp opened ~120x/s.
+- Cause: shim BITMAPFILEHEADER was naturally aligned (16 bytes, Windows packs
+  it to 14), so DxClubMan::LoadBMPFile misread the header and took an early
+  `return FALSE` that skipped fclose. The default club mark never registered,
+  so GetClubData retried every frame with a guild member on screen: one leaked
+  FILE per frame, out of descriptors in ~8-10 min, then EVERY open fails
+  (gate level files, textures, sounds, maps). iOS (limit 256) would hit it
+  within seconds.
+- Fix: `#pragma pack(push,2)` + static_assert(14) on BITMAPFILEHEADER
+  (shim/win/windows.h, both platforms); fclose on that early return
+  (DxClubMan.cpp, all builds); a RanGate error line when the gate's level file
+  will not open (was silent).
+- Verified LDPlayer x86_64, test01: FDSize 128 after ~25 min with play, zero
+  opens in a 3 s trace (was 242 in 2 s), PHX market gate OK teleports.
+  iOS: same shared code, not run on an iPhone.
+
 ## 2026-10-06 (5) — Auto-target always on; crosshair = target lock; camera icon
 
 - Auto-target is always on (m_bMobileAutoSelect = true). The crosshair button
