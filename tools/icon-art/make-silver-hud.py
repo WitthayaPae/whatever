@@ -25,7 +25,7 @@ def hud():
         A.button('sword', N),            clear,                         A.potion_slot(None, None, N),
         A.button('auto', N),             A.button('auto', N, lit=True),
         A.button('pk', N),               A.button('pk', N, lit=True),
-        A.button('lock', N),             A.button('lock', N, lit=True),  A.button('pick_b', N),
+        A.button('camera', N),           A.button('camera', N, lit=True),  A.button('pick_b', N),
         A.button('bike', N),             A.button('grid', N),
         A.text_button('F1', N), A.text_button('F2', N), A.text_button('F3', N), A.text_button('F4', N),
         A.text_button('F1', N, True), A.text_button('F2', N, True), A.text_button('F3', N, True), A.text_button('F4', N, True),

@@ -123,6 +123,14 @@ def glyph(kind, n):
         d.arc((c - 28 * u, c - 58 * u, c + 28 * u, c + 10 * u), 180, 360, fill=W, width=int(13 * u))
         for s in (-1, 1): d.line([(c + s * 28 * u, c - 26 * u), (c + s * 28 * u, c - 4 * u)], fill=W, width=int(13 * u))
         d.ellipse((c - 9 * u, c + 12 * u, c + 9 * u, c + 30 * u), fill=0); d.rectangle((c - 4 * u, c + 24 * u, c + 4 * u, c + 42 * u), fill=0)
+    elif kind == 'camera':
+        # camera-lock button (2026-10-06): body, viewfinder hump, lens, flash
+        d.rounded_rectangle((c - 66 * u, c - 34 * u, c + 66 * u, c + 52 * u), int(14 * u), fill=W)
+        d.rounded_rectangle((c - 26 * u, c - 54 * u, c + 26 * u, c - 26 * u), int(8 * u), fill=W)
+        d.ellipse((c - 34 * u, c - 22 * u, c + 34 * u, c + 46 * u), fill=0)
+        d.ellipse((c - 25 * u, c - 13 * u, c + 25 * u, c + 37 * u), fill=W)
+        d.ellipse((c - 13 * u, c - 1 * u, c + 13 * u, c + 25 * u), fill=0)
+        d.ellipse((c + 40 * u, c - 26 * u, c + 54 * u, c - 12 * u), fill=0)
     elif kind == 'pk':
         for s in (1, -1):
             d.line([(c - 50 * s * u, c - 50 * u), (c + 38 * s * u, c + 38 * u)], fill=W, width=int(14 * u))

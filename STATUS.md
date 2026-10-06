@@ -59,6 +59,21 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (5) — Auto-target always on; crosshair = target lock; camera icon
+
+- Auto-target is always on (m_bMobileAutoSelect = true). The crosshair button
+  (RANTOUCH_SLOT_AUTO) is now the TARGET LOCK (m_bMobileTargetLock): while on,
+  no out-of-range switch and no ground-tap re-pick; a direct tap on another
+  enemy still switches. PK unchanged and independent of the lock.
+- Ground tap with the lock off re-picks by Settings rule (dwMobileTargetPriority)
+  via MobileSelectNearest; still a move order.
+- Anti-bot auto-target time counts only PK auto now (auto-target is universal).
+- Camera-lock button: new 'camera' glyph (silver_art.py), cells 7/8 of
+  mobile_hud3.dds regenerated (make-silver-hud.py + topdds.js).
+- User tested on LDPlayer: "ground tap re-pick -> 2418 (rule 2)", attack
+  auto-pick, re-pick after each kill, 0 swallowed touches. Lock toggle has no log
+  line - confirmed by the user's own test only.
+
 ## 2026-10-06 (4) — Endless loading on the Tiger basement 2 map (my sound-set change)
 
 - w_4school_under02 (ชั้นใต้ดิน2Tiger) never finished loading: DxCamAniMan::Load
