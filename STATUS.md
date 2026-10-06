@@ -77,6 +77,12 @@ If anything here disagrees with another file, this file wins.
   puts it back, sideways bag-to-bag move works. Not tested: an equippable
   item dropped on its slot (code path unchanged). iOS: shared SOURCE code,
   not run on an iPhone.
+- Follow-up (v215): the user still got the question - a LONG PRESS is the
+  right button, and the block only looked at the left. With an item in hand a
+  long press on the doll asked to drop it (reproduced). The block (doll and
+  skill arc) now covers both buttons; same sequence now equips, no question.
+  Also verified: drag bag->empty necklace slot equips; long press in bag then
+  tap the lit slot equips.
 
 ## 2026-10-06 (6) — File-descriptor leak: gate OK did nothing after ~10 min
 
