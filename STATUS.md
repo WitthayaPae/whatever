@@ -59,6 +59,24 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (9) — Crash: weapon/effect trail overflowed the dynamic VB
+
+- Two reports on patch 673 (Xiaomi 25078RA3EA), identical: SIGSEGV code 2 in
+  DxEffCharBlur::RenderBlur (DxEffCharBlur.cpp:947, the vertex copy) drawing
+  a mob, ~6.5 min into each run; part:chareff climbed to 25 ms/frame before.
+  A trail whose points stopped aging grew until one lock was larger than the
+  whole shared VB (m_sVB_PDT, 12,800 vertices) - DISCARD resets the offset
+  but cannot make the buffer bigger - and the copy ran past it.
+- Fix (all builds): FrameMoveBlur keeps the trail at most (12800-4)/2 points,
+  dropping the oldest; RenderBlur refuses a lock larger than the buffer.
+  Normal trails are tens of points and draw exactly as before. Mobile logs
+  "RanBlur: trail at N points" (life, pending elapsed, file) the first 3
+  times the cap acts - the next report names why points stopped aging.
+- Verified LDPlayer x86_64: 2 min of combat, no crash, cap never acted (0
+  RanBlur lines). NOT verified: the runaway itself (mob unknown). iOS:
+  shared SOURCE, not run on an iPhone.
+- Same phone's other report (patch 671 run) is the gate crash fixed in 673.
+
 ## 2026-10-06 (8) — Crash: gate OK below the map's level requirement
 
 - Crash report (patch 671, Xiaomi 25078RA3EA): SIGSEGV fault addr 0x19 in
