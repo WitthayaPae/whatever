@@ -59,6 +59,25 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (7) — Bag: drop question on the doll; tiny carried icon
+
+- "Drag and drop in the equipment, it asks should I drop the item" - the doll
+  is placed LEFT of the inventory window's rect (InventoryWindow.cpp, fDollX
+  < 0), so no window reported the pointer there; the release went on to the
+  world as a ground click with an item in hand -> MobileAskDropHeld.
+  Fix: CInventoryWindow::MobileWearCoversPoint (magnify undone, plate = doll
+  + 7) blocks the world on press/release, beside the skill-arc rule
+  (InnerInterface.cpp).
+- "The icon I drag is small" - ITEM_MOVE is not a window, so the 2x magnify
+  never reached it (~20 px against 50 px slots). DxGameStage now gives it the
+  bag's factor about the finger, or when snapped the factor + anchor of the
+  window whose layout holds it (the doll falls back to the bag).
+- Verified LDPlayer x86_64: megaphone dragged onto the ring slot - no
+  question, icon slot-sized and sitting on the ring slot, tap on its bag slot
+  puts it back, sideways bag-to-bag move works. Not tested: an equippable
+  item dropped on its slot (code path unchanged). iOS: shared SOURCE code,
+  not run on an iPhone.
+
 ## 2026-10-06 (6) — File-descriptor leak: gate OK did nothing after ~10 min
 
 - Report: "I can not teleport, I click ตกลง nothing happen" (test01, after
