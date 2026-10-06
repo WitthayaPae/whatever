@@ -1275,7 +1275,10 @@ void toolCircle(int t, Vec2 &c, float &r) {
     static const float slot[kToolCount] = { 0.0f, 1.0f, 2.6f, 4.4f, 5.6f, 7.4f, 9.0f };
     const float total = 9.0f * step;
     c.x = (float)g_width * 0.5f - total * 0.5f + slot[t] * step + g_toolDX;
-    c.y = g_unit * 0.50f + g_toolDY;
+    //  A third of the way down, not on the top edge: the health section, the
+    //  level box and the potion tray are editable now (2026-10-07) and the
+    //  bar sat on top of them.
+    c.y = (float)g_height * 0.34f + g_toolDY;
 }
 
 //  The plate behind the buttons, which is also its handle.

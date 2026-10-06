@@ -96,6 +96,14 @@ If anything here disagrees with another file, this file wins.
       ปาร์ตี้ คลับ พันธมิตร พื้นที่ โทรโข่ง กระซิบ) runs the chat's own
       BEGIN_*_CHAT, keeping typed text. Verified: ปาร์ตี้ -> "#hello".
       Not verified: sending (would post to the live server), iPhone.
+- [x] 2026-10-07 follow-ups (user): MP/SP fill half grey at 150% - the
+      scale walk re-learnt the progress bar dummy from a re-anchored frame
+      (measured bar y35 / dummy y47); the bar now places its dummy from its
+      local rect and the fill is left out of the walk. Level box rides on
+      the health section at its scale. Typed chat text overflowed the
+      12-unit strip: strip + back grow 6 units. Minimap is heading-up (map
+      turns with the camera, arrow points up, party marks turned to match).
+      Editor toolbar now starts a third of the way down. All on LDPlayer.
 
 ## 2026-10-06 (13) — Five user reports: vehicle buffs, sell price, white mob, bot HP, potion count
 
