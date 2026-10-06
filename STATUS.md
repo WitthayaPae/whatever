@@ -70,9 +70,9 @@ If anything here disagrees with another file, this file wins.
 - [x] Sell price: MobilePinItemInfo passed bShopOpen FALSE; now
       IsMarketWindowOpen() for bag items (the PC bag-hover flag). Verified:
       Beta shop open, พลอยแดง x246 shows "ราคา:3,075,000".
-- [ ] White mob: Little WereWolf (16:2, mob_wd_01) and Freezing Halogen render
-      textured outside SG (checked in game); wolfdog256.dds is DXT2 (handled)
-      and present. Waiting for the user to name the white one.
+- [x] White mob: not reproduced - Little WereWolf (16:2, mob_wd_01) and
+      Freezing Halogen render textured outside SG; the user checked and
+      confirmed it works. No change.
 - [x] Bot target HP: FrameMoveBot sets m_sMobileTarget to the bot's target
       where the PC calls SetTargetInfo (#else branch); MobileTargetTick skips
       its out-of-range switch while m_bRunBot. Verified: bot victims show the
