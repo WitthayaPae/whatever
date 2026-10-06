@@ -59,6 +59,28 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (13) — Five user reports: vehicle buffs, sell price, white mob, bot HP, potion count
+
+- [x] Vehicle: EP9 had commented out, in all three places, the EP1 code that
+      clears every non-SIDE_ENEMY skill effect and the Q-box (sQITEMFACT) on
+      getting on AND off: server GLChar::ActiveVehicle (GLCharMsg.cpp), own
+      client GLCharacter::SetVehicle (incl. RESET_KEEP_QUESTION_ITEM), other
+      players GLCharClient vehicle BRD. Re-enabled, identical to EP1.
+      NEEDS the new ServerField; not verified in game yet.
+- [x] Sell price: MobilePinItemInfo passed bShopOpen FALSE; now
+      IsMarketWindowOpen() for bag items (the PC bag-hover flag). Verified:
+      Beta shop open, พลอยแดง x246 shows "ราคา:3,075,000".
+- [ ] White mob: Little WereWolf (16:2, mob_wd_01) and Freezing Halogen render
+      textured outside SG (checked in game); wolfdog256.dds is DXT2 (handled)
+      and present. Waiting for the user to name the white one.
+- [x] Bot target HP: FrameMoveBot sets m_sMobileTarget to the bot's target
+      where the PC calls SetTargetInfo (#else branch); MobileTargetTick skips
+      its out-of-range switch while m_bRunBot. Verified: bot victims show the
+      name plate HP bar; log "dropped N: falling" as each dies.
+- [x] Potion count: the PC slot's own count text is kept visible (render
+      off, visible on) and pinned to each round button's lower right in
+      MobileHideSquares. Verified: 1/1/1/8 shown, empty slots blank.
+
 ## 2026-10-06 (12) — 59 EP1 quests ported into EP9 (converted, all verified)
 
 - Missing = EP1 quest.lst entries whose id and file EP9 does not have: 59 (EP1
