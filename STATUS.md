@@ -85,6 +85,15 @@ If anything here disagrees with another file, this file wins.
   Quest.rcc left as it was (the loose one is the user's newer edit).
 - SERVER: the field/agent servers load quests from their own
   data/glogic/quest - they need the same 59 files + quest.lst.
+- Follow-up: "[GAME TEXT ERROR] Not exist text keyword QN_046_000". The
+  Modern quest windows (and QuestHelper) read names/steps from
+  data/gui/queststrtable.xml when strLangPlacer != "en" (param.ini does not
+  set it: default "kr") - QN_n_000, QD_n_000, QN_n_000_P_s, QD_n_000_D_s.
+  56 of the 59 ported ids already had keys; 46, 53, 757 did not. Added their
+  20 keys from the quests' own Thai text (CRLF, entities like the rest),
+  Gui.rcc repacked (packed == loose), boots and loads text on LDPlayer.
+  The table itself is Chinese (946) / English (69): 23 of the original 629
+  quests have no keys either (pre-existing).
 - Not checked: whether the NPC dialogs (npctalk) that offer these quests
   exist in EP9, and whether every item/NPC/map id they reference exists.
 
