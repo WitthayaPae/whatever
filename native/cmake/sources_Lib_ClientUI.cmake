@@ -202,6 +202,7 @@ set(Lib_ClientUI_SOURCES
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileMenuWindow.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileItemSheet.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileChatMacroBar.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileChatChannelBar.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileMiniMap.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/ItemPreviewWindow.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/ItemPreviewWindowRender.cpp

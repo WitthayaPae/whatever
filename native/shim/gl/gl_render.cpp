@@ -336,6 +336,11 @@ const char *kFS =
     "    vec4 v = diffuse;\n"                      // 0 DIFFUSE, and CURRENT at stage 0
     "    if      (sel == 2) v = tex;\n"            // D3DTA_TEXTURE
     "    else if (sel == 3) v = uTexFactor;\n"     // D3DTA_TFACTOR
+    //  D3DTA_SPECULAR: the vertex specular the lighting produced - zero when
+    //  D3DRS_SPECULARENABLE is off, as in D3D. DxEffCharReflection2 selects it
+    //  as its colour; read as DIFFUSE it was the lit white material, drawn
+    //  additively over the whole piece (a solid white Freezing Halogen).
+    "    else if (sel == 4) v = vec4(uMatSpecular * vSpec, 1.0);\n"
     "    if ((arg & 16) != 0) v = vec4(1.0) - v;\n"        // D3DTA_COMPLEMENT
     "    if ((arg & 32) != 0) v = vec4(v.a);\n"            // D3DTA_ALPHAREPLICATE
     "    return v;\n"
@@ -467,6 +472,17 @@ const char *kFS =
     "        //  coordinate set 0. This is the shine on hair and on the coloured\n"
     "        //  parts of a character: without it they are flat paint.\n"
     "        rgb *= 2.0 * texture(uTexStage1, vUV).rgb;\n"
+    "    } else if (uStage1 == 8) {\n"
+    //  A 2D texture on stage 1, MODULATE, addressed by the camera-space
+    //  normal projected by its own z (D3DTSS_TCI_CAMERASPACENORMAL with
+    //  D3DTTFF_PROJECTED|COUNT3, no texture matrix) and mirrored, as
+    //  DxEffCharReflection2 sets it. Before this the stage was dropped and
+    //  the pass added its whole colour unmasked.
+    "        vec3 cn = mat3(uView) * normalize(vNormal);\n"
+    "        float cz = (abs(cn.z) < 0.0001) ? 0.0001 : cn.z;\n"
+    "        vec2 p = cn.xy / cz;\n"
+    "        p = 1.0 - abs(mod(p, 2.0) - 1.0);\n"
+    "        rgb *= texture(uTexStage1, p).rgb;\n"
     "    } else if (uStage1 == 2) {\n"
     "        //  MODULATE(TFACTOR, CURRENT): a flat tint over the stage 0 result,\n"
     "        //  with no texture on the stage at all. This is how the ambient\n"
@@ -497,7 +513,11 @@ const char *kFS =
     "    vec4 c = vec4(rgb, alpha);\n"
     "\n"
     "    if (uLighting == 1) {\n"
-    "        if (uStage1 != 6) c.rgb *= vLit;\n"
+    //  Not when the stage colour IS the specular (SELECTARG of D3DTA_SPECULAR):
+    //  in D3D only the diffuse argument carries the lighting.
+    "        bool specSel = (uColorOp == 3 && (uColorArg2 & 7) == 4) ||\n"
+    "                       (uColorOp == 2 && (uColorArg1 & 7) == 4);\n"
+    "        if (uStage1 != 6 && !specSel) c.rgb *= vLit;\n"
     "        if (uSpecularOn == 1) c.rgb += uMatSpecular * vSpec;\n"
     "    }\n"
     "\n"
@@ -1474,6 +1494,7 @@ unsigned variantKey(int preTransformed, int lighting, int specular, int fogMode,
                     | (specular  ? 4 : 0)
                     | ((fogMode & 3) << 3)
                     | ((stage1  & 7) << 5)
+                    | ((stage1  & 8) ? 0x80000u : 0u)	// stage 1 mode 8+ (bits 15-18 are the stage id)
                     | (alphaTest ? 0x100 : 0)
                     | (gammaOn   ? 0x200 : 0)
                     | (useTexture ? 0x400 : 0)
@@ -1557,7 +1578,7 @@ std::string variantPreamble(unsigned key) {
              (key & 2) ? 1 : 0,
              (key & 4) ? 1 : 0,
              (int)((key >> 3) & 3),
-             (int)((key >> 5) & 7),
+             (int)(((key >> 5) & 7) | ((key & 0x80000u) ? 8 : 0)),
              (key & 0x100) ? 1 : 0,
              (key & 0x200) ? 1 : 0,
              (key & 0x400) ? 1 : 0,
@@ -2397,7 +2418,7 @@ extern "C" void RanGLR_SetStage1(int mode, unsigned glCubeTex, unsigned gl2DTex,
     //  caller asks for never reached the shader even though the shader has a
     //  branch for it.
     if ((mode == 1 || mode == 3 || mode == 6) && glCubeTex)  g_stage1Mode = mode;
-    else if ((mode == 5 || mode == 7) && gl2DTex) g_stage1Mode = mode;
+    else if ((mode == 5 || mode == 7 || mode == 8) && gl2DTex) g_stage1Mode = mode;
     else if (mode == 2 || mode == 4)            g_stage1Mode = mode;
     else                                        g_stage1Mode = 0;
 

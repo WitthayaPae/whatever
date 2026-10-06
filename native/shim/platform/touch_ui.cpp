@@ -81,7 +81,10 @@ enum { kGrpStick, kGrpAttack, kGrpSkill, kGrpPage, kGrpAuto, kGrpPK,
        //  slot offsets.
        kGrpVehicle, kGrpFist,
        //  Added after the page buttons' own triples: saved after those.
-       kGrpBot, kGrpCount };
+       kGrpBot,
+       //  The client's own HUD windows - health, minimap, buffs (2026-10-06).
+       //  Saved in the same block as kGrpBot, then their own triples after it.
+       kGrpWin, kGrpCount };
 //  The groups saved between the slots and the page triples.
 const int kGrpPreBot = kGrpBot;
 //  The groups saved in the first block of the layout file.
@@ -142,6 +145,17 @@ CornerBox g_cornerBox[kCornerMax] = { };
 int       g_cornerCount = 0;
 SlotAdj   g_cornerAdj[kCornerMax];
 SlotAdj   g_cornerBefore[kCornerMax];
+
+//  The client's HUD windows (the health section, the minimap, the buff row...)
+//  the same way: the client reports each one's rect, the editor hands back an
+//  offset and a size, and the client applies them. Rects, not circles - they
+//  are wide strips, and a circle round the health bars covered half the screen.
+const int kWinMax = 8;
+struct WinBox { float x, y, w, h; bool has; };
+WinBox    g_winBox[kWinMax] = { };
+int       g_winCount = 0;
+SlotAdj   g_winAdj[kWinMax];
+SlotAdj   g_winBefore[kWinMax];
 
 //  --- movement stick -----------------------------------------------------
 struct Stick {
@@ -344,6 +358,19 @@ void lobbyPinchMove(int id, float x, float y) {
         RanInput_PointerWheel(notches * 120);
         g_pinch.lastDist += (float)notches * kPixelsPerNotch;
     }
+}
+//  Two unclaimed fingers down: a pinch starts, measured from their spread now.
+void pinchCheckStart() {
+    if (unclaimedCount() != 2) return;
+    int ids[2], k = 0;
+    for (int i = 0; i < kMaxPointers && k < 2; ++i)
+        if (g_touch[i].id >= 0 && !g_touch[i].claimed) ids[k++] = i;
+    if (k != 2) return;
+    g_pinch.a = g_touch[ids[0]].id;
+    g_pinch.b = g_touch[ids[1]].id;
+    g_pinch.startDist = hypotf(g_touch[ids[0]].x - g_touch[ids[1]].x,
+                               g_touch[ids[0]].y - g_touch[ids[1]].y);
+    g_pinch.lastDist = g_pinch.startDist;
 }
 void lobbyPinchUp(int id) {
     removeTouch(id);
@@ -1314,6 +1341,21 @@ bool groupCircle(int g, Vec2 &c, float &r) {
             }
             return true;
         }
+        case kGrpWin: {
+            //  Outlined one by one; this is the picked one, or all of them.
+            float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+            for (int i = 0; i < g_winCount && i < kWinMax; ++i) {
+                if (!g_winBox[i].has) continue;
+                if (g_editSlot >= 0 && g_editSel == kGrpWin && i != g_editSlot) continue;
+                x0 = fminf(x0, g_winBox[i].x); y0 = fminf(y0, g_winBox[i].y);
+                x1 = fmaxf(x1, g_winBox[i].x + g_winBox[i].w);
+                y1 = fmaxf(y1, g_winBox[i].y + g_winBox[i].h);
+            }
+            if (x1 < x0) return false;
+            c.x = (x0 + x1) * 0.5f; c.y = (y0 + y1) * 0.5f;
+            r = 0.5f * len(x1 - x0, y1 - y0);
+            return true;
+        }
         case kGrpCorner: {
             //  Outlined one by one in the editor; this is only their extent.
             if (g_cornerCount <= 0) return false;
@@ -1355,7 +1397,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
 int groupAt(float x, float y) {
     static const int order[] = { -2, -3, -4, kGrpPickup, kGrpPage, kGrpAuto, kGrpPK,
                                  kGrpCamera, kGrpMenu, kGrpVehicle, kGrpFist, kGrpBot,
-                                 kGrpAttack, kGrpStick };
+                                 -5, kGrpAttack, kGrpStick };
     g_editSlot = -1;
     for (size_t k = 0; k < sizeof(order) / sizeof(order[0]); ++k) {
         const int g = order[k];
@@ -1374,6 +1416,18 @@ int groupAt(float x, float y) {
                 if (len(x - g_potX[i], y - g_potY[i]) <= g_potRad[i] * 1.45f) {
                     g_editSlot = i;
                     return kGrpPotion;
+                }
+            continue;
+        }
+        if (g == -5) {
+            //  A HUD window, by its rect. Last of the small things: a button
+            //  that sits over a window is still picked as the button.
+            for (int i = 0; i < g_winCount && i < kWinMax; ++i)
+                if (g_winBox[i].has &&
+                    x >= g_winBox[i].x && x < g_winBox[i].x + g_winBox[i].w &&
+                    y >= g_winBox[i].y && y < g_winBox[i].y + g_winBox[i].h) {
+                    g_editSlot = i;
+                    return kGrpWin;
                 }
             continue;
         }
@@ -1428,6 +1482,9 @@ void editDefaultsAll() {
     //  been dragged - which reads as "reset does not work".
     for (int i = 0; i < kCornerMax; ++i) {
         g_cornerAdj[i].dx = g_cornerAdj[i].dy = 0.0f; g_cornerAdj[i].scale = 1.0f;
+    }
+    for (int i = 0; i < kWinMax; ++i) {
+        g_winAdj[i].dx = g_winAdj[i].dy = 0.0f; g_winAdj[i].scale = 1.0f;
     }
     g_toolDX = g_toolDY = 0.0f;
 }
@@ -1655,6 +1712,8 @@ int RanTouch_PointerDown(int id, float x, float y) {
                     pScale = &g_pageAdj[g_editSlot].scale;
                 else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax)
                     pScale = &g_cornerAdj[g_editSlot].scale;
+                else if (g_editSel == kGrpWin && g_editSlot < kWinMax)
+                    pScale = &g_winAdj[g_editSlot].scale;
             }
             switch (t) {
                 case kToolCancel:
@@ -1662,6 +1721,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
                     memcpy(g_slotAdj, g_slotBefore, sizeof(g_slotAdj));
                     memcpy(g_potAdj,  g_potBefore,  sizeof(g_potAdj));
                     memcpy(g_cornerAdj, g_cornerBefore, sizeof(g_cornerAdj));
+                    memcpy(g_winAdj, g_winBefore, sizeof(g_winAdj));
                     memcpy(g_pageAdj, g_pageBefore, sizeof(g_pageAdj));
                     editEnd();
                     break;
@@ -1787,7 +1847,15 @@ int RanTouch_PointerDown(int id, float x, float y) {
         const int inControl = RanUI_PointInDragControl
                                 ? RanUI_PointInDragControl((int)x, (int)y)
                                 : (RanUI_PointInControl ? RanUI_PointInControl((int)x, (int)y) : 0);
-        if (inControl) return 0;
+        if (inControl) {
+            //  Recorded, unclaimed, so two fingers on a window are a pinch: the
+            //  large map zooms on the wheel it turns into (2026-10-06). It used
+            //  to return before addTouch, and a pinch on the map never started.
+            //  The press itself still goes to the window.
+            if (!findTouch(id)) addTouch(id, x, y);
+            pinchCheckStart();
+            return 0;
+        }
     }
 
     Touch *t = addTouch(id, x, y);
@@ -1852,18 +1920,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
 
     //  Not ours. Two unclaimed fingers mean a pinch, which we do watch - but we
     //  still let them through, so a two-finger tap on the world behaves.
-    if (unclaimedCount() == 2) {
-        int ids[2], k = 0;
-        for (int i = 0; i < kMaxPointers && k < 2; ++i)
-            if (g_touch[i].id >= 0 && !g_touch[i].claimed) ids[k++] = i;
-        if (k == 2) {
-            g_pinch.a = g_touch[ids[0]].id;
-            g_pinch.b = g_touch[ids[1]].id;
-            g_pinch.startDist = len(g_touch[ids[0]].x - g_touch[ids[1]].x,
-                                    g_touch[ids[0]].y - g_touch[ids[1]].y);
-            g_pinch.lastDist = g_pinch.startDist;
-        }
-    }
+    pinchCheckStart();
     return 0;
 }
 
@@ -1902,6 +1959,9 @@ int RanTouch_PointerMove(int id, float x, float y) {
                 //  was taking the party frame with it.
                 g_cornerAdj[g_editSlot].dx += mdx;
                 g_cornerAdj[g_editSlot].dy += mdy;
+            } else if (g_editSel == kGrpWin && g_editSlot >= 0 && g_editSlot < kWinMax) {
+                g_winAdj[g_editSlot].dx += mdx;
+                g_winAdj[g_editSlot].dy += mdy;
             } else {
                 g_adj[g_editSel].dx += mdx;
                 g_adj[g_editSel].dy += mdy;
@@ -2566,6 +2626,25 @@ extern "C" void RanTouch_SetCornerBox(int i, float cx, float cy, float r) {
     if (i + 1 > g_cornerCount) g_cornerCount = i + 1;
 }
 
+//  Where the client has put HUD window i (pixels), or w <= 0 for not shown.
+extern "C" void RanTouch_SetWinBox(int i, float x, float y, float w, float h) {
+    if (i < 0 || i >= kWinMax) return;
+    g_winBox[i].x = x; g_winBox[i].y = y; g_winBox[i].w = w; g_winBox[i].h = h;
+    g_winBox[i].has = (w > 0.0f && h > 0.0f);
+    if (i + 1 > g_winCount) g_winCount = i + 1;
+}
+
+//  And what the player did to it: an offset in pixels and an absolute size.
+extern "C" void RanTouch_GetWinAdjust(int i, float *dx, float *dy, float *scale) {
+    float x = g_adj[kGrpWin].dx * g_unit, y = g_adj[kGrpWin].dy * g_unit, s = g_adj[kGrpWin].scale;
+    if (i >= 0 && i < kWinMax) {
+        x += g_winAdj[i].dx * g_unit;
+        y += g_winAdj[i].dy * g_unit;
+        s *= g_winAdj[i].scale;
+    }
+    if (dx) *dx = x; if (dy) *dy = y; if (scale) *scale = s;
+}
+
 //  And what the player did to icon i, in pixels, for the client to apply.
 //
 //  The group's own offset moves the pair; the icon's moves it alone. Both are
@@ -3173,6 +3252,18 @@ void drawEditor() {
                      kInk.r, kInk.g, kInk.b, 0.5f);
         }
     }
+    //  The client's HUD windows: a frame round each rect.
+    for (int i = 0; i < g_winCount && i < kWinMax; ++i) {
+        if (!g_winBox[i].has) continue;
+        const WinBox &wb = g_winBox[i];
+        const bool sel = (g_editSel == kGrpWin && g_editSlot == i);
+        const Col cc = sel ? kAmber : kInk;
+        const float t = u * (sel ? 0.016f : 0.012f), al = sel ? 0.95f : 0.5f;
+        drawRect(wb.x, wb.y, wb.w, t, cc.r, cc.g, cc.b, al);
+        drawRect(wb.x, wb.y + wb.h - t, wb.w, t, cc.r, cc.g, cc.b, al);
+        drawRect(wb.x, wb.y + t, t, wb.h - 2.0f * t, cc.r, cc.g, cc.b, al);
+        drawRect(wb.x + wb.w - t, wb.y + t, t, wb.h - 2.0f * t, cc.r, cc.g, cc.b, al);
+    }
     //  The page buttons: a ring each, and only the one picked is lit - each
     //  moves and sizes on its own.
     for (int k = 0; k < 4; ++k) {
@@ -3186,7 +3277,7 @@ void drawEditor() {
     }
     for (int g = 0; g < kGrpCount; ++g) {
         //  outlined one by one above
-        if (g == kGrpSkill || g == kGrpPotion || g == kGrpCorner || g == kGrpPage) continue;
+        if (g == kGrpSkill || g == kGrpPotion || g == kGrpCorner || g == kGrpPage || g == kGrpWin) continue;
         Vec2 c; float r;
         if (!groupCircle(g, c, r)) continue;
         if (g == g_editSel) {
@@ -3261,6 +3352,8 @@ void drawEditor() {
                 vScale = g_pageAdj[g_editSlot].scale;
             else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax)
                 vScale = g_cornerAdj[g_editSlot].scale;
+            else if (g_editSel == kGrpWin && g_editSlot < kWinMax)
+                vScale = g_winAdj[g_editSlot].scale;
         }
         const float v = (pair == 0) ? vScale : g_adj[g_editSel].alpha;
         int pct = (int)(v * 100.0f + 0.5f);
@@ -4057,6 +4150,7 @@ extern "C" void RanTouch_SetEditMode(int on) {
         memcpy(g_slotBefore, g_slotAdj, sizeof(g_slotAdj));
         memcpy(g_potBefore,  g_potAdj,  sizeof(g_potAdj));
         memcpy(g_cornerBefore, g_cornerAdj, sizeof(g_cornerAdj));
+        memcpy(g_winBefore, g_winAdj, sizeof(g_winAdj));
         memcpy(g_pageBefore, g_pageAdj, sizeof(g_pageAdj));
         g_stick.pointer = -1; g_stick.held = false; g_stick.magnitude = 0.0f;
         g_stick.knob = g_stick.origin = g_stick.centre;
@@ -4085,11 +4179,17 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     //  The groups that existed before the slots were saved, then the slots,
     //  then every group added since. A new group put in the FIRST block would
     //  move every slot, and a saved file would load them scrambled.
+    //  The middle block is the groups between the legacy ones and kGrpPreBot,
+    //  as the loop below writes it. It was (kGrpCount - kGrpLegacy), which
+    //  counted the auto-hunt group twice: the size came to 138 for 134 floats
+    //  written, the client's 134-float buffer was refused, and no arrangement
+    //  saved from 2026-10-05 until this was found (2026-10-06).
     const int n = kGrpLegacy * 4
                 + (RANTOUCH_MAX_SKILL_CIRCLES + kPotMax + kCornerMax) * 3
-                + (kGrpCount - kGrpLegacy) * 4
+                + (kGrpPreBot - kGrpLegacy) * 4
                 + kPageMax * 3                          //  F1-F4, appended 2026-10-05
-                + (kGrpCount - kGrpPreBot) * 4;         //  auto-hunt button, appended 2026-10-05
+                + (kGrpCount - kGrpPreBot) * 4          //  auto-hunt button, appended 2026-10-05
+                + kWinMax * 3;                          //  HUD windows, appended 2026-10-06
     if (!out || max < n) return n;
     for (int i = 0; i < kGrpLegacy; ++i) {
         out[i * 4]     = g_adj[i].dx;    out[i * 4 + 1] = g_adj[i].dy;
@@ -4111,6 +4211,9 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     for (int i = kGrpPreBot; i < kGrpCount; ++i) {
         out[w++] = g_adj[i].dx;    out[w++] = g_adj[i].dy;
         out[w++] = g_adj[i].scale; out[w++] = g_adj[i].alpha;
+    }
+    for (int i = 0; i < kWinMax; ++i) {
+        out[w++] = g_winAdj[i].dx; out[w++] = g_winAdj[i].dy; out[w++] = g_winAdj[i].scale;
     }
     return n;
 }
@@ -4174,6 +4277,15 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (!(sc >= 0.6f && sc <= 1.6f)) sc = 1.0f;
             if (!(al >= 0.2f && al <= 1.0f)) al = 1.0f;
             g_adj[i].dx = dx; g_adj[i].dy = dy; g_adj[i].scale = sc; g_adj[i].alpha = al;
+        }
+        //  The HUD windows' own places. Older files stop before them.
+        for (int i = 0; i < kWinMax; ++i) {
+            float dx = 0.0f, dy = 0.0f, sc = 1.0f;
+            if (r + 2 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; }
+            if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
+            if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
+            if (!(sc >= 0.6f && sc <= 1.6f))  sc = 1.0f;
+            g_winAdj[i].dx = dx; g_winAdj[i].dy = dy; g_winAdj[i].scale = sc;
         }
     }
     if (g_inited) layout();

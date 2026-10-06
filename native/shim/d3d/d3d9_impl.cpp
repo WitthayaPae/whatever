@@ -2379,6 +2379,16 @@ public:
                                  "normal is)", (unsigned long)op, (unsigned long)tci);
                         }
                     }
+                } else if (m_texture[1] && m_texture[1]->GetType() == D3DRTYPE_TEXTURE &&
+                           op == D3DTOP_MODULATE &&
+                           ((arg1 == D3DTA_TEXTURE && arg2 == D3DTA_CURRENT) ||
+                            (arg1 == D3DTA_CURRENT && arg2 == D3DTA_TEXTURE)) &&
+                           m_textureStageState[1][D3DTSS_TEXCOORDINDEX] == D3DTSS_TCI_CAMERASPACENORMAL) {
+                    //  DxEffCharReflection2: a 2D sheet (rain.bmp) modulated in,
+                    //  addressed by the projected camera-space normal. Dropped,
+                    //  the pass painted the piece solid white (2026-10-06).
+                    stage2D = ((RanTexture *)m_texture[1])->GlTexture();
+                    mode = stage2D ? 8 : 0;
                 } else if (m_texture[1] && op == D3DTOP_MODULATE2X &&
                            arg1 == D3DTA_TEXTURE && arg2 == D3DTA_CURRENT) {
                     //  A gloss map over the stage 0 result.

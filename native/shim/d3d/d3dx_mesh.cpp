@@ -363,6 +363,14 @@ public:
         return D3D_OK;
     }
 
+    //  For the .x loader: D3DXLoadMeshFromX hands back faces grouped by
+    //  material, one attribute range each (measured through D3DX9_43.dll,
+    //  2026-10-06: SRN0045's six interleaved runs came back as 262 + 84).
+    //  Kept in file order, a material split into several runs drew only its
+    //  first run - DrawSubset takes the first range it finds - so the pink
+    //  staff showed 4 of its 262 head faces and 36 of 84 pole faces.
+    void SortFacesForLoad() { sortFacesByAttribute(); }
+
 private:
     void sortFacesByAttribute() {
         // Stable counting sort: subsets become contiguous, which is what
@@ -707,6 +715,7 @@ HRESULT meshFromNode(const XNode *mesh, DWORD options, LPDIRECT3DDEVICE9 device,
                         out->m_attributes[t++] = attr;
                 }
                 for (; t < numFaces; ++t) out->m_attributes[t] = 0;
+                out->SortFacesForLoad();
             }
         }
 

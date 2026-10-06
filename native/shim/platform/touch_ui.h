@@ -160,6 +160,11 @@ extern "C" void RanTouch_SetPotionIcons(int count, const unsigned *tex,
 extern "C" void RanTouch_SetCornerBox(int i, float cx, float cy, float r);
 extern "C" void RanTouch_GetCornerAdjust(int i, float *dx, float *dy, float *scale);
 
+//  The client's HUD windows (health, minimap, buffs, target, quest helper) as
+//  rects, and the offset / absolute size the editor gives each.
+extern "C" void RanTouch_SetWinBox(int i, float x, float y, float w, float h);
+extern "C" void RanTouch_GetWinAdjust(int i, float *dx, float *dy, float *scale);
+
 //  How big the player has asked the skill slots to be.
 extern "C" float RanTouch_GetSkillScale(void);
 

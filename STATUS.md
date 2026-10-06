@@ -59,6 +59,44 @@ If anything here disagrees with another file, this file wins.
   toggle; in game no toggle, gauge under the icons, both labels renamed, no GM
   cell. NOT verified: the GM cell on a Master account (user to check).
 
+## 2026-10-06 (14) — Six mobile requests + broken weapon (all on LDPlayer x86_64)
+
+- [x] Freezing Halogen white = DxEffCharReflection2 (effskip A/B). Shim read
+      D3DTA_SPECULAR as lit diffuse and dropped its stage-1 2D sheet
+      (camera-space normal, projected, mirrored). Now: specular arg, stage-1
+      mode 8. Real D3D9 measured (scratchpad spectest): SPECULARENABLE off
+      => D3DTA_SPECULAR reads 0, so this pass and DxEffCharLevel's reflect
+      pass add nothing, as on PC. Verified textured on LDPlayer.
+- [x] Red aura (Flame Halogen) = DxGlowMan burn feedback. Its 0.5-texel D3D9
+      UV nudges are real half-texel shifts on GL; two copies a frame smeared
+      it 1 texel left + 1.5 up per frame (PC: 0.5 up). Nudges dropped under
+      RAN_MOBILE (step kept). No PC capture (user's desktop in use).
+- [x] Pink staff (150/126, SRN0045) drew as a thin stick: shim kept .x faces
+      in file order and DrawSubset drew only a material's first run. D3DX
+      sorts by material on load (ctypes D3DX9_43: 262+84). Sort on load in
+      d3dx_mesh.cpp; 96 rigid meshes had split runs. Verified in the preview.
+      Predates this session (A/B with the old shader files).
+- [x] Large map: bottom-left corner grab (3x the 19-unit thumb) runs the PC
+      LB-thumb resize, min 10 thumbs, kept on screen; pinch = wheel zooms the
+      map (texture size x zoom, anchored under the fingers, min = fills the
+      view, max 4x). touch_ui: fingers on a window are now recorded so a
+      pinch over a window starts. Tap-to-move verified on a zoomed map.
+- [x] Minimap party icons: large map's marks, pinned to the circle's edge
+      when out of range. TEST_MARK1 pointed at an empty CharInven cell (PC
+      large map too): mobile uses the M,2..8 column for both maps. Verified
+      with a temporary fake-member diag (removed); not with a real party.
+- [x] HUD editor: new kGrpWin group - HP section, minimap, buff row, target
+      HP, quest helper - move + size (absolute, MobileScaleTree), text
+      re-rasterised at the scaled size (CBasicTextBox::MobileSetFont).
+      Found: HUD saves had been silently refused since the auto-hunt group
+      (size formula 138 vs 134-float buffer). Fixed; buffer 162, 134 still
+      loads. Verified: HP 150% survives relogin.
+- [x] Chat (also GM announcements, which arrive as chat lines): font 12 on
+      mobile (was 9). Channel row above the chat while typing (ทั่วไป
+      ปาร์ตี้ คลับ พันธมิตร พื้นที่ โทรโข่ง กระซิบ) runs the chat's own
+      BEGIN_*_CHAT, keeping typed text. Verified: ปาร์ตี้ -> "#hello".
+      Not verified: sending (would post to the live server), iPhone.
+
 ## 2026-10-06 (13) — Five user reports: vehicle buffs, sell price, white mob, bot HP, potion count
 
 - [x] Vehicle: EP9 had commented out, in all three places, the EP1 code that
