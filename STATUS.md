@@ -12,6 +12,55 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-08 — User batch of 10 + skill key numbers (not shipped yet)
+
+All SOURCE/shim, so Android and iOS both get them. LDPlayer x86_64 = checked on screen.
+
+1. **Channel picker stays open** — `CMobileChatChannelBar::Place` closes the list on a left
+   press outside its rect (toggle + list). LDPlayer: opens, tap world, closes.
+2. **Dropping a dragged item on the ground dropped bag slot 1 instead** (user's exact steps:
+   drag an item that is not in slot 1 out of the bag, tap the ground, confirm). Measured with
+   logs: the confirm (`MODAL_MOBILE_DROP_ITEM`) also receives the modal's ordinary per-frame
+   messages; the "hand" branch read the first one as No - put the item back and reset the
+   cell to 0,0 - so Yes then lifted and dropped cell (0,0). Fix: act only on
+   `UIMSG_MODAL_OK|CANCEL`. LDPlayer: confirm names the dragged potion, Yes drops it, slot 1
+   untouched. Also: a drop onto a filled cell now completes the swap (displaced item goes to
+   the cell the dragged one came from, `MobileSwapFrame`) instead of staying in the hand.
+13. **Closing the bag left enhance / ย่อย open** (user) — `MobileInventoryWearFrame` closes
+   both (enhance `Close`, `CloseSeparateItemWindow`) when the bag goes from shown to hidden.
+   LDPlayer: both close with the bag's X.
+12. **Worn items show +N** (user) — `CItemImage::SetGrade` from `CInventoryPageWear/WearEx::
+   LoadItem`. LDPlayer: "+4" on the worn weapon.
+3. **Enhance beside the bag** — `MOBILE_ENHANCE_WINDOW` added to `MobileNpcBesideBag`,
+   `MobileMagnifyWants` and `MobileInventoryWearFrame`; `Open` lays out only on first open.
+   LDPlayer: opens left of the bag, doll hidden; ปิด brings the doll back.
+4. **อัพเกรด icon flicker** — `CItemMove` hides the held image while
+   `CMobileEnhanceWindow::IsBusy` (material in hand between the two round trips).
+   Code-read cause; the flicker itself was not captured on screen.
+5. **Mini party flashes bottom right** — placement moved to `MobilePlaceMiniParty`, run
+   right after `CInnerInterface::FrameMove` (the press that shows it is handled there).
+   Not seen on screen: needs a real party.
+6. **ย่อย beside the bag** — `SEPARATE_ITEM_WINDOW` in the same three lists. LDPlayer: opens
+   left of the bag, doll hidden.
+7. **+N on bag icons** — `CItemSlot::Update` draws the higher of grade_damage/defense as
+   "+N" (`SetNumber2`, Renew's colours). Every CItemSlot/CItemSlotEx grid gets it (bag,
+   locker, trade, stall, item bank ...). LDPlayer: "+7" on the weapon.
+8. **Full invisible still shows Admin** — own name plate skipped when `EM_REQ_VISIBLENONE`
+   (`GLLandManClient`), and the HP bar under the feet too (`UpdateStateSimpleHP`). LDPlayer:
+   `/visible none` = nothing drawn; `/visible on` = body, name, bar back. Other players'
+   screens already hid it (`GLCharClient::IsVisibleDetect`) - not checked with a 2nd account.
+9. **Square around the folded chat bubble** — `RanTouch_RenderChatMode` mode 2 draws the
+   fallback disc + glyph only when the sheet has no cell. LDPlayer: bubble only.
+10. **Cooldown square box -> countdown** — the slot's square recharge fill is switched off
+    (`CSkillImage::MobileHideRechargeFill`; the progress bar hid its over image from the
+    arc's render-off walk). The round black fill stays (user: keep it). A per-slot text box
+    in `CSkillTrayTab` shows the seconds left: "%d" from 10 up, "%.1f" below. LDPlayer: "2.1".
+11. **Skill key numbers removed** (user, mid-batch) — `CBasicQuickSkillSlotEx` hides its
+    number text on mobile. LDPlayer: no numbers on the arc.
+
+Builds: arm64 + x86_64 0 errors; MiniA, Emulator, ServerAgent, ServerField 0 errors.
+Not verified: iPhone; item 5 and the item-4 flicker on screen.
+
 ## 2026-10-07 — Item link from chat showed different info than the bag (shipped: manifest 711, app 235)
 
 - **Problem (user):** tapping a linked item in chat showed the card tooltip

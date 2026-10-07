@@ -4393,7 +4393,10 @@ extern "C" void RanTouch_RenderChatMode(int mode) {
             const float bw = hw * 0.92f, bh = hh * 0.17f;
             drawRect(b.centre.x - bw, b.centre.y - bh, bw * 2.0f, bh * 2.0f,
                      kInk.r, kInk.g, kInk.b, a);
-        } else {
+        } else if (cell < 0) {
+            //  Folded: only without the painted cell. Cell 22 is in every sheet,
+            //  and the drawn bubble's square ink showed through the cell's
+            //  translucent disc around the painted bubble (2026-10-08).
             chromeDisc(b.centre.x, b.centre.y, R, b.down ? 1.0f : 0.94f, kFace, kFaceE);
             glyphMark(b, 0.88f);
         }
