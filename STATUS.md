@@ -12,6 +12,35 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-07 — Chat channel button drawn over other windows
+
+- **Symptom:** the channel button in front of the chat input stayed on top of any window opened
+  over the chat (the item shop, for example), while the chat itself was underneath.
+- **Cause:** `MobileKeepFront` put it at the front of the focus list every frame (done so the chat
+  stopped taking its presses).
+- **Fix:** new `CUIMan::MobileKeepAbove(id, idBelow)` keeps it directly in front of
+  `BASIC_CHAT_BOX`. It is still pressed before the chat, but any window above the chat covers it
+  too.
+- **LDPlayer:** with the shop open, the button is behind the shop like the chat. After closing
+  the shop and touching the chat, the button still opens its list, and picking ปาร์ตี้ sets it.
+
+## 2026-10-07 — Item shop: tooltip and menu flickered after tapping an item
+
+- **Symptom (user, LDPlayer):** after tapping an item in the item shop, the tooltip and the
+  ซื้อ/ปิด menu jumped between sizes and places.
+- **Measured (temporary per-frame log, removed):** the tooltip (`id 54`) ran a 3-frame cycle:
+  at (670,580), hidden, at (728,522). The menu (`id 242`) moved with it.
+- **Cause:** while the menu is open, `MobilePinItemInfo` keeps the tooltip shown, but only for bag,
+  worn gear and storage items; for the shop (context 7) it returned. The tooltip was left to the
+  shop's hover. The tooltip and menu are enlarged as one group anchored on their combined corner,
+  so each time the tooltip came or went the menu moved. Moving the menu changed whether the
+  finger was under it, which changed whether the hover showed the tooltip: a feedback loop.
+- **Fix:** the shop item is pinned like the others, described from its id as the shop builds
+  its own tooltip.
+- **Measured after:** 64 of 64 frames show both pop-ups at one place at 2x. Six screenshots
+  in a row are identical. ปิด closes both, and a second item opens steadily.
+- **Builds:** arm64 + x86_64; PC MiniA, Emulator, ServerAgent, ServerField.
+
 ## 2026-10-07 — Trade round 2 (user tested 228: icon off the finger, iPhone could not drag)
 
 - **Icon not under the finger:** the carried icon snaps onto the cell under the finger, in that
