@@ -12,6 +12,22 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-07 — Touch controls black squares after re-login (player report, patch 226)
+
+- **Symptom:** a player's screenshot showed every painted touch control (stick, skill rims, pad
+  buttons, chat button, empty potion slots) drawn as a solid black square. The potions and text were fine.
+- **Cause (reproduced on LDPlayer with 226):** `DxGameStage` handed the overlay the HUD sheet's GL
+  texture name once per run (`static s_bSheetSent`). Going back to server or character select and
+  in again releases and reloads the interface textures. The overlay kept binding the deleted name,
+  which GLES samples as opaque black. Potions and skill icons look up their textures each time, so
+  they were unaffected.
+- **Fix:** the sheet's GL name is looked up every frame and handed over again when it changes
+  (`RanHud` log: `hud sheet: GL 1801 -> 5061` after a re-login). Before/after screenshots were
+  taken on LDPlayer in the same re-login flow; 226 showed black squares, the fix draws correctly.
+- **Builds:** arm64 + x86_64 libs; PC MiniA, Emulator, ServerAgent, ServerField all build.
+- **Not yet:** shipped in a patch; not tested on a real phone or iPhone. The code is shared
+  (SOURCE), so iOS gets the same fix from the same edit.
+
 ## 2026-10-05 — HD icons, start screens magnified: v188 "1.1.7", patch 618
 
 - Icons looked pixelated at 2x. Measured: 35x35 texels per icon at ~3.7 screen
