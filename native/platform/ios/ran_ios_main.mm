@@ -1142,7 +1142,7 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
                     NSString *title = lines.count ? lines[0] : @"";
                     NSString *body  = lines.count > 1
                         ? [[lines subarrayWithRange:NSMakeRange ( 1, lines.count - 1 )]
-                              componentsJoinedByString:@" "]
+                              componentsJoinedByString:@"\n"]
                         : @"";
                     me.bar.hidden = YES;
                     me.status.text = title;
@@ -1150,8 +1150,37 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
                     UIAlertController *a = [UIAlertController alertControllerWithTitle:title
                                                 message:body
                                          preferredStyle:UIAlertControllerStyleAlert];
-                    [a addAction:[UIAlertAction actionWithTitle:@"ปิด"
+                    //  The app is too old (the only fatal stop): the way to
+                    //  update it, and a Google search in Thai - as Android's
+                    //  failApkTooOld. Each link re-shows the steps on return.
+                    __weak UIAlertController *wa = a;
+                    void (^reshow)(void) = ^{
+                        dispatch_after ( dispatch_time ( DISPATCH_TIME_NOW, (int64_t)( 0.5 * NSEC_PER_SEC ) ),
+                                         dispatch_get_main_queue (), ^{
+                            if ( wa && !wa.presentingViewController )
+                                [me presentViewController:wa animated:YES completion:nil];
+                        });
+                    };
+                    [a addAction:[UIAlertAction actionWithTitle:@"ไปหน้าวิธีติดตั้ง"
                                                           style:UIAlertActionStyleDefault
+                                                        handler:^(UIAlertAction *x) {
+                        [UIApplication.sharedApplication openURL:[NSURL URLWithString:
+                            @"https://ran-legacy-m.com/launcher_mobile/ios/install.html"]
+                                                         options:@{} completionHandler:nil];
+                        reshow ();
+                    }]];
+                    [a addAction:[UIAlertAction actionWithTitle:@"ค้นหาวิธีใน Google"
+                                                          style:UIAlertActionStyleDefault
+                                                        handler:^(UIAlertAction *x) {
+                        NSString *q = [@"วิธีอัปเดตแอปใน SideStore iPhone"
+                            stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
+                        [UIApplication.sharedApplication openURL:[NSURL URLWithString:
+                            [@"https://www.google.com/search?q=" stringByAppendingString:q]]
+                                                         options:@{} completionHandler:nil];
+                        reshow ();
+                    }]];
+                    [a addAction:[UIAlertAction actionWithTitle:@"ปิด"
+                                                          style:UIAlertActionStyleCancel
                                                         handler:nil]];
                     [me presentViewController:a animated:YES completion:nil];
                     return;

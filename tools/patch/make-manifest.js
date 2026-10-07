@@ -154,7 +154,8 @@ const arg = (name, fallback) => {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
 const versionArg = parseInt(arg('version', ''), 10);
-const minApk = parseInt(arg('min-apk', '1'), 10);
+//  Only when given: otherwise minApk follows the APK in the store (minApkOut).
+const minApkArg = arg('min-apk', '');
 /*  The iOS build gate, and deliberately absent unless asked for.
  *
  *  minApk is an Android versionCode and says nothing about an iOS build, so
@@ -556,6 +557,30 @@ if (minIosOut === null) {
             : 'carried from the previous manifest';
 }
 
+/*  minApk follows the APK in the store, the way minIos follows the iOS build
+ *  (2026-10-07: "if the phone blocks the install, the player keeps the old app
+ *  and never sees the new version").
+ *
+ *  The launcher offers the new APK first; if the install is declined, blocked
+ *  or fails, only minApk can stop the old app from playing on - and at 1 it
+ *  never did, so an old binary kept running against new data and new servers.
+ *  Now every phone must be on the newest APK: below it, the launcher says
+ *  "ต้องอัปเดตแอปก่อนเล่น" and offers the install again on the next start.
+ *  The APK blob uploads before manifest.json, so the gate never names an APK
+ *  that is not there yet. It never goes down on its own; --min-apk still wins. */
+const prevMinApk = PREV && Number.isFinite(PREV.minApk) ? PREV.minApk : 1;
+let minApk, minApkWhy;
+if (minApkArg) {
+  minApk = parseInt(minApkArg, 10);
+  minApkWhy = 'given on the command line';
+} else {
+  const want = apk ? apk.versionCode : prevMinApk;
+  minApk = Math.max(prevMinApk, want);
+  minApkWhy = (apk && minApk === apk.versionCode && minApk !== prevMinApk)
+            ? 'raised to the APK in the store'
+            : 'carried from the previous manifest';
+}
+
 const changes = (() => {
   if (!PREV || !Array.isArray(PREV.files)) return null;   //  first ever build
   //  The seed flag is part of what a client is told to do with a file, so a
@@ -580,9 +605,10 @@ const changes = (() => {
   const apkChanged = apkWas !== apkNow;
   //  A raised gate has to reach clients in a new manifest, like any change.
   const minIosChanged = prevMinIos !== minIosOut;
-  return { added, changed, removed, apkChanged, minIosChanged,
+  const minApkChanged = prevMinApk !== minApk;
+  return { added, changed, removed, apkChanged, minIosChanged, minApkChanged,
            total: added.length + changed.length + removed.length +
-                  (apkChanged ? 1 : 0) + (minIosChanged ? 1 : 0) };
+                  (apkChanged ? 1 : 0) + (minIosChanged ? 1 : 0) + (minApkChanged ? 1 : 0) };
 })();
 
 let version, versionWhy;
@@ -1006,7 +1032,8 @@ console.log('payload  : ' + mb(bytes));
 console.log('blobs    : ' + linked + ' linked, ' + copied + ' copied, ' + kept + ' already present');
 console.log('manifest : ' + mb(fs.statSync(path.join(OUT, 'manifest.json')).size) +
             (signed ? '  + manifest.sig (' + signed + ' byte signature)' : '  UNSIGNED'));
-console.log('version  : ' + version + '  (' + versionWhy + ')   minApk: ' + minApk);
+console.log('version  : ' + version + '  (' + versionWhy + ')');
+console.log('           minApk: ' + minApk + '  (' + minApkWhy + ')');
 if (minIosOut !== null) console.log('           minIos: ' + minIosOut + '  (' + minIosWhy + ')');
 else console.log('           minIos: none - the iOS patcher will REFUSE this manifest (pass --min-ios <n>)');
 console.log('upload   : ' + global.__uploadSummary);

@@ -750,9 +750,7 @@ public class RanLauncher extends Activity {
             /*  A data patch cannot fix a client whose packet layout is stale,
              *  so this is a hard stop rather than a warning. Reopening the game
              *  offers the install again. */
-            fail("ต้องอัปเดตแอปก่อนเล่น",
-                 "เซิร์ฟเวอร์ต้องการแอปเวอร์ชัน " + minApk + " แต่เครื่องนี้เป็น " + myApk +
-                 "\nกรุณาเปิดเกมใหม่แล้วกดติดตั้งอัปเดต");
+            failApkTooOld(minApk, myApk);
             throw new Exception("apk too old");
         }
 
@@ -1374,6 +1372,56 @@ public class RanLauncher extends Activity {
 
     /*  Set by fail(): this run is over, and the retry loop must not restart it. */
     private volatile boolean mFatal = false;
+
+    /*  The app is older than the server allows and the install did not happen
+     *  (declined, blocked by the phone, no permission, failed download). The
+     *  player cannot play, so say exactly what to do, with the two ways out a
+     *  player can take from here: the download page, and a Google search in
+     *  Thai for their phone's brand (2026-10-07: "block the user and tell them
+     *  to search Google in Thai how to update the APK"). Same text and buttons
+     *  as the iOS stop (ran_ios_main.mm, fatal).                              */
+    private static final String APK_PAGE = "https://ran-legacy-m.com/launcher_mobile/android/";
+
+    private void failApkTooOld(int minApk, int myApk) {
+        mFatal = true;
+        final String title = "ต้องอัปเดตแอปก่อนเล่น";
+        final String msg =
+            "แอปในเครื่องนี้เป็นเวอร์ชันเก่า (" + myApk + ") ต้องเป็นเวอร์ชัน " + minApk + " ขึ้นไป\n" +
+            "การติดตั้งอัปเดตยังไม่สำเร็จ เครื่องอาจบล็อกการติดตั้งไว้\n\n" +
+            "วิธีแก้:\n" +
+            "1. เปิดเกมใหม่ แล้วกด อัปเดต / ติดตั้ง เมื่อระบบถาม\n" +
+            "2. ถ้าขึ้นว่าไม่อนุญาต ให้เปิด \"ติดตั้งแอปที่ไม่รู้จัก\" ให้ Ran Legacy M ในการตั้งค่า\n" +
+            "3. หรือกด ไปหน้าดาวน์โหลด แล้วติดตั้งแอปใหม่ทับ (ข้อมูลตัวละครไม่หาย)\n\n" +
+            "ถ้ายังทำไม่ได้ กด ค้นหาวิธีใน Google";
+        final String query = "วิธีติดตั้งไฟล์ apk อนุญาตติดตั้งแอปที่ไม่รู้จัก " + Build.MANUFACTURER;
+        ui.post(new Runnable() { public void run() {
+            bar.setVisibility(ViewGroup.INVISIBLE);
+            status.setText(title);
+            detail.setText(msg);
+            AlertDialog d = new AlertDialog.Builder(RanLauncher.this)
+                .setTitle(title).setMessage(msg).setCancelable(false)
+                .setPositiveButton("ไปหน้าดาวน์โหลด", null)
+                .setNeutralButton("ค้นหาวิธีใน Google", null)
+                .setNegativeButton("ปิด", null)
+                .create();
+            d.show();
+            //  The two links keep the dialog up: coming back from the browser
+            //  the player still needs the steps.
+            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { openUrl(APK_PAGE); } });
+            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    try {
+                        openUrl("https://www.google.com/search?q=" + java.net.URLEncoder.encode(query, "UTF-8"));
+                    } catch (Exception e) { openUrl("https://www.google.com/"); }
+                } });
+        }});
+    }
+
+    private void openUrl(String url) {
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
+        catch (Throwable t) { Log.w(TAG, "no browser for " + url); }
+    }
 
     private void fail(final String title, final String msg) {
         mFatal = true;

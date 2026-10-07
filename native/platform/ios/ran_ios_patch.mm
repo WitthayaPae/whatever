@@ -541,11 +541,17 @@ extern "C" void RanIOS_RunPatch ( RanPatchProgress say, RanPatchDone done )
             //  The one fatal ending, as RanLauncher.fail() is on Android: no
             //  amount of retrying fixes an app that is too old. "Title\nbody",
             //  in Thai like the rest of the page.
+            //  The same steps and two buttons as Android's failApkTooOld
+            //  (ran_ios_main.mm adds the buttons for this fatal stop).
             done ( NO, YES, [NSString stringWithFormat:
-                        @"เวอร์ชันแอปเก่าเกินไป\n"
-                        @"เซิร์ฟเวอร์ต้องการแอปเวอร์ชัน %d แต่เครื่องนี้เป็น %d\n"
-                        @"กรุณาอัปเดตแอปใน AltStore หรือ SideStore",
-                        minIos, myBuild] );
+                        @"ต้องอัปเดตแอปก่อนเล่น\n"
+                        @"แอปในเครื่องนี้เป็นเวอร์ชันเก่า (%d) ต้องเป็นเวอร์ชัน %d ขึ้นไป\n"
+                        @"วิธีแก้:\n"
+                        @"1. เปิด LocalDevVPN กด Connect แล้วเปิด SideStore\n"
+                        @"2. ไปที่แท็บ My Apps แล้วกด Update ที่ RAN Legacy M\n"
+                        @"3. หรือกด ไปหน้าวิธีติดตั้ง แล้วทำตามขั้นตอน\n"
+                        @"ถ้ายังทำไม่ได้ กด ค้นหาวิธีใน Google",
+                        myBuild, minIos] );
             return;
         }
 
