@@ -12,6 +12,35 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-07 — name#ID everywhere a player name is shown (everyone sees it)
+
+- **Helper:** `Lib_Client/G-Logic/GLCharNameTag.h`.
+  - `RanNameTag(name, charID)` returns "name#id", or the plain name when the id is 0 or unknown.
+  - `RanNameUntag` strips a trailing "#digits".
+  - Display only: lookups (head position, whisper target, friend and party tests) keep the plain name.
+- **Client-only, ID already on the client:**
+  - Name plates: `CROWREN::m_dwCharID`, players only.
+  - Stall box and stall window title.
+  - Target info: 6 functions. The war-map random-name code is left alone.
+  - Trade request and trade window.
+  - Club list: 3 sites.
+  - Friend list (selection uses the stored char id).
+- **Chat:** `dwCharID` appended LAST to `NET_CHAT_FB` / `NET_CHAT_CTRL_FB`.
+  - Filled at 8 Agent sites (including loudspeaker) and 2 Field sites.
+  - The client reads it only when `nmg.dwSize` holds it, so an older server shows plain names.
+  - Shown as `[name#id]:` in all 7 chat types and in whispers.
+  - Double-click-to-whisper uses `RanNameUntag`. The head chat bubble keeps the plain name.
+- **Party:** new `NET_MSG_GCTRL_PARTY_CHARID` (GCTRL+3996, `SNET_PARTY_CHARID`), sent by the Agent
+  to every member after a party forms or grows (`SendPartyCharIDs`). `GLPARTY_FNET` was not grown,
+  because it is an array element. The client keeps a gaea id → char id map
+  (`GLPartyClient::GetMemberCharID`, falling back to anyone in view). Party window, mini-party and
+  party display all show name#id.
+- **LDPlayer against the live (old) servers:** plates show `admin#1` and other players' names with
+  `#id`; NPCs are unchanged.
+- **Not verified:** chat and party need the new ServerAgent/ServerField. Club, friend, target and
+  trade were not opened in this test.
+- **Builds:** arm64 + x86_64; PC MiniA, Emulator, ServerAgent, ServerField.
+
 ## 2026-10-07 — Wrong password took over 5 s to report
 
 - **Measured on LDPlayer against the live Agent (RanChal log):**
