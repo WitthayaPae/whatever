@@ -12,6 +12,79 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-07 — Trusted merchant (new feature, not shipped yet)
+
+- **What:** an account flag and title in `UserInfo` (`UserMerchant`, `UserMerchantTitle`,
+  `MOBILE/server/merchant.sql`). In ตลาดปลอดภาษี (map 22,0) only, a merchant's name is green
+  (`BRIGHTGREEN`) with the title on its own line above the plate. With a stall open, the stall
+  box gets the title as a green first line and a green name.
+- **Set it:** in the DB (applies the next time the character enters the world), or live with
+  `/merchant <char> <0|1> [title]` (GM `USER_MASTER`+). The command also saves to the DB.
+- **Data path:**
+  1. `CGetChaInfoAndJoin::Execute` reads the columns with `GetUserMerchant` (a separate query, so
+     missing columns mean "not a merchant" and never block login) into `GLCHARAG_DATA`.
+  2. The Agent sends them to the Field in `NET_GAME_JOIN_FIELDSVR`, at all four join sites.
+  3. The Field carries them in the internal `SINFO` onto `GLChar` (both join paths in
+     `s_CFieldServerMsg.cpp`).
+  4. Other players get them in `SDROP_CHAR`. The fields are appended LAST; `static_assert`
+     keeps `SNETDROP_PC` within 2048 bytes (1728 before).
+  5. Your own client gets `NET_MSG_GCTRL_MERCHANT_BRD` from `GLChar::MsgReady`, on every map entry.
+- **GM window:** the Player tab has a ข้อความพ่อค้า field (32-byte limit) and ตั้งพ่อค้า /
+  ยกเลิกพ่อค้า buttons, which run `/merchant` with ชื่อตัวละคร. The Thai labels are in
+  `gameword.xml` (`GM_FIELD3` 4, `GM_BTN3` 15-16, `GM_MSG` 14), packed into the `Ran/` and
+  `CLIENT/` `Gui.rcc`; only that entry changed. Checked on LDPlayer: the labels show, and an empty
+  name gives the warning without sending.
+- **Player tab list (user: "search by name and select from the list so it will not mismatch"):**
+  - The Player tab now shows the online-player list (`/dsp allplayer`, the same list as Tele's
+    search) and filters as you type.
+  - Picking a row fills ชื่อตัวละคร and ไอดีตัวละคร exactly, for every Player-tab button.
+  - New รีเฟรชรายชื่อ button (`GM_BTN3` 17).
+  - LDPlayer: 11 players listed; picking kimura gave `kimura` / `524`; typing "doh" left only
+    `DoH_TH (id 519)`.
+- **GM path:** `NET_MSG_GM_MERCHANT` → `GLAgentServer::MsgGmMerchant`. It updates the Agent's
+  copy, adds a DB job (`CSetUserMerchant`), sends `_FLD` to every channel
+  (`GLGaeaServer::GMCtrolMerchantFld`, which broadcasts around the character), and replies `_FB`.
+- **Client:**
+  - `CROWREN::MerchantPlate` runs after the other colour rules and checks the map.
+  - `CNameDisplay::SetMerchant` is a separate text box above the plate. It joins the mobile text
+    pass and is hidden in the plate pass.
+  - `CPrivateMarketShowMan` rebuilds an open stall's box when the merchant state changes.
+  - A drop message from an older server (too short to hold the fields) reads as "not a merchant".
+- **Verified on LDPlayer** with a temporary client diag that marked me and the players around
+  as merchants (removed): green name and a centred green title above the plate, for me and for
+  another player.
+- **Builds:** arm64 + x86_64; PC MiniA, Emulator, ServerAgent, ServerField.
+- **Not verified:** the server half (the DB read, `/merchant`, the broadcast). It needs the new
+  servers and the SQL on the live DB. The stall-box line was not seen either (opening a stall
+  needs a market card).
+- **Deploy:** the Agent and **every** Field server together, because the Agent → Field join
+  message grew, plus the client patch. Old clients keep working (they ignore the appended fields).
+
+## 2026-10-07 — Bus: ตลาดปลอดภาษี stop went to MP
+
+- **How the bus works:**
+  - `busmain.ini` holds the stop list, one `Statin_Info = MID,SID,PROBABILITY,LINK,map,stop` per
+    stop. The file's own comment lists 5 fields, which is stale; read order is in `GLBusList.cpp`.
+  - The client sends LINK. The server looks it up in `busstation.ini`
+    (`STATION = [used][id][MID,SID][gate][names]`, `GLGaeaServerMsg.cpp` ~6036) and moves the
+    character to that map and gate.
+  - The game reads both files from `GLogic.rcc`, not the loose files (PC unless started with
+    `no_rcc`; mobile always). Both files are AES-256-ECB with a version-8 prefix (`gamecrypt.js`)
+    and zero padding.
+- **Bug:** the ตลาดปลอดภาษี line had LINK 10, which is MP Restaurant (map 6, gate 4).
+- **Fix, as the user asked (trade zone = map 22 `tradezone`, gate 0):**
+  - `busmain.ini`: LINK 10 → 20.
+  - `busstation.ini`: station 20's gate 2 → 0.
+  - Applied to the loose `CLIENT/data/glogic/` files and to both `CLIENT/` and `Ran/` `GLogic.rcc`
+    (`rcc-pack.js`, every entry verified).
+  - Each file differs from its original by exactly 1 byte; no other archive entry changed.
+  - Re-encrypting the originals reproduced them byte for byte.
+  - Backups are in the session scratchpad (`busbak/`).
+- **Verified:** the repacked `Ran/` archive loads on LDPlayer and the game reaches the world.
+  **Not verified:** an actual bus ride. That needs a ticket, and the gate change only takes effect
+  once the server's `busstation.ini` is updated: the server decides where you land. With only the
+  client change, the stop goes to tradezone gate 2.
+
 ## 2026-10-07 — Chat channel button drawn over other windows
 
 - **Symptom:** the channel button in front of the chat input stayed on top of any window opened
