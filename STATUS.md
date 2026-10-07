@@ -12,6 +12,28 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-07 — Trade round 2 (user tested 228: icon off the finger, iPhone could not drag)
+
+- **Icon not under the finger:** the carried icon snaps onto the cell under the finger, in that
+  window's own layout coordinates. `DxGameStage`'s carried-icon code turns those into screen
+  positions only for windows in its list, and the trade windows were not in it. Over the enlarged
+  trade box the icon was drawn about half a cell off (1:1 crop: finger on cell 1,0, icon over
+  0,0/0,1). `TRADE_WINDOW` and `TRADEINVENTORY_WINDOW` are added to that list, and the icon now
+  sits on the cell under the finger.
+- **iPhone drag:** a finger that rests before moving (the iOS drag habit) becomes a hold (right
+  button at 450 ms; `GESTURE right(hold)` in the log). The trade bag ignored a hold, and the trade
+  box only took a left release. The trade bag now picks on a hold too, and the trade box places
+  on the right release while an item is picked.
+- **Leftover icon:** a drag let go outside both trade windows left the item picked, so its icon
+  stayed on screen. On mobile, a release outside the trade window and the trade bag now clears
+  the pick.
+- **LDPlayer, temporary local trade (removed), finger held with `input motionevent`:**
+  - Quick drag, hold-then-drag and tap-tap all log `box to 1,0 pre valid=1 1,3`.
+  - Mid-drag 1:1 crops show the icon on the target cell, and following the finger over open ground.
+  - Letting go on the ground leaves no icon.
+- **Not verified:** a real trade with a second player, a real phone, or an iPhone. The iPhone
+  cause is inferred from the hold gesture reproduced on LDPlayer.
+
 ## 2026-10-07 — Trade: windows overlapped, items could not be dragged in
 
 - **Overlap:** each window was enlarged on its own, about its own centre, so the trade bag
