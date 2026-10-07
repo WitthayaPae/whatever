@@ -12,6 +12,59 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-07 — Item link from chat showed different info than the bag (not shipped yet)
+
+- **Problem (user):** tapping a linked item in chat showed the card tooltip
+  (`ITEM_INFOR_TOOLTIP_LINK`), while the bag shows the classic `INFO_DISPLAY`. Same item,
+  two different-looking windows. The data was identical (`SITEMLINK` carries all of
+  `SITEMCUSTOM`).
+- **Fix (SOURCE, both platforms):**
+  - `SHOW_INFO_ITEM_LINK` fills the classic link window (`INFO_DISPLAY_ITEM_LINK`) with the
+    same `NS_ITEMINFO::LOAD` the bag uses. Link mode is switched on before the load. The old
+    commented-out code switched it off first, so the text went to the bag's window.
+  - The window is shown with `ShowGroupFocus`, not `ShowGroupTop`. The top list takes no
+    taps, so taps went through and walked the character (user: "it can click through").
+  - `CBasicVarTextBoxItemLink`: the close button's messages were commented out, so they
+    were restored. Text is centred like `CBasicVarTextBox`.
+  - `InnerInterfaceMsg`: the classic window's close calls `CLEAR_INFO_ITEM_LINK`. ESC and
+    close-all clear the link too.
+  - The weapon-skill panel (`INFO_DISPLAY_ITEM_LINK_EX`) is added to the mobile pop-up
+    magnify list.
+- **Also fixed (Android only, `android_main.cpp`):** Return from a hardware or emulator
+  keyboard could not send chat.
+  - The DOWN went in as a newline character, and LDPlayer's keyboard swallows the DOWN
+    entirely (measured: only action=UP reached native).
+  - Return in an open field is now one `RanInput_KeyTap(0x1C)` on whichever edge comes
+    first. iOS already maps "\n" to the same tap.
+- **LDPlayer:** checked on x86_64.
+  - The linked bracelet (กำไล Adoniechus [1 วัน]) showed the same lines as the bag:
+    expiry 26/10/08 20:17, defence 2, resists 10, EXP 1.50.
+  - A tap inside the window, and on the F1 button under it, did not move the character
+    (log: `GESTURE left(tap/drag)`).
+  - The X closed it.
+  - Return sent chat (log: keytap 28, then enter taken).
+- **Builds:** arm64 + x86_64 0 errors. MiniA, Emulator, ServerAgent and ServerField build
+  with 0 errors.
+- **Not verified:** iPhone.
+
+## 2026-10-07 — Forced app update (v234)
+
+- **Problem (user):** if the phone blocks or the player declines the APK install, they kept
+  playing the old app against new data and servers. `minApk` was always 1.
+- **Fix:**
+  - `make-manifest.js`: `minApk` now follows the APK in the store, like `minIos`. It never goes
+    down on its own, `--min-apk` still wins, and a change counts as a manifest change.
+  - Launcher (`RanLauncher.failApkTooOld`): the block screen gives Thai steps and three buttons:
+    ไปหน้าดาวน์โหลด (the APK page), ค้นหาวิธีใน Google (a Thai query plus `Build.MANUFACTURER`),
+    and ปิด.
+  - iOS: the same steps for SideStore, with buttons ไปหน้าวิธีติดตั้ง (install.html) and
+    ค้นหาวิธีใน Google.
+- **LDPlayer** (temporary `apkblocktest` trigger, removed): the screen renders, and the Google
+  button opened Chrome on "วิธีติดตั้งไฟล์ apk อนุญาตติดตั้งแอปที่ไม่รู้จัก OnePlus".
+- **Not verified:** the iOS screen on a device (both button labels are in the binary as UTF-16).
+- **Note:** apps ≤233 are blocked by their own older message, without the buttons.
+- **Patch 234:** manifest 709, minApk 234, minIos 234.
+
 ## 2026-10-07 — name#ID everywhere a player name is shown (everyone sees it)
 
 - **Helper:** `Lib_Client/G-Logic/GLCharNameTag.h`.

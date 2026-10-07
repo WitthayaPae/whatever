@@ -856,6 +856,25 @@ int32_t onInputEvent(android_app *app, AInputEvent *event) {
         const int32_t action = AKeyEvent_getAction(event);
         const int32_t keyCode = AKeyEvent_getKeyCode(event);
 
+        //  Return in an open field sends the line, as on iOS (newline ->
+        //  RanInput_KeyTap) and the Java InputConnection (enter()). Measured on
+        //  LDPlayer 2026-10-07: the keyboard app keeps Return's DOWN and only the
+        //  UP reaches us, so chat could not be sent from a keyboard; and a DOWN
+        //  that did arrive was asked for its character below and went into the
+        //  field as a newline. One tap per press, on whichever edge comes first:
+        //  a tap because the client wants the key down on a poll plus the latch.
+        if (g_imeActive && (keyCode == AKEYCODE_ENTER || keyCode == AKEYCODE_NUMPAD_ENTER)) {
+            static bool s_enterTapped = false;
+            if (action == AKEY_EVENT_ACTION_DOWN) {
+                if (AKeyEvent_getRepeatCount(event) == 0) RanInput_KeyTap(0x1C);
+                s_enterTapped = true;
+            } else if (action == AKEY_EVENT_ACTION_UP) {
+                if (!s_enterTapped) RanInput_KeyTap(0x1C);
+                s_enterTapped = false;
+            }
+            return 1;
+        }
+
         //  While a field is open, keys are text first.
         if (g_imeActive && action == AKEY_EVENT_ACTION_DOWN) {
             if (keyCode == AKEYCODE_DEL) { RanIME_Backspace(); return 1; }
