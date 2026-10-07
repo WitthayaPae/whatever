@@ -12,6 +12,25 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-07 — Trade: windows overlapped, items could not be dragged in
+
+- **Overlap:** each window was enlarged on its own, about its own centre, so the trade bag
+  (`TRADEINVENTORY_WINDOW`) covered the right half of `TRADE_WINDOW`, including its buttons. The
+  trade pair now uses the same arrangement as an NPC shop or locker and the bag. The trade window
+  is set 8 units left of the bag, both are enlarged as one set (log: `drawn with its pair -> x1.50`),
+  and they no longer overlap (LDPlayer screenshot).
+- **Drag:** the trade bag picked an item only when the finger was released over that item (the
+  PC's click). A drag is released over the trade box, so nothing was picked.
+  `CInventoryUI_Trade` now also picks on the press. Trade picking is local (`ReqInvenTo` only
+  remembers the cell), so this costs no server traffic.
+- **Measured on LDPlayer with a temporary local trade (`tradedemo` diag, removed):**
+  - A drag from bag cell 0,3 to trade cell 0,0 called `ReqTradeBoxTo` with the item selected.
+  - Tap item then tap box: works (cell 1,3 to cell 1,0).
+  - Tapping an empty cell clears the selection.
+- **Not verified:** a real trade with a second player. The server ignores trade messages when no
+  trade is open, so the item landing in the box and the lock/OK flow were not seen.
+- **Builds:** arm64 + x86_64; PC MiniA, Emulator, ServerAgent, ServerField.
+
 ## 2026-10-07 — Touch controls black squares after re-login (player report, patch 226)
 
 - **Symptom:** a player's screenshot showed every painted touch control (stick, skill rims, pad
