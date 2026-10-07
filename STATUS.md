@@ -12,6 +12,36 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-07 — Wrong password took over 5 s to report
+
+- **Measured on LDPlayer against the live Agent (RanChal log):**
+  - salt asked 47.608 → salt answered 47.805 → **no answer in 5000 ms** at 52.810 → classic login.
+  - The DB was not the cost: `fn_PassHash` takes 3.1 ms, so at most ~12 ms for a wrong password.
+- **Cause:** `CAgentServer::MsgLoginChallenge` deliberately sends nothing when the challenge answer
+  doesn't match, so the client waits `CHALLENGE_FB_WAIT` (5 s) before the classic login.
+  - The fallback must stay: accounts whose hash was stored before FIX_09 (not lowercased) only
+    match through `sp_PassCheck`.
+- **Fix:** new `NET_MSG_LOGIN_CHALLENGE_RETRY` (`NET_MSG_LOBBY+154`, `NET_LOGIN_CHALLENGE_RETRY_DATA`).
+  - The Agent sends it on a mismatch; the client (`MsgLoginChallengeRetry` → `ChallengeFallBack`)
+    sends the classic login immediately.
+  - Old clients ignore the unknown message and keep the 5 s timer. An old Agent sends nothing,
+    so new clients behave as before.
+- **Builds:** arm64 + x86_64; PC MiniA, Emulator, ServerAgent, ServerField.
+- **Not verified:** the fast path needs the new ServerAgent live.
+
+## 2026-10-07 — Private stall window overlapped the bag
+
+- **Symptom (user):** setting up a stall, the bag covered the stall window.
+- **Cause:** the same as the trade. `SetPrivateMarketOpen`/`..Buy` open `PRIVATE_MARKET_WINDOW`
+  edge to edge with `TRADEINVENTORY_WINDOW`, and each was enlarged about its own centre.
+- **Fix:** `MobileTradeBagPartner()` returns the trade window or the stall window that is up
+  beside the trade bag. The pair is placed side by side and enlarged as one set, for both the
+  seller's setup and a buyer viewing a stall. `PRIVATE_MARKET_WINDOW` is also in the
+  carried-icon window list.
+- **LDPlayer** (temporary `pmarketdemo` diag calling `SetPrivateMarketOpen(true, me)`, removed):
+  stall window and bag side by side; log `window 75 drawn with its pair -> x1.50`.
+- **Note:** patch 231 was built but not uploaded; this needs a rebuild (232).
+
 ## 2026-10-07 — Trusted merchant (new feature, not shipped yet)
 
 - **What:** an account flag and title in `UserInfo` (`UserMerchant`, `UserMerchantTitle`,
