@@ -12,7 +12,7 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
-## 2026-10-07 — Item link from chat showed different info than the bag (not shipped yet)
+## 2026-10-07 — Item link from chat showed different info than the bag (shipped: manifest 711, app 235)
 
 - **Problem (user):** tapping a linked item in chat showed the card tooltip
   (`ITEM_INFOR_TOOLTIP_LINK`), while the bag shows the classic `INFO_DISPLAY`. Same item,
