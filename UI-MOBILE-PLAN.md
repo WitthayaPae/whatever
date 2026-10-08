@@ -304,6 +304,12 @@ ships, on both platforms (shared code; iOS checked through CI + the store build)
   paged, classic status line per row, + learns (ReqNonInvenSkill) / levels up (same confirm modal),
   "ใส่ปุ่ม" opens a ring-slot picker F1-F4 x10 (ReqSkillQuickSet) instead of the drag. Verified on
   LDPlayer incl. a real slot set. Kit: taps deferred to one topmost per frame (see memory).
+- 2026-10-09: **ภารกิจ, NPC talk, locker, NPC shop done.** All four keep the classic window open
+  but hosted (engine: CUIControl::SetMobileHosted - no update, draw or hit area) and drive it
+  through small Mobile* hooks, so every dialog/request path is the classic one. Verified on
+  LDPlayer: quest list/detail/completed tab; talk sheet, page change, open locker; locker move
+  in/out, locked page, X closes both. **NPC shop built, NOT yet tested on device** (no shop NPC
+  reached yet). Also fixed: storage long-press opened the item-shop sheet; commission modal NPC.
 
 ## 6. Open questions for the user
 

@@ -209,6 +209,7 @@ set(Lib_ClientUI_SOURCES
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileQuestPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileTalkPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileStoragePanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileShopPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileChatMacroBar.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileChatChannelBar.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileMiniMap.cpp
