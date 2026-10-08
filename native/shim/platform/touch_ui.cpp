@@ -42,6 +42,7 @@ extern "C" int RanUI_PointInDragControl(int x, int y) __attribute__((weak));
 //  on a skill button, while an open window over the arc must still get its
 //  press.
 extern "C" int RanUI_PointInWindowOverSkill(int x, int y) __attribute__((weak));
+extern "C" int RanUI_PointInMobilePanel(int x, int y) __attribute__((weak));
 
 #define LOGI(...) RanPlat_Log(RANLOG_INFO,  "RanTouch", __VA_ARGS__)
 #define LOGE(...) RanPlat_Log(RANLOG_ERROR, "RanTouch", __VA_ARGS__)
@@ -1792,7 +1793,11 @@ int RanTouch_PointerDown(int id, float x, float y) {
             ? (fabsf(x - bc.centre.x) <= bc.radius * RANTOUCH_CHATBAR_ASPECT &&
                fabsf(y - bc.centre.y) <= bc.radius)
             : hit(bc.centre, bc.radius, x, y);
-        if (bc.pointer < 0 && onIt) {
+        //  Unless a redesigned window (CMobilePanel) is over it: then the
+        //  press is the window's, like everywhere else.
+        const bool panelOver = RanUI_PointInMobilePanel &&
+                               RanUI_PointInMobilePanel((int)x, (int)y);
+        if (bc.pointer < 0 && onIt && !panelOver) {
             bc.pointer = id;
             bc.down = true;
             bc.pressedEdge = true;
