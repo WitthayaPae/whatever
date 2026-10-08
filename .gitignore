@@ -99,3 +99,5 @@ tools/ad-art/src/*.png
 # App Store Connect API key (.p8) for TestFlight uploads - never commit.
 native/.appstore/
 *.p8
+# The Play upload key passwords - see native/android/store-bundle.sh (store branch).
+native/.signing-upload
