@@ -12,6 +12,30 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-08 — Shockwave skills drew a white disc (Makaze Kick) (not shipped yet)
+
+- User: Makaze Kick's effect looks white, no texture. Its hit effect SBA108_SK.egp: all six
+  textures/meshes exist and decode (incl. RLE TGA). The white disc is its WAVE node ->
+  DxEnvironment::DxWave refraction: a fan sampling the screen copy (m_pWaveTex) with stage 0
+  TCI_CAMERASPACEPOSITION + PROJECTED|COUNT3 and D3DTS_TEXTURE0 = invView*VP*scale
+  (DxSetTextureMatrix). The shim had no stage-0 texcoord generation - every vertex used UV
+  (0,0), one corner of the screen copy: a flat bright disc.
+- Fix (shim, Android + iOS): d3d9_impl sends RanGLR_SetTexGen0 when stage 0 asks for camera-
+  space position projected; shader uTexGen0/uTexMat0: uv = (TEX0 * (View*worldPos)).xy / z.
+- LDPlayer, test01 ทดสอบๆ#603, Makaze Kick on a Little Vulgarian: before = white blob/disc,
+  after = refracted ground with a soft ring. Every other skill using a WAVE node is covered.
+- Built x86_64 + arm64 0 errors (shim only, PC unaffected). Not on an iPhone.
+
+## 2026-10-08 — Auto-potion 1-second wait removed (not shipped yet)
+
+- User removed the cooldown from the potion items themselves and asked for the code wait to
+  go too. Removed: RunAutoPots per-slot m_fAutoPotWait 1 s, its IsAutoDrugPending(1000) skip,
+  the same gate in ReqAutoDrug, and the pet auto-potion's two IsAutoDrugPending(1000) skips
+  (GLPetClientSkill). Kept: the chat silence for a server refusal of an auto request (3 s).
+- Risk noted to the user: with no wait at all, the loop (every 0.01 s) can send a second
+  request before the server's answer arrives - possible double drink on a laggy link.
+- Built: both mobile ABIs, MiniA/Emulator/Agent/Field 0 errors. Not tested in game.
+
 ## 2026-10-08 — +N enhance glow drawn as a blotchy cloud (not shipped yet)
 
 - User: samatos#536's +7 sword showed the blade covered by a cloudy blue/purple texture.

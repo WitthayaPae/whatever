@@ -330,6 +330,11 @@ const char *kFS =
     "uniform int  uStage1;\n"
     "#endif\n"
     "uniform mat4 uView;\n"
+    //  Stage 0 coordinates generated from the camera-space position through
+    //  D3DTS_TEXTURE0, projected (TCI_CAMERASPACEPOSITION + PROJECTED|COUNT3):
+    //  the refraction ripple samples the screen copy this way.
+    "uniform int  uTexGen0;\n"
+    "uniform mat4 uTexMat0;\n"
     "\n"
     "vec4 argValue(int arg, vec4 tex, vec4 diffuse) {\n"
     "    int sel = arg & 7;\n"          // low bits pick the source
@@ -431,6 +436,12 @@ const char *kFS =
     "        } else {\n"
     "            uvS = sharpUV(vUV);\n"
     "        }\n"
+    "    }\n"
+    "    if (uTexGen0 == 1) {\n"
+    "        vec4 cp = uView * vec4(vWorldPos, 1.0);\n"
+    "        vec4 t = uTexMat0 * vec4(cp.xyz, 1.0);\n"
+    "        float tz = (abs(t.z) < 0.0001) ? 0.0001 : t.z;\n"
+    "        uvS = t.xy / tz;\n"
     "    }\n"
     "    vec4 tex = (uUseTexture == 1) ? texture(uTex, uvS) : vec4(1.0);\n"
     "    if (uPlain == 1) { oColor = tex * vColor; return; }\n"
@@ -690,6 +701,8 @@ bool   g_reflectChars = false;
 int    g_shadowBudget = 6;
 int    g_shadowLeft = 0;
 int    g_stage1Mode = 0;
+int    g_texGen0 = 0;
+float  g_texMat0[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
 unsigned g_stage1Cube = 0;
 float  g_viewMatrix[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
 GLint  uFlipY = -1, uWorldM = -1, uViewProj = -1, uVertexBlend = -1, uIndexedBlend = -1;
@@ -709,7 +722,7 @@ GLint  uMVP = -1, uViewport = -1, uPreTransformed = -1, uTex = -1,
        uUseTexture = -1, uAlphaTest = -1, uAlphaRef = -1,
        uColorOp = -1, uColorArg1 = -1, uColorArg2 = -1,
        uAlphaOp = -1, uAlphaArg1 = -1, uAlphaArg2 = -1, uTexFactor = -1,
-       uTexCube = -1, uStage1 = -1, uView = -1,
+       uTexCube = -1, uStage1 = -1, uView = -1, uTexGen0 = -1, uTexMat0 = -1,
        uTexSize = -1, uUiSharpen = -1,
        uGammaOn = -1, uGammaLut = -1, uPlain = -1;
 GLuint g_vbo = 0, g_ibo = 0, g_vao = 0;
@@ -1408,6 +1421,8 @@ void fetchUniformLocations(GLuint prog) {
     uTexCube        = glGetUniformLocation(prog, "uTexCube");
     uTexStage1      = glGetUniformLocation(prog, "uTexStage1");
     uStage1         = glGetUniformLocation(prog, "uStage1");
+    uTexGen0        = glGetUniformLocation(prog, "uTexGen0");
+    uTexMat0        = glGetUniformLocation(prog, "uTexMat0");
     uTexSize        = glGetUniformLocation(prog, "uTexSize");
     uUiSharpen      = glGetUniformLocation(prog, "uUiSharpen");
     uPanelH         = glGetUniformLocation(prog, "uPanelH");
@@ -1469,7 +1484,7 @@ GLint *const kLocationVars[] = {
     &uMVP, &uViewport, &uPreTransformed, &uFlipY, &uMatAlpha, &uWorldM, &uViewProj,
     &uVertexBlend, &uIndexedBlend, &uTex, &uUseTexture, &uAlphaTest, &uAlphaRef,
     &uColorOp, &uColorArg1, &uColorArg2, &uAlphaOp, &uAlphaArg1, &uAlphaArg2,
-    &uTexFactor, &uTexCube, &uStage1, &uTexSize, &uUiSharpen, &uPanelH, &uUiOrigin, &uTexHD, &uGammaOn, &uPlain,
+    &uTexFactor, &uTexCube, &uStage1, &uTexGen0, &uTexMat0, &uTexSize, &uUiSharpen, &uPanelH, &uUiOrigin, &uTexHD, &uGammaOn, &uPlain,
     &uGammaLut, &uSpecularOn, &uMatSpecular, &uMatPower, &uLightSpecular, &uView,
     &uWorld, &uCameraPos, &uCameraPosF, &uLighting, &uLightCount, &uGlobalAmbient,
     &uMatDiffuse, &uHasVertexColor, &uMatAmbient, &uMatEmissive, &uLightType,
@@ -2413,6 +2428,13 @@ extern "C" void RanGLR_SetVertexBlend(int weightCount, const float *worldMatrice
 
 //  Stage 1, bound once per draw. mode 1 means "cube map by camera-space normal";
 //  0 turns the stage off. The cube texture stays on texture unit 1.
+//  Stage 0 texture coordinate generation (see uTexGen0). mode 0 = mesh UVs.
+extern "C" void RanGLR_SetTexGen0(int mode, const float *texMatrix, const float *viewMatrix) {
+    g_texGen0 = mode;
+    if (mode && texMatrix) memcpy(g_texMat0, texMatrix, sizeof(g_texMat0));
+    if (mode && viewMatrix) memcpy(g_viewMatrix, viewMatrix, sizeof(g_viewMatrix));
+}
+
 extern "C" void RanGLR_SetStage1(int mode, unsigned glCubeTex, unsigned gl2DTex,
                                  const float *viewMatrix) {
     //  1 and 3 are the two cube-map addressings and need a cube bound; 2 is a
@@ -2532,7 +2554,9 @@ void applyProgramUniforms() {
     }
     setUniformVec4(uTexFactor, g_texFactor);
     setUniform1i(uStage1, (g_fsProbe & 2) ? 0 : g_stage1Mode);
-    if (g_stage1Mode) setUniformMatrix(uView, g_viewMatrix, 1);
+    if (g_stage1Mode || g_texGen0) setUniformMatrix(uView, g_viewMatrix, 1);
+    setUniform1i(uTexGen0, g_texGen0);
+    if (g_texGen0) setUniformMatrix(uTexMat0, g_texMat0, 1);
 
     setUniform1i(uVertexBlend, g_vertexBlend);
     //  "palettetrim": send only the slots this draw can index. The engine fills

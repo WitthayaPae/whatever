@@ -55,6 +55,7 @@ void RanGLR_SetFog(int enabled, int mode, const float *color,
 // selected the texture alone and the vertex colour happens to be black.
 // Stage 1: mode 1 modulates a cube map addressed by the camera-space normal
 // into the stage 0 result, which is what the character specular passes ask for.
+void RanGLR_SetTexGen0(int mode, const float *texMatrix, const float *viewMatrix);
 void RanGLR_SetStage1(int mode, unsigned glCubeTex, unsigned gl2DTex,
                       const float *viewMatrix);
 

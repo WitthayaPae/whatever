@@ -2458,6 +2458,19 @@ public:
             RanGLR_SetStage1(mode, cube, stage2D, (const float *)&m_transform[D3DTS_VIEW]);
         }
 
+        {
+            //  The refraction ripple (DxEnvironment::DxWave, DxSetTextureMatrix):
+            //  stage 0 addressed by the camera-space position through
+            //  D3DTS_TEXTURE0, projected. Ignored, every vertex sampled one
+            //  corner of the screen copy - a flat white disc on Makaze Kick and
+            //  every other shockwave skill (2026-10-08).
+            const DWORD tci0 = m_textureStageState[0][D3DTSS_TEXCOORDINDEX];
+            const DWORD ttf0 = m_textureStageState[0][D3DTSS_TEXTURETRANSFORMFLAGS];
+            const bool gen = (tci0 & 0xFFFF0000u) == D3DTSS_TCI_CAMERASPACEPOSITION &&
+                             (ttf0 & D3DTTFF_PROJECTED) != 0;
+            RanGLR_SetTexGen0(gen ? 1 : 0, (const float *)&m_transform[D3DTS_TEXTURE0],
+                              (const float *)&m_transform[D3DTS_VIEW]);
+        }
         RanGLR_SetTextureStage(m_textureStageState[0][D3DTSS_COLOROP],
                                m_textureStageState[0][D3DTSS_COLORARG1],
                                m_textureStageState[0][D3DTSS_COLORARG2],
