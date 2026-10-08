@@ -107,6 +107,38 @@ jobs:
           /usr/libexec/PlistBuddy -c "Merge out/ios-store/icon-partial.plist" "$APP/Info.plist"
           ls -la "$APP/Assets.car"
 
+      #  The keys Xcode writes into every app it builds and this Makefile build
+      #  does not. App Store Connect reads DTXcode / DTSDKName to enforce the
+      #  minimum SDK, and refuses a bundle without the platform keys.
+      #  UIDeviceFamily 1,2 = iPhone and iPad (TARGETED_DEVICE_FAMILY only
+      #  reaches the Xcode generator). Store build only, so the SideStore
+      #  build's iPad behaviour is untouched.
+      - name: Add the toolchain keys
+        working-directory: MOBILE/native/out/ios-store
+        run: |
+          P=ran.app/Info.plist; PB=/usr/libexec/PlistBuddy
+          SDKV=$(xcrun --sdk iphoneos --show-sdk-version)
+          SDKB=$(xcrun --sdk iphoneos --show-sdk-build-version)
+          XV=$(xcodebuild -version | awk 'NR==1 {print $2}')
+          XB=$(xcodebuild -version | awk 'NR==2 {print $3}')
+          #  "26.6" -> "2660", "26.6.1" -> "2661", as Xcode writes DTXcode.
+          XC=$(echo "$XV" | awk -F. '{printf "%d%d%d", $1, $2, $3}')
+          set_s() { $PB -c "Delete :$1" "$P" 2>/dev/null || true; $PB -c "Add :$1 string $2" "$P"; }
+          set_s DTPlatformName iphoneos
+          set_s DTPlatformVersion "$SDKV"
+          set_s DTPlatformBuild "$SDKB"
+          set_s DTSDKName "iphoneos$SDKV"
+          set_s DTSDKBuild "$SDKB"
+          set_s DTXcode "$XC"
+          set_s DTXcodeBuild "$XB"
+          set_s DTCompiler com.apple.compilers.llvm.clang.1_0
+          set_s BuildMachineOSBuild "$(sw_vers -buildVersion)"
+          $PB -c "Delete :CFBundleSupportedPlatforms" "$P" 2>/dev/null || true
+          $PB -c "Add :CFBundleSupportedPlatforms array" -c "Add :CFBundleSupportedPlatforms:0 string iPhoneOS" "$P"
+          $PB -c "Delete :UIDeviceFamily" "$P" 2>/dev/null || true
+          $PB -c "Add :UIDeviceFamily array" -c "Add :UIDeviceFamily:0 integer 1" -c "Add :UIDeviceFamily:1 integer 2" "$P"
+          plutil -lint "$P"
+
       #  What App Store Connect will read, checked before anything is signed.
       - name: Check the bundle
         working-directory: MOBILE/native/out/ios-store
@@ -119,6 +151,9 @@ jobs:
           test "$(get CFBundleIconName)" = AppIcon
           test "$(get UIFileSharingEnabled)" = false
           test "$(get ITSAppUsesNonExemptEncryption)" = false
+          test "$(get DTPlatformName)" = iphoneos
+          case "$(get DTSDKName)" in iphoneos2[6-9]*|iphoneos[3-9][0-9]*) ;; *) echo "SDK below 26"; exit 1 ;; esac
+          test "$(get UIDeviceFamily:1)" = 2
           echo "version $(get CFBundleShortVersionString) build $(get CFBundleVersion)"
 
       - name: Collect the debug info
