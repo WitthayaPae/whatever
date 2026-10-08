@@ -12,7 +12,25 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
-## 2026-10-08 — Shockwave skills drew a white disc (Makaze Kick) (not shipped yet)
+## 2026-10-08 — Menu: ระบบ replaced by ตั้งค่า and ออก (not shipped yet)
+
+- User: remove ระบบ from the menu and put ตั้งค่า and ออก there instead, so there is no menu
+  inside a menu. Change character (relogin) is not needed.
+- New cells MOBILE_SETTINGS_BUTTON (opens OPTION_HW_WINDOW) and MOBILE_EXIT_BUTTON (the ESC
+  menu's exit confirm, MODAL_CLOSEGAME). They take ESCMENU_OPEN's place in
+  CMobileMenuWindow::IconList, with labels MOBILE_MENULABEL 21/22. ESCMENU_OPEN is hidden on
+  mobile. The Back key still opens the ESC menu window.
+- Art: two new cells in mobile_icons.dds at 256,384 (gear) and 384,384 (power), drawn on the
+  ranking cell's grey plate. Sources: tools/icon-art/settings.png, exit.png. The old gear at
+  256,256 belongs to ผลิตของ. pack.js does not know about these cells or the GM cell.
+- Data: uiinnercfg02.xml (2 controls) and gameword.xml (2 labels), repacked into Gui.rcc.
+  The patch has to carry Gui.rcc and textures/gui/mobile_icons.dds.
+- LDPlayer, test01: the menu shows ตั้งค่า and ออก and no ระบบ. ตั้งค่า opens options and closes
+  the menu. ออก shows "คุณต้องการออกจากเกมหรือไม่ ?". ไม่ keeps the game running. ใช่ ends the
+  process with no crash. arm64, x86_64 and PC (MiniA, Emulator, Agent, Field) all build.
+- iOS: shared SOURCE and data, no platform code. Not run on an iPhone.
+
+ drew a white disc (Makaze Kick) (not shipped yet)
 
 - User: Makaze Kick's effect looks white, no texture. Its hit effect SBA108_SK.egp: all six
   textures/meshes exist and decode (incl. RLE TGA). The white disc is its WAVE node ->
