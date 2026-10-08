@@ -19,9 +19,24 @@ If anything here disagrees with another file, this file wins.
   LOAD alignment 0x1000 (Play needs 16 KB), APK not AAB, manifest asks for
   REQUEST_INSTALL_PACKAGES and MANAGE_EXTERNAL_STORAGE (restricted), launcher installs its
   own APK (forbidden). Fix = a STORE=1 build variant; data patching stays.
+- Decided: IP risk accepted, personal accounts, store name "Legacy M Online", package
+  com.legacym.online.
+- **Android store build done on branch `store` (e2e6846), not on main.** `STORE=1 ./build-apk.sh`
+  makes out/RanMobile-store.aab (upload) + RanMobile-store.apk (test). Store manifest: target 36,
+  only INTERNET + ACCESS_NETWORK_STATE, appCategory game, back-callback opt-out; libran.so linked
+  16 KB (all 4 libs checked 0x4000); upload key native/android/upload.jks + native/.signing-upload
+  (gitignored - BACK UP). Launcher: store build never installs an APK; below minApk it shows
+  "ต้องอัปเดตแอปก่อนเล่น" with an อัปเดต button to Play.
+- LDPlayer (Android 14): store APK installed beside com.ran.native, data copied, patch check
+  "เป็นเวอร์ชันล่าสุด", test01 in-world. Test build versionCode 200: the Play stop shows, no
+  APK download, อัปเดต opens play.google.com/store/apps/details?id=com.legacym.online (no
+  Play app on LDPlayer). Not tested: a real Android 15/16 device (edge-to-edge, camera cutout,
+  predictive back), the Tab S9, a 16 KB-page emulator.
+- Found while testing: Back (ESC) does not open the ESC menu in either build - 4 presses in
+  the direct build, nothing. Same in both, so not the store change.
 - Still open:
-  - [ ] User: IP risk decision, personal vs organisation accounts, Apple $99/yr + Play $25.
-  - [ ] Claude: API 36 + 16 KB pages + AAB + store variant (Android), signed IPA + TestFlight upload (iOS).
+  - [ ] User: open Apple ($99/yr) and Play ($25) accounts.
+  - [ ] Claude: test the store build on the Tab S9 / an Android 15+ device; iOS signed IPA + TestFlight upload.
   - [ ] Privacy policy, account deletion, data safety, content rating, reviewer account.
 
 ---

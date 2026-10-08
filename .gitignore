@@ -98,3 +98,6 @@ native/.signing-upload
 
 # generated billboard art is large and lives outside the repo
 tools/ad-art/src/*.png
+# App Store Connect API key (.p8) for TestFlight uploads - never commit.
+native/.appstore/
+*.p8
