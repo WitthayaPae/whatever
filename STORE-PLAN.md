@@ -140,6 +140,11 @@ with a public link, every build through Beta App Review; builds expire after 90 
 6. Play: internal test, then closed test with 12+ testers for 14 days (personal
    account), then production. TestFlight: internal, then external review + public link.
 
+## Decisions
+
+- 2026-10-08: user accepts the IP risk.
+- 2026-10-08: personal accounts, so Play needs the 12-tester / 14-day closed test.
+
 ## Open questions
 
 - Store name and icon: our own, or keep "RAN LEGACY M"?
