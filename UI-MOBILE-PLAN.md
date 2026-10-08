@@ -217,7 +217,23 @@ optional, small, and gives the order for tiers 2 and 3.
 Each step: full interaction test per window, rects logged and checked at 1:1, before it
 ships, on both platforms (shared code; iOS checked through CI + the store build).
 
-## 5. Open questions for the user
+## 5. Decisions so far
+
+- 2026-10-08, user: **keep the current RAN window style** (dark panel, grey title bar,
+  silver bevel tabs, gold headers), made more compact for mobile, with special care for
+  the windows that are too small today.
+- 2026-10-08, user: **4K quality**. The new frame is drawn at the screen's real resolution
+  from 9-slice art authored at 4K (corners, edges, tab and button plates), not the PC's
+  small textures stretched 2x. Icons use the HD set (`CLIENT/textures/gui_hd`, already
+  shipping). Text is rasterised at its final pixel size, not at 1280x720 and then scaled.
+  Check every new window with a 1:1 crop on the Tab S9 (2560x1600) and the LDPlayer 4K
+  screen before it ships.
+- Mockup v1 (clickable): https://claude.ai/artifact/GJParct9A8qo1wNs6hFu4d. It covers
+  character stats, bag + equipment + item card, quest, NPC shop + bag, and settings.
+  Sizes are in the game's 1280x720 units: tabs/buttons 80 (≈44 pt on an iPhone 15), rows 64,
+  slots 76, steppers 64x56. Colours were sampled from the live settings window.
+
+## 6. Open questions for the user
 
 - Which mobile MMORPGs do you like the UI of? Screenshots of their bag, character and
   shop screens would pin the visual style (colours, frame art, fonts) better than
