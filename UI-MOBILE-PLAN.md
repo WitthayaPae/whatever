@@ -300,6 +300,10 @@ ships, on both platforms (shared code; iOS checked through CI + the store build)
   the NPC window is enlarged to its left. Verified on LDPlayer: sheet, long-press move bag->locker
   ->bag, page 2, ย่อย fade, X closes bag+locker, reopen. NOT verified: a full costume apply (test01
   owns no costume), the Extreme doll (no Extreme character), market sell path.
+- 2026-10-09: **สกิล done** (CMobileSkillPanel): class tabs (classic names), skill points, 2x4 rows
+  paged, classic status line per row, + learns (ReqNonInvenSkill) / levels up (same confirm modal),
+  "ใส่ปุ่ม" opens a ring-slot picker F1-F4 x10 (ReqSkillQuickSet) instead of the drag. Verified on
+  LDPlayer incl. a real slot set. Kit: taps deferred to one topmost per frame (see memory).
 
 ## 6. Open questions for the user
 
