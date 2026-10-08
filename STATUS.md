@@ -3,12 +3,31 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-05
-- **Approach:** compile the real PC client (`SOURCE/`) for mobile. Decided 2026-08-24.
-- **Current phase:** 1 complete · 2 complete · **3 in progress — login works end to end; character-select scene and models remain**
-- **Builds:** `cd MOBILE/native && ./build.sh` → 0 errors, produces `out/arm64-v8a/libran.so`
-- **On device:** renders on the x86_64 test device (Adreno 750, GLES 3.1) at a steady 60 fps.
-  APKs: `out/ran-phase3.apk` (current), `out/ran-phase2.apk` (headless, kept for comparison).
+- **Last updated:** 2026-10-08
+- **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
+- **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
+  https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
+  (built 2026-10-08, waiting for the user's upload).
+- **Release flow:** MAKE-PATCH.bat on `main` -> push -> ios-build.yml -> make-ios-source.js ->
+  patch again -> user uploads `native/out/upload`. See CLAUDE.md and PATCHING.md.
+
+### Where we are (2026-10-08)
+
+| Track | State |
+|---|---|
+| Game (direct APK + SideStore) | Live, patch 721 built. Normal develop -> test -> patch on `main`. |
+| Google Play | Account in Google identity review. Store build done on branch `store` (`STORE=1 ./build-apk.sh` -> .aab). Next: 12 testers x 14 days closed test. |
+| TestFlight | Apple enrollment paid, pending approval. Store build + CI (`ios-testflight.yml`, Xcode 26.6) green on `store`; signing/upload wait for the API key. |
+| Store paperwork | `store/privacy.html` + `store/listing.md` on `store`: placeholders (name, email), reviewer account, gacha-odds question open. |
+
+**Branches.** `main` = what ships in patches. `store` = main + store-only changes (Play/TestFlight
+manifests, launcher store paths, 16 KB pages, Xcode 26 shim fix). Merge `main` into `store` after
+every release; the store builds are made from `store`. Never run MAKE-PATCH while `store` is
+checked out, and after building on `store` rebuild the libs on `main` before a patch (otherwise
+the patch ships a needless APK bump).
+
+**Known open bugs:** Back key does not open the ESC menu (direct and store build, found
+2026-10-08). Full list in the dated sections below.
 
 ---
 
