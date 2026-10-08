@@ -12,6 +12,20 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-08 — Goal: TestFlight + Google Play (planned, waiting on user decisions)
+
+- Plan: `STORE-PLAN.md` (replaces TESTFLIGHT-PLAN.md).
+- Measured blockers for Play: targetSdk 34 (Play needs 36 since 2026-08-31), libran.so
+  LOAD alignment 0x1000 (Play needs 16 KB), APK not AAB, manifest asks for
+  REQUEST_INSTALL_PACKAGES and MANAGE_EXTERNAL_STORAGE (restricted), launcher installs its
+  own APK (forbidden). Fix = a STORE=1 build variant; data patching stays.
+- Still open:
+  - [ ] User: IP risk decision, personal vs organisation accounts, Apple $99/yr + Play $25.
+  - [ ] Claude: API 36 + 16 KB pages + AAB + store variant (Android), signed IPA + TestFlight upload (iOS).
+  - [ ] Privacy policy, account deletion, data safety, content rating, reviewer account.
+
+---
+
 ## 2026-10-08 — Menu: ระบบ replaced by ตั้งค่า and ออก (patch 721, APK 240, iOS 1.0.240; built, awaiting upload)
 
 - User: remove ระบบ from the menu and put ตั้งค่า and ออก there instead, so there is no menu
