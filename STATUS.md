@@ -18,6 +18,7 @@ If anything here disagrees with another file, this file wins.
 | Game (direct APK + SideStore) | Live, patch 721 built. Normal develop -> test -> patch on `main`. |
 | Google Play | Account in Google identity review. Store build done on branch `store` (`STORE=1 ./build-apk.sh` -> .aab). Next: 12 testers x 14 days closed test. |
 | TestFlight | Apple enrollment paid, pending approval. Store build + CI (`ios-testflight.yml`, Xcode 26.6) green on `store`; signing/upload wait for the API key. |
+| Mobile UI redesign | Research + proposal in `UI-MOBILE-PLAN.md` (one mobile frame, hubs, tap → item card, 3 tiers over ~110 windows). Waiting for design approval and the user's reference games. |
 | Store paperwork | `store/privacy.html` + `store/listing.md` on `store`: placeholders (name, email), reviewer account, gacha-odds question open. |
 
 **Branches.** `main` = what ships in patches. `store` = main + store-only changes (Play/TestFlight
