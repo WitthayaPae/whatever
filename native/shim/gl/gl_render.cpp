@@ -483,6 +483,10 @@ const char *kFS =
     "        vec2 p = cn.xy / cz;\n"
     "        p = 1.0 - abs(mod(p, 2.0) - 1.0);\n"
     "        rgb *= texture(uTexStage1, p).rgb;\n"
+    "    } else if (uStage1 == 9) {\n"
+    //  MODULATE2X(TEXTURE, TFACTOR) on stage 1, set 0: replaces the colour
+    //  (DxEffCharLevel ambient glow). TFACTOR, not DIFFUSE: no lighting.
+    "        rgb = clamp(2.0 * texture(uTexStage1, vUV).rgb * uTexFactor.rgb, 0.0, 1.0);\n"
     "    } else if (uStage1 == 2) {\n"
     "        //  MODULATE(TFACTOR, CURRENT): a flat tint over the stage 0 result,\n"
     "        //  with no texture on the stage at all. This is how the ambient\n"
@@ -496,6 +500,7 @@ const char *kFS =
     "    if      (uAlphaOp == 2)  alpha = b1.a;\n"
     "    else if (uAlphaOp == 3)  alpha = b2.a;\n"
     "    else if (uAlphaOp == 5)  alpha = b1.a * b2.a * 2.0;\n"
+    "    else if (uAlphaOp == 6)  alpha = min(b1.a * b2.a * 4.0, 1.0);\n"   // MODULATE4X
     "    else if (uAlphaOp == 1)  alpha = diffuse.a;\n"   // DISABLE: pipeline alpha
     "    else                     alpha = b1.a * b2.a;\n"
     "\n"
@@ -517,7 +522,7 @@ const char *kFS =
     //  in D3D only the diffuse argument carries the lighting.
     "        bool specSel = (uColorOp == 3 && (uColorArg2 & 7) == 4) ||\n"
     "                       (uColorOp == 2 && (uColorArg1 & 7) == 4);\n"
-    "        if (uStage1 != 6 && !specSel) c.rgb *= vLit;\n"
+    "        if (uStage1 != 6 && uStage1 != 9 && !specSel) c.rgb *= vLit;\n"
     "        if (uSpecularOn == 1) c.rgb += uMatSpecular * vSpec;\n"
     "    }\n"
     "\n"
@@ -2418,7 +2423,7 @@ extern "C" void RanGLR_SetStage1(int mode, unsigned glCubeTex, unsigned gl2DTex,
     //  caller asks for never reached the shader even though the shader has a
     //  branch for it.
     if ((mode == 1 || mode == 3 || mode == 6) && glCubeTex)  g_stage1Mode = mode;
-    else if ((mode == 5 || mode == 7 || mode == 8) && gl2DTex) g_stage1Mode = mode;
+    else if ((mode == 5 || mode == 7 || mode == 8 || mode == 9) && gl2DTex) g_stage1Mode = mode;
     else if (mode == 2 || mode == 4)            g_stage1Mode = mode;
     else                                        g_stage1Mode = 0;
 

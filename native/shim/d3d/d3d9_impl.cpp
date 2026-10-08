@@ -2389,6 +2389,19 @@ public:
                     //  the pass painted the piece solid white (2026-10-06).
                     stage2D = ((RanTexture *)m_texture[1])->GlTexture();
                     mode = stage2D ? 8 : 0;
+                } else if (m_texture[1] && m_texture[1]->GetType() != D3DRTYPE_CUBETEXTURE &&
+                           op == D3DTOP_MODULATE2X &&
+                           arg1 == D3DTA_TEXTURE && arg2 == D3DTA_TFACTOR &&
+                           m_textureStageState[1][D3DTSS_TEXCOORDINDEX] == 0) {
+                    //  DxEffCharLevel's ambient layer, the enhance glow on +N
+                    //  weapons and armour: stage 0 only carries the mask alpha
+                    //  (MODULATE4X), stage 1 REPLACES the colour with the piece's
+                    //  own texture x the glow colour x 2. Unmapped, it fell to
+                    //  mode 0 and painted a flat lit tint through a soft mask -
+                    //  the blotchy blue/purple blade at +7 (2026-10-08, measured:
+                    //  "op 5 a 2/3 s0aop 6 -> mode 0").
+                    stage2D = ((RanTexture *)m_texture[1])->GlTexture();
+                    mode = stage2D ? 9 : 0;
                 } else if (m_texture[1] && op == D3DTOP_MODULATE2X &&
                            arg1 == D3DTA_TEXTURE && arg2 == D3DTA_CURRENT) {
                     //  A gloss map over the stage 0 result.

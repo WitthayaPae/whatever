@@ -12,6 +12,23 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-08 — +N enhance glow drawn as a blotchy cloud (not shipped yet)
+
+- User: samatos#536's +7 sword showed the blade covered by a cloudy blue/purple texture.
+- Measured (temporary stage-1 combo log, removed): DxEffCharLevel's ambient layer is
+  stage 1 MODULATE2X(TEXTURE, TFACTOR) with stage 0 alpha MODULATE4X -> the shim mapped it to
+  mode 0 ("op 5 a 2/3 s0aop 6 -> mode 0"): a flat lit tint through an un-quadrupled mask.
+- Fix (shim, Android + iOS): d3d9_impl maps it to new stage-1 mode 9; gl_render: mode 9
+  rgb = clamp(2 * tex1(uv0) * TFACTOR), unlit; alpha op 6 (MODULATE4X) = min(4*a1*a2, 1).
+  After: log "-> mode 9"; LDPlayer: #545's glowing greatsword shows its engraving under an even
+  purple glow, admin's +4 staff an orange glow; no cloud texture. samatos had left - his
+  sword itself was not re-seen.
+- Found, not changed: RanTexture::GetType returns 0 (no override), so the existing mode 8
+  test "GetType()==D3DRTYPE_TEXTURE" (DxEffCharReflection2 rain reflection) never matches -
+  that branch has likely never run. Mode 9 tests "!= CUBETEXTURE" instead.
+- Not done: PC also draws Reflect + Flow layers at +5..+9 (needs D3DPTEXTURECAPS_PROJECTED,
+  which the shim does not report) - the moving orange flow is still absent on mobile.
+
 ## 2026-10-08 — GM announcement text bigger (not shipped yet)
 
 - User: the GM announcement at the top left (GM-channel chat, `CAdminMessageDisplay`) was too
