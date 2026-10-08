@@ -269,6 +269,20 @@ ships, on both platforms (shared code; iOS checked through CI + the store build)
   The selector itself goes into the new ตั้งค่า window (tier 1). Test override: uitheme0/1/2 diag files.
 - Rule from the user: a redesigned window keeps EVERY field the classic one shows.
 
+- 2026-10-09, user: opening a new window hid the whole HUD - treated as a bug. Fixed: the HUD and
+  chat stay up (drawn under the window); presses on the window still never reach the HUD (skill
+  ring, stick, pad yield to any control; the chat fold button now yields to a panel too). Verified
+  on LDPlayer: taps inside the window over the chat button and a skill slot went to the window.
+- 2026-10-09, user, scope added:
+  - **Login, register and character create pages** in the same style (outer interface).
+    Register is off today (bFeatureRegister); redesigning it is in scope, switching it on is
+    a separate decision (store account-deletion rules apply once accounts can be made in the app).
+  - **The three themes for the whole interface, HUD included** (joystick, skill ring, pad buttons,
+    chat, HP/MP block, minimap, corner icons, menu): one switch changes everything. The touch HUD
+    draws from mobile_hud3.dds - it needs a sheet per theme, chosen by the same setting.
+- Order: ตั้งค่า (with the style picker) -> the rest of tier 1 -> HUD in three themes ->
+  login / register / character create & select -> tier 2 -> tier 3.
+
 ## 6. Open questions for the user
 
 - Which mobile MMORPGs do you like the UI of? Screenshots of their bag, character and
