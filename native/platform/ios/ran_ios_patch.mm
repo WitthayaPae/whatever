@@ -161,6 +161,11 @@ static const int kDlThreads = 8;
 //  What the player is told the version is: the app's own label (1.1.0 at the
 //  2026-10-03 launch, then 1.1.1, ...), not the patch number - the same as
 //  RanLauncher.label() on Android.
+extern "C" BOOL RanIOS_IsStore ( void )
+{
+    return ![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.ran.launcher"];
+}
+
 static NSString *AppLabel ( void )
 {
     NSString *v = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
@@ -543,6 +548,17 @@ extern "C" void RanIOS_RunPatch ( RanPatchProgress say, RanPatchDone done )
             //  in Thai like the rest of the page.
             //  The same steps and two buttons as Android's failApkTooOld
             //  (ran_ios_main.mm adds the buttons for this fatal stop).
+            //  The store build updates through TestFlight: the same stop as
+            //  Android's failStoreTooOld, with TestFlight for Play Store.
+            if (RanIOS_IsStore ()) {
+                done ( NO, YES, [NSString stringWithFormat:
+                        @"ต้องอัปเดตแอปก่อนเล่น\n"
+                        @"แอปในเครื่องนี้เป็นเวอร์ชันเก่า (%d) ต้องเป็นเวอร์ชัน %d ขึ้นไป\n\n"
+                        @"กด อัปเดต เพื่อไปที่ TestFlight แล้วกดอัปเดต\n"
+                        @"ถ้า TestFlight ยังไม่มีอัปเดต ให้รอสักครู่แล้วเปิดเกมใหม่",
+                        myBuild, minIos] );
+                return;
+            }
             done ( NO, YES, [NSString stringWithFormat:
                         @"ต้องอัปเดตแอปก่อนเล่น\n"
                         @"แอปในเครื่องนี้เป็นเวอร์ชันเก่า (%d) ต้องเป็นเวอร์ชัน %d ขึ้นไป\n"

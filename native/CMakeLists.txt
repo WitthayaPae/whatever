@@ -14,6 +14,10 @@ option(RAN_ASAN "Build with AddressSanitizer" OFF)
 #  whose size the compiler knows, which is the shape of the bug being hunted -
 #  a four-byte write landing on somebody else's pointer.
 option(RAN_BOUNDS "Build with trapping array-bounds checks" OFF)
+#  The TestFlight / App Store build of the iOS client (MOBILE/STORE-PLAN.md):
+#  its own bundle id and name, no Files.app sharing, an asset-catalog icon
+#  (compiled by actool in ios-testflight.yml). Off = the SideStore build.
+option(RAN_IOS_STORE "iOS store (TestFlight) build" OFF)
 if(RAN_BOUNDS)
     add_compile_options(-fsanitize=array-bounds -fsanitize-trap=array-bounds -g)
     message(STATUS "array-bounds trapping: on")
@@ -339,9 +343,27 @@ if(RAN_IOS)
   set_source_files_properties(${IOS_ICONS} PROPERTIES
     MACOSX_PACKAGE_LOCATION Resources)
 
+  #  What differs between the SideStore build and the store build, all of
+  #  it in Info.plist. The store build is told apart at run time by its
+  #  bundle id (RanIOS_IsStore, ran_ios_patch.mm).
+  if(RAN_IOS_STORE)
+    set(RAN_IOS_BUNDLE_ID   com.legacym.online)
+    set(RAN_IOS_DISPLAY     "Legacy M Online")
+    #  Documents/ holds the diagnostics and ran.log: not for players.
+    set(RAN_IOS_FILESHARE   "<false/>")
+    #  The asset catalog actool compiles into the bundle after the build.
+    set(RAN_IOS_ICONNAME    "<key>CFBundleIconName</key> <string>AppIcon</string>")
+  else()
+    set(RAN_IOS_BUNDLE_ID   com.ran.launcher)
+    set(RAN_IOS_DISPLAY     "Ran Legacy M")
+    set(RAN_IOS_FILESHARE   "<true/>")
+    set(RAN_IOS_ICONNAME    "")
+  endif()
+  message(STATUS "iOS bundle ${RAN_IOS_BUNDLE_ID} (store=${RAN_IOS_STORE})")
+
   set_target_properties(ran PROPERTIES
-    MACOSX_BUNDLE_GUI_IDENTIFIER com.ran.launcher
-    MACOSX_BUNDLE_BUNDLE_NAME "Ran Legacy M"
+    MACOSX_BUNDLE_GUI_IDENTIFIER ${RAN_IOS_BUNDLE_ID}
+    MACOSX_BUNDLE_BUNDLE_NAME "${RAN_IOS_DISPLAY}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${RAN_PRODUCT_VERSION}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${RAN_PRODUCT_BUILD}"
     MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/Info.plist.in

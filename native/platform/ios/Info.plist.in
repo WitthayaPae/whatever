@@ -5,7 +5,11 @@
     <key>CFBundleExecutable</key>            <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
     <key>CFBundleIdentifier</key>            <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
     <key>CFBundleName</key>                  <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
-    <key>CFBundleDisplayName</key>           <string>Ran Legacy M</string>
+    <key>CFBundleDisplayName</key>           <string>${RAN_IOS_DISPLAY}</string>
+    ${RAN_IOS_ICONNAME}
+    <!--  HTTPS (system TLS) is the only encryption: exempt, so no export
+          compliance documents and no question on every TestFlight upload. -->
+    <key>ITSAppUsesNonExemptEncryption</key> <false/>
     <key>CFBundlePackageType</key>           <string>APPL</string>
     <key>CFBundleShortVersionString</key>    <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
     <key>CFBundleVersion</key>               <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
@@ -86,8 +90,8 @@
 
           A store build would drop both: they expose the directory to the
           player, and nothing there is meant for them.  -->
-    <key>UIFileSharingEnabled</key>                  <true/>
-    <key>LSSupportsOpeningDocumentsInPlace</key>     <true/>
+    <key>UIFileSharingEnabled</key>                  ${RAN_IOS_FILESHARE}
+    <key>LSSupportsOpeningDocumentsInPlace</key>     ${RAN_IOS_FILESHARE}
 
     <key>UIRequiredDeviceCapabilities</key>
     <array>

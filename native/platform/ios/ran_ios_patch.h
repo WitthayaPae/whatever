@@ -15,6 +15,9 @@ typedef void (^RanPatchDone) ( BOOL ok, BOOL fatal, NSString *error );
 extern "C" {
 #endif
 void RanIOS_RunPatch ( RanPatchProgress say, RanPatchDone done );
+//  YES in the TestFlight / App Store build: any bundle id but the SideStore
+//  build's (CMake RAN_IOS_STORE), as RanLauncher.isStore() on Android.
+BOOL RanIOS_IsStore ( void );
 #ifdef __cplusplus
 }
 #endif

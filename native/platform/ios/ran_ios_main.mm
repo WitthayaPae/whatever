@@ -1161,6 +1161,29 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
                                 [me presentViewController:wa animated:YES completion:nil];
                         });
                     };
+                    //  The store build: one button to TestFlight, then Close -
+                    //  as Android's failStoreTooOld sends the player to Play.
+                    if (RanIOS_IsStore ()) {
+                        [a addAction:[UIAlertAction actionWithTitle:@"อัปเดต"
+                                                              style:UIAlertActionStyleDefault
+                                                            handler:^(UIAlertAction *x) {
+                            [UIApplication.sharedApplication openURL:[NSURL URLWithString:@"itms-beta://"]
+                                                             options:@{}
+                                                   completionHandler:^(BOOL opened) {
+                                //  No TestFlight app: its App Store page.
+                                if (!opened)
+                                    [UIApplication.sharedApplication openURL:[NSURL URLWithString:
+                                        @"https://apps.apple.com/app/testflight/id899247664"]
+                                                                     options:@{} completionHandler:nil];
+                            }];
+                            reshow ();
+                        }]];
+                        [a addAction:[UIAlertAction actionWithTitle:@"ปิด"
+                                                              style:UIAlertActionStyleCancel
+                                                            handler:nil]];
+                        [me presentViewController:a animated:YES completion:nil];
+                        return;
+                    }
                     [a addAction:[UIAlertAction actionWithTitle:@"ไปหน้าวิธีติดตั้ง"
                                                           style:UIAlertActionStyleDefault
                                                         handler:^(UIAlertAction *x) {
