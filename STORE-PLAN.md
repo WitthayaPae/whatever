@@ -144,6 +144,8 @@ with a public link, every build through Beta App Review; builds expire after 90 
 
 - 2026-10-08: user accepts the IP risk.
 - 2026-10-08: personal accounts, so Play needs the 12-tester / 14-day closed test.
+- 2026-10-08: store name **Legacy M Online** (fallback if Apple says taken: "Legacy M: School War").
+  No "Ran" in store titles or keywords. The game itself stays RAN LEGACY M inside.
 
 ## Open questions
 
