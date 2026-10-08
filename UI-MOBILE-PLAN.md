@@ -252,6 +252,15 @@ ships, on both platforms (shared code; iOS checked through CI + the store build)
   mobile_ui.dds + gui_hd 4x atlas, CMobileCharPanel pilot (verified on LDPlayer: steppers,
   ล้าง, tab, X, Back, HUD restore). To be restyled to v3 once the user picks opacity/accent.
 
+- 2026-10-08, mockup v4 (user): ตัวละคร takes stat points in a number box per stat (number pad,
+  สูงสุด) instead of − / +, and previews the status as current → new before ยืนยัน. In the game
+  the preview must come from the client's own formulas run on a copy of the character
+  (GLCHARLOGIC with the pending SCHARSTATS added), never from estimates.
+- กระเป๋า gets a ทับชุด mode like ย่อย: everything except costumes fades; after picking a
+  costume only items it can go on stay bright, using ReqDisguise's rules (same suit slot, a class
+  both allow, target not a costume, target not already disguised - already coded in
+  MobileEnhanceWindow); tap a target to confirm, then ReqDisguise.
+
 ## 6. Open questions for the user
 
 - Which mobile MMORPGs do you like the UI of? Screenshots of their bag, character and
