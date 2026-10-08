@@ -282,6 +282,14 @@ ships, on both platforms (shared code; iOS checked through CI + the store build)
     draws from mobile_hud3.dds - it needs a sheet per theme, chosen by the same setting.
 - Order: ตั้งค่า (with the style picker) -> the rest of tier 1 -> HUD in three themes ->
   login / register / character create & select -> tier 2 -> tier 3.
+- 2026-10-09: **ตั้งค่า done** (CMobileSettingsPanel, replaces OPTION_HW_WINDOW behind `newui`).
+  Tabs ภาพ / เสียง / เกม / ฟังก์ชัน / หน้าต่าง; every classic option kept (resolution is shown, a
+  phone has one mode). Drop-downs became choice rows, check boxes switches, volume bars sliders.
+  Every tap applies and saves at once through the classic OK paths (VideoOK / GameOK / AudioOK +
+  the character requests), so switching tabs no longer drops edits. หน้าต่าง holds the A/B/C
+  picker with live samples. Verified on LDPlayer: every tab, preset->custom on a change, slider
+  drag, theme switch live, reset-positions dialog, F9 running the PC handler, X close. Kit gained
+  CMobileSwitch (on = white track, off = small white knob), CMobileSegment, CMobileSlider.
 
 ## 6. Open questions for the user
 
