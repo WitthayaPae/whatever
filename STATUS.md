@@ -34,9 +34,26 @@ If anything here disagrees with another file, this file wins.
   predictive back), the Tab S9, a 16 KB-page emulator.
 - Found while testing: Back (ESC) does not open the ESC menu in either build - 4 presses in
   the direct build, nothing. Same in both, so not the store change.
+- 2026-10-08 later: Play account in Google identity review; Apple enrollment paid, pending.
+- **iOS store build done on branch `store`**: CMake RAN_IOS_STORE=ON (com.legacym.online, "Legacy M
+  Online", no Files.app sharing, ITSAppUsesNonExemptEncryption NO, CFBundleIconName + asset catalog
+  with a 1024 icon upscaled by tools/icon-hd/make-appicon-1024.py). Launcher: store build's minIos
+  stop says update in TestFlight, button opens itms-beta:// (App Store page if TestFlight missing) -
+  same text as Android's Play stop.
+- CI `ios-testflight.yml` (manual, `gh workflow run ios-testflight.yml --ref store`), macos-26:
+  run 37791077684 green on **Xcode 26.6 / iOS 26.5 SDK** (Apple's upload minimum since 2026-04-28):
+  build, actool, toolchain keys (DTXcode 2660, DTSDKName iphoneos26.5, UIDeviceFamily 1,2), bundle
+  checks. Sign + upload steps wait for the secrets. Needed shim fix for Xcode 26 libc++:
+  `namespace std { using ::ran_fopen; }` in shim/win/windows.h (store branch; Android arm64 builds).
+- `tools/patch/ios-signing-setup.py`: once the Apple key exists, makes bundle id, distribution
+  cert, App Store profile via the API and stores all GitHub secrets (never printed).
+- `store/privacy.html` (Thai + English, two [placeholders]) and `store/listing.md` (names,
+  description, age rating, Data safety, App Privacy, reviewer notes). In-app registration is off
+  (bFeatureRegister unset), so account deletion = request via contact, no in-app flow required.
 - Still open:
-  - [ ] User: open Apple ($99/yr) and Play ($25) accounts.
-  - [ ] Claude: test the store build on the Tab S9 / an Android 15+ device; iOS signed IPA + TestFlight upload.
+  - [ ] User: Apple enrollment approval, then App Store Connect app record + API key (Admin) into native/.appstore/.
+  - [ ] User: fill privacy.html placeholders (name, contact email) and upload it; reviewer account; gacha odds question.
+  - [ ] Claude: run ios-signing-setup.py, then ios-testflight.yml with upload; test store Android build on the Tab S9 / Android 15+.
   - [ ] Privacy policy, account deletion, data safety, content rating, reviewer account.
 
 ---
