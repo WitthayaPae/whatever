@@ -290,6 +290,16 @@ ships, on both platforms (shared code; iOS checked through CI + the store build)
   picker with live samples. Verified on LDPlayer: every tab, preset->custom on a change, slider
   drag, theme switch live, reset-positions dialog, F9 running the PC handler, X close. Kit gained
   CMobileSwitch (on = white track, off = small white knob), CMobileSegment, CMobileSlider.
+- 2026-10-09: **กระเป๋า done** (CMobileBagPanel). The classic INVENTORY_WINDOW stays open but
+  "hosted" (no update/render/hit area) so all 269 places that ask about the bag are unchanged; the
+  touch rules moved to CInventoryWindow::MobileTouchCell/MobileTouchWear and both bags run them.
+  Equipment in the classic doll positions (user, 2026-10-09), Extreme second set + A/B; bag 6x6
+  pages (1-2; beside a shop 6x5, pages 1-3), locked rows, counts, grades, cooldowns, money/points
+  buttons (classic handlers), เรียง, ย่อย (fade as classic), ทับชุด mode (costumes light, then
+  valid targets; ReqDisguise rules; MobileApplyHeld). Beside storage/shop the bag docks right and
+  the NPC window is enlarged to its left. Verified on LDPlayer: sheet, long-press move bag->locker
+  ->bag, page 2, ย่อย fade, X closes bag+locker, reopen. NOT verified: a full costume apply (test01
+  owns no costume), the Extreme doll (no Extreme character), market sell path.
 
 ## 6. Open questions for the user
 
