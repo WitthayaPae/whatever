@@ -12,6 +12,17 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
+## 2026-10-08 — GM announcement text bigger (not shipped yet)
+
+- User: the GM announcement at the top left (GM-channel chat, `CAdminMessageDisplay`) was too
+  small. Mobile: font 9 -> 14, wrap width (`BASIC_ADMIN_MESSAGE_DUMMY`) x14/9.
+- LDPlayer: a local test message (temporary diag, removed) showed at the new size on its box.
+  No real GM broadcast sent. iOS: shared SOURCE, not run on an iPhone.
+- Also measured this day: test01 storage report - deleting a character does not touch
+  `UserInven` (sp_delete_character only flags ChaDeleted; no triggers). User's own test kept 5
+  items through a delete. Suspect for the original loss: an offline stall saving its old
+  storage copy. น้องหมวย's 50-point quest needs level 165 (data, same as EP1) - left as is.
+
 ## 2026-10-08 — User batch of 10 + skill key numbers (not shipped yet)
 
 All SOURCE/shim, so Android and iOS both get them. LDPlayer x86_64 = checked on screen.
