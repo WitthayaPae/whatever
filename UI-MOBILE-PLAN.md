@@ -241,6 +241,17 @@ ships, on both platforms (shared code; iOS checked through CI + the store build)
     PIN pad (10 lock windows); confirm / quantity sheets; bottom sheets (NPC talk, player menu); table; form.
   - The item card is a redesign of the existing `CMobileItemSheet` and keeps its labels (MOBILE_ITEM_SHEET).
 
+- 2026-10-08, after the first in-game pilot (character panel, classic grey look, full-screen dim,
+  hub with a left tab rail): user asked for **more modern, transparent, and no combining**.
+  Superseded decisions: hubs (3.2) are dropped - one window per function as the menu lists them,
+  tabs only for a window's own sections (top pill tabs). Classic grey look dropped for
+  translucent glass panels (rounded, thin light border, flat buttons, gold accent), sized to
+  content, no full-screen scrim. Mockup v3 at the same link, with opacity and accent controls.
+- Built so far (main, off by default behind the `newui` diag file, so no patch can ship it):
+  MobileUiKit (box/button/label/panel, HUD hidden while a panel is open, Back/X close),
+  mobile_ui.dds + gui_hd 4x atlas, CMobileCharPanel pilot (verified on LDPlayer: steppers,
+  ล้าง, tab, X, Back, HUD restore). To be restyled to v3 once the user picks opacity/accent.
+
 ## 6. Open questions for the user
 
 - Which mobile MMORPGs do you like the UI of? Screenshots of their bag, character and
