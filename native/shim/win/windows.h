@@ -1440,5 +1440,11 @@ FILE       *ran_fopen(const char *path, const char *mode);
 #endif
 #define fopen(p, m) ran_fopen((p), (m))
 #ifdef __cplusplus
+// libc++ in Xcode 26 opens a file stream inline in <fstream> with
+// std::fopen(...), which the macro above turns into std::ran_fopen - "no
+// member named 'ran_fopen' in namespace 'std'" in every file that opens an
+// ofstream (StopWatch.cpp). Naming it in std as well makes that compile, and
+// the stream's path then goes through the resolver like every other open.
+namespace std { using ::ran_fopen; }
 extern "C" void RanLog_IniProgress(const char *file, unsigned lines);
 #endif
