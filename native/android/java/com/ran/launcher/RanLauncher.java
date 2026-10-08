@@ -606,7 +606,8 @@ public class RanLauncher extends Activity {
         boolean privHasData = new File(priv, "config.ini").exists();
         boolean legacyHasData = new File(legacy, "config.ini").exists();
 
-        if (!privHasData && legacyHasData) {
+        //  The store build has no all-files access and no old install to move.
+        if (!isStore() && !privHasData && legacyHasData) {
             if (!migrate(legacy, priv)) {
                 /*  Half a data tree is worse than the old one. Leave the legacy
                  *  root in charge; the native loader still accepts it.        */
@@ -744,13 +745,16 @@ public class RanLauncher extends Activity {
          *  first, and the gate only stops a phone that is still too old after
          *  that (declined, no permission, failed download).                 */
         mApkRequired = (minApk > myApk);
-        if (offerApk(m.optJSONObject("apk"), myApk)) return;
+        //  The store build never installs a binary itself: Play forbids an app
+        //  updating itself (Device and Network Abuse). Play updates it.
+        if (!isStore() && offerApk(m.optJSONObject("apk"), myApk)) return;
 
         if (minApk > myApk) {
             /*  A data patch cannot fix a client whose packet layout is stale,
              *  so this is a hard stop rather than a warning. Reopening the game
              *  offers the install again. */
-            failApkTooOld(minApk, myApk);
+            if (isStore()) failStoreTooOld(minApk, myApk);
+            else           failApkTooOld(minApk, myApk);
             throw new Exception("apk too old");
         }
 
@@ -1414,6 +1418,44 @@ public class RanLauncher extends Activity {
                     try {
                         openUrl("https://www.google.com/search?q=" + java.net.URLEncoder.encode(query, "UTF-8"));
                     } catch (Exception e) { openUrl("https://www.google.com/"); }
+                } });
+        }});
+    }
+
+    /*  The store build: the same app under its own package id, installed and
+     *  updated by Google Play (MOBILE/STORE-PLAN.md). Anything that is not the
+     *  direct build's id is a store build, so the two variants share one
+     *  launcher and differ only in the manifest build-apk.sh STORE=1 writes.  */
+    private static final String DIRECT_PACKAGE = "com.ran.native";
+    private boolean isStore() { return !DIRECT_PACKAGE.equals(getPackageName()); }
+
+    /*  minApk is above this store build: the update comes from Play. */
+    private void failStoreTooOld(int minApk, int myApk) {
+        mFatal = true;
+        final String title = "ต้องอัปเดตแอปก่อนเล่น";
+        final String msg =
+            "แอปในเครื่องนี้เป็นเวอร์ชันเก่า (" + myApk + ") ต้องเป็นเวอร์ชัน " + minApk + " ขึ้นไป\n\n" +
+            "กด อัปเดต เพื่อไปที่ Play Store แล้วกดอัปเดต\n" +
+            "ถ้า Play Store ยังไม่มีอัปเดต ให้รอสักครู่แล้วเปิดเกมใหม่";
+        final String pkg = getPackageName();
+        ui.post(new Runnable() { public void run() {
+            bar.setVisibility(ViewGroup.INVISIBLE);
+            status.setText(title);
+            detail.setText(msg);
+            AlertDialog d = new AlertDialog.Builder(RanLauncher.this)
+                .setTitle(title).setMessage(msg).setCancelable(false)
+                .setPositiveButton("อัปเดต", null)
+                .setNegativeButton("ปิด", null)
+                .create();
+            d.show();
+            //  Keeps the dialog up: back from Play the player may still be waiting.
+            d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + pkg)));
+                    } catch (Throwable t) {
+                        openUrl("https://play.google.com/store/apps/details?id=" + pkg);
+                    }
                 } });
         }});
     }

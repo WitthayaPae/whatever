@@ -93,6 +93,8 @@ native/.login
 
 # The APK signing key and its passwords - see build-apk.sh.
 native/.signing
+# The Play upload key passwords - see native/android/store-bundle.sh.
+native/.signing-upload
 
 # generated billboard art is large and lives outside the repo
 tools/ad-art/src/*.png

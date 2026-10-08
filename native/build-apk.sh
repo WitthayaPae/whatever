@@ -145,6 +145,14 @@ fi
 # resources (the splash window background) -> flat archive, then link
 "$BT/aapt2.exe" compile --dir "$(cygpath -w "$HERE/android/res")" -o "$(cygpath -w "$OUT/res.zip")"
 
+# The Google Play build (STORE=1): an .aab and a test .apk from the same
+# staged libs, dex and resources, with the store manifest. See
+# android/store-bundle.sh and MOBILE/STORE-PLAN.md.
+if [ "${STORE:-0}" = 1 ]; then
+  . "$HERE/android/store-bundle.sh"
+  exit 0
+fi
+
 # manifest + resources -> base APK
 # The shipped manifest is not debuggable. DEBUGGABLE=1 puts the flag back, on a
 # copy, so a debugger can be attached without that ever being the default.

@@ -360,7 +360,12 @@ elseif(APP_SRC)
     ranzlib minilzo lua50 vorbis ogg c++_shared log android EGL GLESv3 m)
   # -u keeps ANativeActivity_onCreate (referenced only by the OS) from being stripped.
   target_link_options(ran PRIVATE
-    -Wl,--error-limit=0 -Wl,--no-dependent-libraries -u ANativeActivity_onCreate)
+    -Wl,--error-limit=0 -Wl,--no-dependent-libraries -u ANativeActivity_onCreate
+    # 16 KB pages: Google Play refuses a library whose LOAD segments are 4 KB
+    # aligned (apps targeting Android 15+), and 16 KB-page devices cannot load
+    # it. 16 KB alignment loads fine on 4 KB devices too. libc++_shared from
+    # NDK r27 is already 0x4000.
+    -Wl,-z,max-page-size=16384)
 endif()
 
 # third-party C libraries must not see the Win32 emulation defines
