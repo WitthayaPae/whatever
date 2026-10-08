@@ -233,6 +233,14 @@ ships, on both platforms (shared code; iOS checked through CI + the store build)
   Sizes are in the game's 1280x720 units: tabs/buttons 80 (≈44 pt on an iPhone 15), rows 64,
   slots 76, steppers 64x56. Colours were sampled from the live settings window.
 
+- Mockup v2 (same link): **all 110 windows**, catalogued by hub with a mockup each.
+  - Tiers: 20 in tier 1, 40 in tier 2, 44 in tier 3, 2 already on the HUD, 4 hidden on mobile
+    (ESC menu, key settings, VN play-time, SMS).
+  - Shared layout families: list + detail; bag pairs (shop, storage, item bank, auction storage, sell stall);
+    craft bench (enhance, ย่อย, rebuild, mix, transfer, trash, pet-skin mix, NPC exchange); picker (11 cards);
+    PIN pad (10 lock windows); confirm / quantity sheets; bottom sheets (NPC talk, player menu); table; form.
+  - The item card is a redesign of the existing `CMobileItemSheet` and keeps its labels (MOBILE_ITEM_SHEET).
+
 ## 6. Open questions for the user
 
 - Which mobile MMORPGs do you like the UI of? Screenshots of their bag, character and
