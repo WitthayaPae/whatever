@@ -206,6 +206,7 @@ set(Lib_ClientUI_SOURCES
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileSettingsPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileBagPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileSkillPanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileQuestPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileChatMacroBar.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileChatChannelBar.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileMiniMap.cpp
