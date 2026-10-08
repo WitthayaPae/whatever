@@ -17,6 +17,8 @@ name: iOS build
 on:
   workflow_dispatch:
   push:
+    #  main only: the store branch has its own workflow (ios-testflight.yml).
+    branches: [main]
     paths:
       - 'native/platform/ios/**'
       - 'native/shim/**'

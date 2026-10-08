@@ -1,0 +1,206 @@
+#  The store (TestFlight) build of the iOS client - MOBILE/STORE-PLAN.md.
+#
+#  Same source as ios-build.yml (the SideStore build), configured with
+#  RAN_IOS_STORE=ON: bundle id com.legacym.online, "Legacy M Online", no
+#  Files.app sharing, an asset-catalog icon. Then, when the signing secrets
+#  exist (tools/patch/ios-signing-setup.py puts them there), it is signed with
+#  the Apple Distribution certificate and uploaded to App Store Connect, where
+#  it appears in TestFlight. Without the secrets it stops after building, and
+#  the unsigned bundle is kept so the store build is still known to compile.
+#
+#  Xcode 26: App Store Connect refuses uploads built with an older SDK since
+#  2026-04-28. ios-build.yml stays on macos-14 for the SideStore build.
+#
+#  Manual only: macOS minutes bill at 10x on a private repository.
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload to TestFlight (needs the signing secrets)'
+        type: boolean
+        default: true
+
+jobs:
+  testflight:
+    runs-on: macos-26
+    env:
+      HAVE_SIGNING: ${{ secrets.IOS_DIST_P12 != '' && secrets.ASC_KEY_P8 != '' }}
+    steps:
+      - name: Check out MOBILE
+        uses: actions/checkout@v4
+        with:
+          path: MOBILE
+
+      - name: Check out SOURCE
+        uses: actions/checkout@v4
+        with:
+          repository: WitthayaPae/RAN-ASURA-SOURCE
+          ref: main
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          path: SOURCE
+
+      - name: Cache the compiler output
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ios-store-ccache-${{ github.sha }}
+          restore-keys: |
+            ios-store-ccache-
+
+      - name: Install ccache
+        run: |
+          brew list ccache >/dev/null 2>&1 || brew install ccache
+          ccache --max-size=2G
+          ccache --zero-stats
+
+      - name: Show the toolchain
+        run: |
+          xcodebuild -version
+          cmake --version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Configure and build
+        working-directory: MOBILE/native
+        run: |
+          cmake -S . -B out/ios-store -G "Unix Makefiles" \
+            -DRAN_IOS_STORE=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
+          set -o pipefail
+          cmake --build out/ios-store -j "$(sysctl -n hw.ncpu)" 2>&1 | tee build.log
+
+      - name: ccache statistics
+        if: always()
+        run: ccache --show-stats
+
+      - name: Keep the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-store-build-log
+          path: MOBILE/native/build.log
+
+      #  The icon. App Store Connect refuses a bundle without CFBundleIconName
+      #  and a compiled asset catalog (the SideStore build uses loose PNGs).
+      #  actool writes Assets.car into the bundle and a partial Info.plist
+      #  (CFBundleIcons...) that is merged into the real one.
+      - name: Compile the asset catalog
+        working-directory: MOBILE/native
+        run: |
+          APP=out/ios-store/ran.app
+          xcrun actool platform/ios/Assets.xcassets \
+            --compile "$APP" --platform iphoneos \
+            --minimum-deployment-target 13.0 \
+            --target-device iphone --target-device ipad \
+            --app-icon AppIcon \
+            --output-partial-info-plist out/ios-store/icon-partial.plist \
+            --output-format human-readable-text
+          /usr/libexec/PlistBuddy -c "Merge out/ios-store/icon-partial.plist" "$APP/Info.plist"
+          ls -la "$APP/Assets.car"
+
+      #  What App Store Connect will read, checked before anything is signed.
+      - name: Check the bundle
+        working-directory: MOBILE/native/out/ios-store
+        run: |
+          P=ran.app/Info.plist
+          plutil -p "$P"
+          get() { /usr/libexec/PlistBuddy -c "Print :$1" "$P"; }
+          test "$(get CFBundleIdentifier)" = com.legacym.online
+          test "$(get CFBundleDisplayName)" = "Legacy M Online"
+          test "$(get CFBundleIconName)" = AppIcon
+          test "$(get UIFileSharingEnabled)" = false
+          test "$(get ITSAppUsesNonExemptEncryption)" = false
+          echo "version $(get CFBundleShortVersionString) build $(get CFBundleVersion)"
+
+      - name: Collect the debug info
+        working-directory: MOBILE/native/out/ios-store
+        run: dsymutil ran.app/ran -o ran.dSYM
+
+      - name: Keep the debug info
+        uses: actions/upload-artifact@v4
+        with:
+          name: ran-ios-store-dsym
+          path: MOBILE/native/out/ios-store/ran.dSYM
+
+      - name: Keep the unsigned store bundle
+        if: env.HAVE_SIGNING != 'true'
+        working-directory: MOBILE/native/out/ios-store
+        run: |
+          mkdir -p Payload && cp -R ran.app Payload/
+          zip -qry LegacyMOnline-unsigned.ipa Payload
+          echo "No signing secrets yet - run tools/patch/ios-signing-setup.py once the Apple account is active."
+
+      - name: Upload the unsigned store bundle
+        if: env.HAVE_SIGNING != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ran-ios-store-unsigned
+          path: MOBILE/native/out/ios-store/LegacyMOnline-unsigned.ipa
+
+      #  Signing: the distribution identity into a throwaway keychain, the
+      #  profile into the bundle, entitlements from the profile itself (so the
+      #  team id and application-identifier always match what Apple issued).
+      - name: Sign
+        if: env.HAVE_SIGNING == 'true'
+        working-directory: MOBILE/native/out/ios-store
+        env:
+          P12: ${{ secrets.IOS_DIST_P12 }}
+          P12_PASS: ${{ secrets.IOS_DIST_P12_PASS }}
+          PROFILE: ${{ secrets.IOS_PROFILE }}
+        run: |
+          KC="$RUNNER_TEMP/sign.keychain-db"; KCP="$(uuidgen)"
+          security create-keychain -p "$KCP" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KCP" "$KC"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" -k "$KC" -P "$P12_PASS" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KCP" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          IDENTITY=$(security find-identity -v -p codesigning "$KC" | awk -F'"' '/Apple Distribution|iPhone Distribution/ {print $2; exit}')
+          test -n "$IDENTITY" || { echo "no distribution identity in the p12"; exit 1; }
+          echo "identity: $IDENTITY"
+
+          echo "$PROFILE" | base64 --decode > ran.app/embedded.mobileprovision
+          security cms -D -i ran.app/embedded.mobileprovision > profile.plist
+          /usr/libexec/PlistBuddy -x -c "Print :Entitlements" profile.plist > entitlements.plist
+          cat entitlements.plist
+
+          find ran.app -name '*.dylib' -o -name '*.framework' | while read -r f; do
+            codesign -f -s "$IDENTITY" --keychain "$KC" "$f"
+          done
+          codesign -f -s "$IDENTITY" --keychain "$KC" --entitlements entitlements.plist ran.app
+          codesign -dv --verbose=2 ran.app
+          codesign --verify --deep --strict ran.app
+
+          mkdir -p Payload && rm -rf Payload/ran.app && cp -R ran.app Payload/
+          zip -qry LegacyMOnline.ipa Payload
+          ls -la LegacyMOnline.ipa
+
+      - name: Upload to TestFlight
+        if: env.HAVE_SIGNING == 'true' && inputs.upload
+        working-directory: MOBILE/native/out/ios-store
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8
+          xcrun altool --validate-app -f LegacyMOnline.ipa -t ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+          xcrun altool --upload-app   -f LegacyMOnline.ipa -t ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+
+      - name: Keep the signed build
+        if: env.HAVE_SIGNING == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ran-ios-store-signed
+          path: MOBILE/native/out/ios-store/LegacyMOnline.ipa
