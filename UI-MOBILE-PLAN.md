@@ -261,6 +261,14 @@ ships, on both platforms (shared code; iOS checked through CI + the store build)
   both allow, target not a costume, target not already disguised - already coded in
   MobileEnhanceWindow); tap a target to confirm, then ReqDisguise.
 
+- 2026-10-09, user: text must be highlighted like the PC window, and the frame must look like a
+  real game window. Three frame styles were mocked (https://claude.ai/artifact/R3Rt1jGZB2yrFTB7YwjhT5);
+  the user wants **all three as a setting, default C**: A Crystal, B Royal, C Tactical
+  (RANPARAM::dwMobileUiTheme, saved with the game options). Built and verified in game on LDPlayer
+  (character window in each theme); PC colours (NS_UITEXTCOLOR) used for every label/value.
+  The selector itself goes into the new ตั้งค่า window (tier 1). Test override: uitheme0/1/2 diag files.
+- Rule from the user: a redesigned window keeps EVERY field the classic one shows.
+
 ## 6. Open questions for the user
 
 - Which mobile MMORPGs do you like the UI of? Screenshots of their bag, character and
