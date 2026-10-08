@@ -12,7 +12,7 @@ If anything here disagrees with another file, this file wins.
 
 ---
 
-## 2026-10-08 — Menu: ระบบ replaced by ตั้งค่า and ออก (not shipped yet)
+## 2026-10-08 — Menu: ระบบ replaced by ตั้งค่า and ออก (patch 721, APK 240, iOS 1.0.240; built, awaiting upload)
 
 - User: remove ระบบ from the menu and put ตั้งค่า and ออก there instead, so there is no menu
   inside a menu. Change character (relogin) is not needed.
@@ -28,7 +28,8 @@ If anything here disagrees with another file, this file wins.
 - LDPlayer, test01: the menu shows ตั้งค่า and ออก and no ระบบ. ตั้งค่า opens options and closes
   the menu. ออก shows "คุณต้องการออกจากเกมหรือไม่ ?". ไม่ keeps the game running. ใช่ ends the
   process with no crash. arm64, x86_64 and PC (MiniA, Emulator, Agent, Field) all build.
-- iOS: shared SOURCE and data, no platform code. Not run on an iPhone.
+- iOS: shared SOURCE and data, no platform code. CI run 37770820709 built SOURCE f35fdfe as
+  build 240, and the binary contains MOBILE_SETTINGS_BUTTON and MOBILE_EXIT_BUTTON. Not run on an iPhone.
 
  drew a white disc (Makaze Kick) (not shipped yet)
 
