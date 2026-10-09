@@ -32,6 +32,14 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-10 — Parallel character posing (patch 741, APK 251, iOS 1.0.251; awaiting upload)
+
+- Players and monsters drawn this frame are posed on a worker pool (`ran_jobs`, game thread + up to 4 helpers; iPhone 15 -> 4, LDPlayer -> 2) before drawing. Each worker poses into a private copy of the shared skeleton through a thread-local redirect by bone index (`RanPoseBone`/`RanPoseSkeleton`, DxBoneCollector). DxSkinChar::Render copies the pose times the world matrix into the shared skeleton. UpdateBones applies the world matrix at the root only, so every reader (parts, effects, attachments, shadow) sees what it saw before. Unsafe cases (animation not yet loaded, the shared lazy `m_pQuatOrigRot`, a missing copy) fall back to the old path for that character.
+- **Correctness**, "posecheck" diag (poses both ways and compares every bone): about 1,730 poses/s, largest difference rotation 2.9e-6, position 4e-7 relative. That is float rounding.
+- **Speed**, LDPlayer, 250-player SG crowd, 3 interleaved rounds ("noposejobs" = old path): frame 78-82 -> **72-75 ms**, render 74 -> 66-69 ms. 99.6% of poses on workers; pose no longer in the main thread's top sections. **iPhone: to measure** (pose was ~10 ms there).
+- Remaining main-thread cost in that crowd: ch:parts 17-19 ms, part:skinned ~13, ch:eff 8-10, glow and ghost. That is mostly GL submission, so next: render thread, then instancing.
+- Also fixed: the old "skeleton is per character" pose cache (wrong); a release/acquire pair on SAnimContainer::m_bVALID; a DxAniScale null bone. iOS CI has a `source_ref` input for building a SOURCE branch.
+
 ## 2026-10-09 — Crowd performance: diagnostic stat in the draw (patch 739, APK 250, iOS 1.0.250; awaiting upload)
 
 - iPhone 15 in the SG load-test crowd (252 players drawn): 5.8 fps, ~150 ms game CPU a frame. Cost switches on the phone, interleaved: palette uploads and light block = noise; all draws (nulldraw) = only ~20 ms. So the cost is game-side CPU before any GL. LDPlayer does the same crowd in ~37 ms on a slower CPU.
