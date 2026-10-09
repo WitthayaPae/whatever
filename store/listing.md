@@ -20,19 +20,20 @@ original-publisher names, no website top-up, no prices.
 
 Legacy M Online คือเกม MMORPG ออนไลน์บนมือถือ ในโลกของนักเรียนต่างสถาบันที่แข่งขันกันเพื่อเป็นที่หนึ่ง
 
-• เลือกสถาบันและสายอาชีพ: นักดาบ นักหมัด นักธนู นักเวท และอีกหลายสาย
+• เลือกสถาบันและสายอาชีพ: นักหมัด นักดาบ นักธนู และหมอ
 • ฝึกเลเวล เก็บสกิล ตีบวกอาวุธ และสร้างตัวละครในแบบของคุณ
 • ตั้งปาร์ตี้ ล่าบอส และสำรวจแผนที่ต่าง ๆ กับเพื่อน
-• PvP และสงครามระหว่างสถาบัน
+• PvP และศึก Tyranny ระหว่างสถาบัน
 • ระบบคลับ เพื่อน และแชทในเกม
 • ปุ่มและจอยสติ๊กออกแบบมาเพื่อมือถือ เล่นได้ทั้งมือถือและแท็บเล็ต
 
 ต้องมีบัญชีเกมเพื่อเข้าเล่น และต้องเชื่อมต่ออินเทอร์เน็ตตลอดการเล่น
 ครั้งแรกที่เปิด เกมจะดาวน์โหลดข้อมูลเพิ่มเติมประมาณ 5 GB แนะนำให้ใช้ Wi-Fi
 
-(Note: confirm the class list and the ~5 GB figure before publishing. The
-payload was 4.8 GB at patch 721. Name only features that are live, per the
-"source is not production" rule.)
+(2026-10-09: classes taken from the in-game ranking tabs; Tyranny is live
+(its announcements run in chat), School Wars is not, so it is not named. The
+payload was 4.8 GB at patch 721. No website or top-up mention anywhere in the
+listing: Play forbids steering players to outside payment.)
 
 ## Apple keywords (100 chars, comma-separated, no spaces needed)
 
