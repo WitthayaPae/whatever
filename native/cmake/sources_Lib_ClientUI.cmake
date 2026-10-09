@@ -210,6 +210,13 @@ set(Lib_ClientUI_SOURCES
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileTalkPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileStoragePanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileShopPanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileItemShopPanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileToolPanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileSocialPanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobilePartyPanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileEventPanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileTradePanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileNpcPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileChatMacroBar.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileChatChannelBar.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileMiniMap.cpp

@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-08
+- **Last updated:** 2026-10-09
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -31,6 +31,48 @@ the patch ships a needless APK bump).
 2026-10-08). Full list in the dated sections below.
 
 ---
+
+## 2026-10-09 — Mobile UI tier 2: item shop + 19 small-list windows (built, behind `newui`, not shipped)
+
+- User approved the tier-2 mocks (15 boards, artifact 6HCQ4sN2e7udFSK1J64HHd) and asked for
+  all of them, plus: the item shop shows the pre-discount price crossed out.
+- Kit: **CMobileList** (finger-tall rows, up to 4 columns + item icon, drag/wheel scroll, thumb,
+  empty text, TakeTap). Disabled white/red buttons draw as plain buttons.
+  `CInnerInterface::MobileHostRedirect(classic id, panel)` = one line per hosted window; it logs
+  "mobile panel: classic N open/closed" once per change.
+- Engine fix: CUIMan::Render's bottom list now skips hosted windows too (the boss button opens
+  its window with ShowGroupBottom; the classic boss window drew under the panel).
+- New panels (all host the classic window; every action calls the classic code path / dialog):
+  - MobileItemShopPanel: item shop (ITEMSHOP_WINDOW_RN) + gift picker (ITEMSHOP_GIFT_WINDOW).
+    Cards: price, struck original price, -% sticker on the icon, stock. Detail: buy (confirm
+    switch), add to cart, gift, preview/contents. Cart bar: 10 slots, totals, clear/gift/buy all.
+  - MobileNpcPanel: NPC point shop, item exchange (docked left of the bag), taxi + bus.
+  - MobileTradePanel: auction (+ its storage), product/crafting.
+  - MobileEventPanel: party finder, boss viewer, ranking (8 tabs), competition (Tyranny/CDM).
+  - MobilePartyPanel: party window, player menu (labelled 3x3), mini party HUD (52-tall rows).
+  - MobileSocialPanel: friends (name box, block list), club (info/members/alliance/battle).
+  - MobileToolPanel: chat macro editor, item search + results, kill-feed style.
+  - Left classic on purpose: Pandora + Codex (features off in config.ini), attendance book
+    (cells already 70x62), student record (button removed).
+  - Strings: MOBILE_PANEL 57-74, MOBILE_NPC, MOBILE_TRADE, MOBILE_EVENT, MOBILE_PARTY,
+    MOBILE_SOCIAL, MOBILE_TOOL (gameword.xml -> Gui.rcc).
+- Verified on LDPlayer (x86_64, test01), 3840x2160 and iPhone size 2556x1179:
+  item shop (select, cart add/remove, box contents, buy confirm cancelled, category, filter,
+  paging, switch, drag scroll, close/reopen), gift picker (empty list), party (empty), club (not a
+  member), friends (name box typing), chat macro (save + reload, then cleared again), party finder
+  (search, none found), ranking (live data), competition (both tabs, TOP 10), boss (map -> monster
+  -> drops), NPC shop (crow 9/63, select), item exchange (crow 49/20), taxi (area, stop, fare),
+  crafting (recipe, materials), item search (typing, suggestions, server search).
+  NPC windows were opened with a temporary test trigger, removed before the build.
+- Builds: arm64 + x86_64 0 errors; PC MiniA, Emulator, ServerAgent, ServerField build.
+- iOS: shared SOURCE + data only, no platform code. Not built in CI yet, not run on an iPhone.
+- Still open:
+  - [ ] Not testable solo / on this server: auction (only while an auction is live), bus (needs
+        the NPC talk), player menu (needs a second player), mini party + party actions (needs a
+        party), club actions (test01 has no club), gift send (no friends), kill feed (needs the
+        card item), friend add/delete (would change the account).
+  - [ ] Tab S9 check.
+  - [ ] Ship: flip `newui` default, patch Android + iOS together (waiting for the user).
 
 ## 2026-10-08 — Goal: TestFlight + Google Play (planned, waiting on user decisions)
 
