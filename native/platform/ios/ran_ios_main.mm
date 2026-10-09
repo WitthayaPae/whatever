@@ -48,6 +48,7 @@ void RanInput_PointerMove ( int x, int y );
 //  pinch cancelling a drag, and a press outside an edit box closing the
 //  keyboard. It lived inside android_main.cpp, so iOS had none of it.
 void RanGesture_Down ( int x, int y );
+void RanSampler_Tick ( void );
 void RanGesture_Move ( int x, int y );
 void RanGesture_Up   ( int x, int y );
 void RanGesture_Tick ( void );
@@ -263,6 +264,7 @@ static int  g_imeInsetPerMille = 0;
         return;
     }
 
+    RanSampler_Tick ();     //  ran_ios_sampler.mm; idle unless the "sampler" diag is set
     const CFTimeInterval now = link.timestamp;
     const float dt = self.lastTick > 0 ? (float)(now - self.lastTick) : 0.0f;
     self.lastTick = now;

@@ -148,8 +148,13 @@ public:
         }
 
         //  Diagnostic: nomeshvbo forces the old streaming path, so the cache
-        //  can be ruled in or out on a running client.
-        const bool noVbo = RanPlat_DiagExists("nomeshvbo") != 0;
+        //  can be ruled in or out on a running client. Asked once every 512
+        //  draws, not on every one: even the cached lookup was 0.8% of the game
+        //  thread at ~2,000 mesh draws a frame (simpleperf, 2026-10-10).
+        static bool s_noVbo = false;
+        static unsigned s_noVboAsk = 0;
+        if ((s_noVboAsk++ & 511) == 0) s_noVbo = RanPlat_DiagExists("nomeshvbo") != 0;
+        const bool noVbo = s_noVbo;
         if (!noVbo && !m_streamAlways && ensureGpuBuffers()) {
             m_device->SetStreamSource(0, m_vb, 0, m_stride);
             m_device->SetIndices(m_ib);

@@ -384,7 +384,18 @@ namespace { double g_collSeconds = 0.0; unsigned long g_collCalls = 0; }
 //  A total is not useful on its own here: the question is what one more player
 //  or one more mob costs, because the scene this has to survive is a hundred of
 //  each, not the dozen that happens to be standing around.
-extern "C" double RanProf_Now(void) { return DXUtil_Timer(TIMER_GETABSOLUTETIME); }
+//  The profiler's clock: nanosecond monotonic time as a double.
+//
+//  It was DXUtil_Timer(TIMER_GETABSOLUTETIME), which returns a FLOAT of seconds
+//  since boot. On a phone up for days a float has ~4-60 ms steps, so every
+//  section and span quantised to a few fixed values (an iPhone 15 showed 4.5,
+//  4.8, 10.0 ms over and over, 2026-10-10) and small costs read as noise. The
+//  game's clock is untouched; only measurement uses this.
+extern "C" double RanProf_Now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
 
 namespace {
 struct ProfCount { const char *name; unsigned long total; unsigned long frames; };

@@ -235,12 +235,25 @@ extern "C" const char *RanPlat_DiagPath ( const char *name )
 //  that ARE there - usually none. No name limit, no syscall in a draw loop,
 //  and a file dropped in still takes effect within a second. The listing is
 //  done outside the lock; a reader keeps the previous snapshot meanwhile.
+//  FNV-1a, for RanPlat_DiagExists.
+static unsigned diagNameHash ( const char *s )
+{
+    unsigned h = 2166136261u;
+    while ( *s ) { h ^= (unsigned char) *s++; h *= 16777619u; }
+    return h;
+}
+
 extern "C" int RanPlat_DiagExists ( const char *name )
 {
     if ( !name || !*name ) return 0;
 
     enum { kMaxPresent = 128, kNameMax = 64 };
     static char  s_present[kMaxPresent][kNameMax];
+    //  A hash beside each name: the folder holds dozens of files (logs, caches),
+    //  and a strcmp against each of them on every call was 0.7% of the game
+    //  thread in a crowd (simpleperf, 2026-10-10). Now a call hashes the name
+    //  once and compares integers; strcmp only confirms a hash that matched.
+    static unsigned s_hash[kMaxPresent];
     static int   s_nPresent = 0;
     static long  s_listedMs = -100000;
     static int   s_listing = 0;
@@ -254,6 +267,8 @@ extern "C" int RanPlat_DiagExists ( const char *name )
 #endif
     const long nowMs = (long)( ts.tv_sec * 1000 + ts.tv_nsec / 1000000 );
 
+    const unsigned h = diagNameHash ( name );
+
     pthread_mutex_lock ( &s_lock );
     if ( nowMs - s_listedMs >= 1000 && !s_listing )
     {
@@ -262,6 +277,7 @@ extern "C" int RanPlat_DiagExists ( const char *name )
 
         //  The root itself: RanPlat_DiagPath("") is "<root>/".
         static char s_fresh[kMaxPresent][kNameMax];
+        static unsigned s_freshHash[kMaxPresent];
         int nFresh = 0;
         DIR *d = opendir ( RanPlat_DiagPath ( "" ) );
         if ( d )
@@ -271,6 +287,7 @@ extern "C" int RanPlat_DiagExists ( const char *name )
             {
                 if ( de->d_name[0] == '.' && ( !de->d_name[1] || ( de->d_name[1] == '.' && !de->d_name[2] ) ) ) continue;
                 if ( strlen ( de->d_name ) >= kNameMax ) continue;
+                s_freshHash[nFresh] = diagNameHash ( de->d_name );
                 memcpy ( s_fresh[nFresh++], de->d_name, strlen ( de->d_name ) + 1 );
             }
             closedir ( d );
@@ -278,6 +295,7 @@ extern "C" int RanPlat_DiagExists ( const char *name )
 
         pthread_mutex_lock ( &s_lock );
         memcpy ( s_present, s_fresh, sizeof(s_present[0]) * (size_t)nFresh );
+        memcpy ( s_hash, s_freshHash, sizeof(s_hash[0]) * (size_t)nFresh );
         s_nPresent = nFresh;
         s_listedMs = nowMs;
         s_listing = 0;
@@ -285,7 +303,7 @@ extern "C" int RanPlat_DiagExists ( const char *name )
 
     int answer = 0;
     for ( int i = 0; i < s_nPresent; ++i )
-        if ( strcmp ( s_present[i], name ) == 0 ) { answer = 1; break; }
+        if ( s_hash[i] == h && strcmp ( s_present[i], name ) == 0 ) { answer = 1; break; }
     pthread_mutex_unlock ( &s_lock );
     return answer;
 }

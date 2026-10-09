@@ -93,6 +93,13 @@ long long nowMs() {
                std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+//  The clock at the last Present, for "last drawn" stamps. A texture is
+//  stamped on every bind, thousands of times a frame, and the budget it feeds
+//  works in seconds (10-15 s idle), so a stamp one frame old loses nothing.
+//  Reading the clock per bind was ~1% of the game thread on LDPlayer.
+long long g_presentMs = 0;
+inline long long useStampMs() { return g_presentMs ? g_presentMs : nowMs(); }
+
 //  Reads a texture file back for the budget. The engine registers it
 //  (TextureManager.cpp): encrypted .mtf textures need its decrypt, which the
 //  shim cannot do. Returns malloc'd bytes, freed here.
@@ -473,7 +480,7 @@ public:
         //  appeared. Leave it dirty and upload later, on the right thread.
         if (!RanGLR_OnRenderThread()) return m_glTex;
 
-        m_lastUseMs = nowMs();
+        m_lastUseMs = useStampMs();
         //  Given back to the budget (texBudgetPass): read the file again. The
         //  texture object never went away, so nothing in the engine noticed.
         if (m_evicted && !reloadPixels()) return 0;
@@ -1670,6 +1677,7 @@ public:
     HRESULT Present(const RECT *, const RECT *, HWND, const RGNDATA *) override {
         flushUIBatch();
         ++g_stats.frames;
+        g_presentMs = nowMs();
         texBudgetPass();
         //  "uiflushlog" report: sites that ended a submitted UI batch, per frame,
         //  with one known function's address so the log can be symbolised
