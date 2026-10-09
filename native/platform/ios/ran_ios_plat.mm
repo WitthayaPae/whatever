@@ -12,6 +12,20 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
+//  The App Store / TestFlight build (CMake RAN_IOS_STORE) has its own bundle
+//  id; the SideStore build is com.ran.launcher. Android's RanPlat_IsStore is
+//  the same question by package name.
+extern "C" int RanPlat_IsStore ( void )
+{
+    static int s = -1;
+    if ( s < 0 )
+    {
+        NSString *b = [[NSBundle mainBundle] bundleIdentifier];
+        s = ( b && ![b isEqualToString:@"com.ran.launcher"] ) ? 1 : 0;
+    }
+    return s;
+}
+
 //  Open a link in Safari (or whatever the phone's default browser is).
 //
 //  openURL:options:completionHandler: rather than the deprecated openURL: - the
