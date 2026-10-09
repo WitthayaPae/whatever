@@ -140,6 +140,12 @@ the patch ships a needless APK bump).
     same row is tapped again, the page changes or the window closes. Pages kept (user: leave it).
     Fix (user: detail kept following the finger): any press not on a skill row dismisses it; a
     press on another row switches to that skill. LDPlayer verified.
+- HP section sized in the HUD editor drew squashed rows under scaled text, level box misplaced
+  (user, 2026-10-09; same with classicui). Cause, logged: MobileArrangeHudWindows moved
+  BASIC_INFO_VIEW (editor offset, root 53,17) without its dummy, and MoveBasicInfoWindow snapped it
+  back to the dummy (56,14) every frame, re-anchoring the bars at their unscaled offsets just before
+  drawing. Fix: MobileFollowBasicInfoDummies after the move. LDPlayer at 160%: rows, labels and
+  values line up, level box under EXP.
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:
