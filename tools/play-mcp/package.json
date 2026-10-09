@@ -1,0 +1,13 @@
+{
+  "name": "ran-play-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for the Google Play Developer API (Legacy M Online)",
+  "main": "server.mjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "googleapis": "^150.0.0",
+    "zod": "^3.25.0"
+  }
+}

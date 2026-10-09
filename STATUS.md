@@ -3,14 +3,188 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-05
-- **Approach:** compile the real PC client (`SOURCE/`) for mobile. Decided 2026-08-24.
-- **Current phase:** 1 complete · 2 complete · **3 in progress — login works end to end; character-select scene and models remain**
-- **Builds:** `cd MOBILE/native && ./build.sh` → 0 errors, produces `out/arm64-v8a/libran.so`
-- **On device:** renders on the x86_64 test device (Adreno 750, GLES 3.1) at a steady 60 fps.
-  APKs: `out/ran-phase3.apk` (current), `out/ran-phase2.apk` (headless, kept for comparison).
+- **Last updated:** 2026-10-09
+- **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
+- **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
+  https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
+  (built 2026-10-08, waiting for the user's upload).
+- **Release flow:** MAKE-PATCH.bat on `main` -> push -> ios-build.yml -> make-ios-source.js ->
+  patch again -> user uploads `native/out/upload`. See CLAUDE.md and PATCHING.md.
+
+### Where we are (2026-10-08)
+
+| Track | State |
+|---|---|
+| Game (direct APK + SideStore) | Live, patch 721 built. Normal develop -> test -> patch on `main`. |
+| Google Play | Account in Google identity review. Store build done on branch `store` (`STORE=1 ./build-apk.sh` -> .aab). Next: 12 testers x 14 days closed test. |
+| TestFlight | Apple enrollment paid, pending approval. Store build + CI (`ios-testflight.yml`, Xcode 26.6) green on `store`; signing/upload wait for the API key. |
+| Mobile UI redesign | **Built, on by default, in patch 725 (APK 242, iOS 1.0.242); awaiting upload.** Plan `UI-MOBILE-PLAN.md`. Four styles: D Original (classic grey chrome, first on the picker), A Crystal, B Royal, C Tactical (default C). Tier 1 and tier 2 windows are re-laid out; every other window gets a themed skin. Not checked on the Tab S9 or an iPhone; trade, stalls, auction, party and club actions need a second player. Backup: git tag `ui-classic-2026-10-08` (SOURCE + MOBILE) and `BACKUP/ui-classic-2026-10-08/`; `classicui` diag forces the old UI, `uitheme0..3` force a style. |
+| Store paperwork | `store/privacy.html` + `store/listing.md` on `store`: placeholders (name, email), reviewer account, gacha-odds question open. |
+
+**Branches.** `main` = what ships in patches. `store` = main + store-only changes (Play/TestFlight
+manifests, launcher store paths, 16 KB pages, Xcode 26 shim fix). Merge `main` into `store` after
+every release; the store builds are made from `store`. Never run MAKE-PATCH while `store` is
+checked out, and after building on `store` rebuild the libs on `main` before a patch (otherwise
+the patch ships a needless APK bump).
+
+**Known open bugs:** Back key does not open the ESC menu (direct and store build, found
+2026-10-08). Full list in the dated sections below.
 
 ---
+
+## 2026-10-09 — Drag released over a button clicked it (patch 731, APK 245, iOS 1.0.245; awaiting upload)
+
+- **Cause, measured:** a left drag (one that starts on something draggable: a list row, a scroll thumb, an item) is pressed where the finger went down and released where it lifts. `CUIControl::Update` handed every control the release with "pointer inside", wherever the press began, so the control under the lift took it as a click. A drag from empty space is a camera drag (middle button) and never clicked, which is why it only showed on lists and scroll bars.
+- **Fix (shared SOURCE, so Android and iOS):** each control remembers whether the press began inside it (`m_bMobilePressIn`, tested on the press frame with the pointer that control is given) and drops the release otherwise. While something is carried for a drop (hold item, drag-lift, lift pending, item-cell press, skill press or skill to tray) `CUIControl::s_bMobileCarry` lets the release through; `CInnerInterface::FrameMove` sets it each frame and keeps it one frame after it ends. Controls hidden on the press frame get no click from its release, which also stops taps leaking into controls the tap itself showed.
+- First attempt, one global press point, broke every tap on the login page: magnified windows give their children their own coordinates. Replaced by the per-control flag.
+- **Verified on LDPlayer, v729 against the new build:** ranking row dragged onto ร่ำรวย switched the tab on v729, not on the new build. Scroll thumb dragged onto ✕ closed the window on v729; now it stays open and the list scrolls. Tap tab, tap ✕, login, and bag item drag (column 4 to 6) all work. Not tested: skill drag to the quick bar, potion tray drag, Tab S9, iPhone.
+
+## 2026-10-09 — Original default, pressed buttons, top-up return fix (patch 729, APK 244, iOS 1.0.244; awaiting upload)
+
+- **Original is the default style.** `dwMobileUiTheme` defaults to 3. It is now saved under a new key, `dwMobileUiStyle`, because every existing option.ini already stores the old default (2, Tactical) under the old key, which would have kept those players on Tactical. Settings marks Original as ค่าเริ่มต้น.
+- **Buttons show they are pressed** (user: no click animation). `CMobileButton`, every `CBasicButton` (menu icons and other image buttons) and the redesigned `CBasicTextButton` darken to 55% while a finger rests on them, and for 0.12 s after a tap. The gesture layer only presses a button when the finger lifts, so a resting finger is read from the new shared `RanGesture_Holding()` in `shim/platform/touch_gesture.cpp` (Android and iOS). Measured on LDPlayer: เรียง 79 at rest, 43 while held; the menu icon darkens the same way. The round touch-HUD buttons already had their own ring.
+- **Dark empty screen after the top-up page** (user report). Coming back through the app icon started `RanLauncher` again, because the task root was gone, and it booted a second `RanActivity` over the running one. `RanActivity.sAlive` now makes the launcher reorder the running game to the front and finish. Verified on LDPlayer: same steps, the game comes back with the item shop still open, and the log says "game already running". Android only; iOS has one app instance and was not affected (not checked on an iPhone).
+- **Still open: server stopped updating a client after background + map move (user, LDPlayer, 2026-10-09 ~17:50).** Both TCP links (12002/12003) were ESTABLISHED with empty queues, but nothing arrived from the server: in-game clock frozen at 17:50-17:51 at 17:58 real time, no monsters in SG, item shop request never answered ("Item Shop Delay open" on the retry). Other players still saw the character. The character had just moved market to SG, so the server was answering until then. Not reproduced: a fresh login with 3 min in the top-up page and back through the icon stayed healthy. Known fact: the game loop does not run in the background, so nothing reads the sockets. Suspect a server-side backlog plus a map move soon after return; unconfirmed. Need the user's steps (how they reached SG).
+
+## 2026-10-09 — Original style, chat filter fix, new UI shipped (patch 725, APK 242, iOS 1.0.242; awaiting upload)
+
+- **Original (4th style, first on the picker).** The new layouts with the game's own art from `interface_main.dds`: grey chrome buttons, the classic slot frame, the title strip across every window's title bar (`CMobilePanel` and `CMobileWindowSkin`), square corners. Atlas `mobile_ui.dds` now has four 256 blocks (1024x256, HD 4096x1024), generated by `tools/icon-art/make-mobile-ui.py`. Gameword MOBILE_PANEL 77 "ออริจินัล".
+- **The saved style survives a restart.** `RANPARAM_OPTION` clamped `dwMobileUiTheme > 2` back to Tactical; it now allows 3.
+- **Menu close button kept its round shape after a style change.** A radius only takes effect on `Place`; `CMobileMenuWindow::Update` now places it again when the radius changes.
+- **Chat ตัวกรอง did nothing visible.** On PC the filter only affects lines that arrive later. The All page now keeps its own history (up to 200 lines, with each line's channel) and `MobileRefilter` lays it out again when a switch changes. Verified on LDPlayer: switching ระบบ off removed the tax line already shown, and switching it on brought it back. The regional pill now says พื้นที่ (the tab's word); "ของบริเวณ" next to พันธมิตร read as one phrase.
+- NewUiOn is on by default.
+- **Original was too dark (user test).** The first cut used a near-black body. The PC builds 95 windows with `CreateBaseWindowLightGray`: body `BASIC_WINDOW_BODY_MAIN_LIGHTGRAY` = (114,114,114) at alpha 179, 2px black edge. The atlas now uses exactly that. Inner section boxes are black at 70 (the PC uses 153, which covered most of the bag and made it dark again). Data only, in patch 725.
+- Verified on LDPlayer (x86_64): style picker, Settings, chat, bag, menu, character window and item shop in Original; style persists across a force-stop. Not verified: Tab S9, iPhone (the iOS binary was checked for the new code only).
+
+## 2026-10-09 — Mobile UI tier 2: item shop + 19 small-list windows (built, behind `newui`, not shipped)
+
+- User approved the tier-2 mocks (15 boards, artifact 6HCQ4sN2e7udFSK1J64HHd) and asked for
+  all of them, plus: the item shop shows the pre-discount price crossed out.
+- Kit: **CMobileList** (finger-tall rows, up to 4 columns + item icon, drag/wheel scroll, thumb,
+  empty text, TakeTap). Disabled white/red buttons draw as plain buttons.
+  `CInnerInterface::MobileHostRedirect(classic id, panel)` = one line per hosted window; it logs
+  "mobile panel: classic N open/closed" once per change.
+- Engine fix: CUIMan::Render's bottom list now skips hosted windows too (the boss button opens
+  its window with ShowGroupBottom; the classic boss window drew under the panel).
+- New panels (all host the classic window; every action calls the classic code path / dialog):
+  - MobileItemShopPanel: item shop (ITEMSHOP_WINDOW_RN) + gift picker (ITEMSHOP_GIFT_WINDOW).
+    Cards: price, struck original price, -% sticker on the icon, stock. Detail: buy (confirm
+    switch), add to cart, gift, preview/contents. Cart bar: 10 slots, totals, clear/gift/buy all.
+  - MobileNpcPanel: NPC point shop, item exchange (docked left of the bag), taxi + bus.
+  - MobileTradePanel: auction (+ its storage), product/crafting.
+  - MobileEventPanel: party finder, boss viewer, ranking (8 tabs), competition (Tyranny/CDM).
+  - MobilePartyPanel: party window, player menu (labelled 3x3), mini party HUD (52-tall rows).
+  - MobileSocialPanel: friends (name box, block list), club (info/members/alliance/battle).
+  - MobileToolPanel: chat macro editor, item search + results, kill-feed style.
+  - Left classic on purpose: Pandora + Codex (features off in config.ini), attendance book
+    (cells already 70x62), student record (button removed).
+  - Strings: MOBILE_PANEL 57-74, MOBILE_NPC, MOBILE_TRADE, MOBILE_EVENT, MOBILE_PARTY,
+    MOBILE_SOCIAL, MOBILE_TOOL (gameword.xml -> Gui.rcc).
+- Verified on LDPlayer (x86_64, test01), 3840x2160 and iPhone size 2556x1179:
+  item shop (select, cart add/remove, box contents, buy confirm cancelled, category, filter,
+  paging, switch, drag scroll, close/reopen), gift picker (empty list), party (empty), club (not a
+  member), friends (name box typing), chat macro (save + reload, then cleared again), party finder
+  (search, none found), ranking (live data), competition (both tabs, TOP 10), boss (map -> monster
+  -> drops), NPC shop (crow 9/63, select), item exchange (crow 49/20), taxi (area, stop, fare),
+  crafting (recipe, materials), item search (typing, suggestions, server search).
+  NPC windows were opened with a temporary test trigger, removed before the build.
+- Builds: arm64 + x86_64 0 errors; PC MiniA, Emulator, ServerAgent, ServerField build.
+- iOS: shared SOURCE + data only, no platform code. CI run 37882522036 built SOURCE 54575cf; the
+  binary contains MOBILE_SOCIAL / MOBILE_TOOL and the panel log line. Not run on an iPhone.
+- Follow-up (user, 2026-10-09): "the inventory has 10 lines, 5 a page; beside the locker it showed 3
+  pages". The grid is EM_INVENSIZE_Y = 11 rows (5 base + 1 premium + 5 inventory-card rows). The bag
+  panel now shows 5 rows a page in both shapes (it was 6, and 5 beside a shop or locker = 3 pages);
+  a third page appears only when the 11th row is open or holds an item. LDPlayer: pages 1-2 alone
+  and beside break-down.
+- "Most pages used to scroll": the classic ranking and boss drop lists scrolled, so those panels
+  now drag-scroll (kit CMobileDragScroll; the drop tooltip stays off during a drag). Verified:
+  ranking rich tab rows 6-11 after a drag, boss drops moved one row. Item shop, NPC shop, item
+  exchange and party finder keep pages because the classic windows had page buttons; every
+  CMobileList (categories, maps, friends, results...) already scrolled.
+- Follow-up 2 (user, 2026-10-09):
+  - Scroll bars: kit MobilePlaceThumb; ranking, boss drops and the quest list show one.
+  - Quest list: scrolls (drag/wheel, a drag does not select), no page buttons - the classic one scrolled.
+  - Bag item menu: "ใส่ช่องลัด" for what the potion tray takes (the server's list in
+    MsgReqActionQSet: cure, recall, pet card, buff card, level-up card, Q-item); the rows then become
+    the 6 slots ("ช่อง N: item / ว่าง", MOBILE_ITEM_SHEET 21). Lift + ReqItemQuickSet; the server
+    puts the item back. LDPlayer: MP potion into slot 5, back in its cell; slot 5 cleared again.
+    The server saves the tray with a delay: a clear right before a force-stop came back once.
+  - Old bag still shown beside some windows: every side bag (TRADEINVENTORY = trade, private
+    stall owner/visitor, rebuild mode; REBUILDINVENTORY; GARBAGEINVENTORY; ITEM_MIX_INVEN;
+    ITEM_TRANSFER_INVEN - classes CInventoryUI_Trade/Rebuild/Trash/ItemMix, CItemTransferInvenWindow)
+    is now hosted and the new bag panel drives it (CMobileBagPanel::Redirect; per window
+    MobileFrame/MobileTouchCell/MobileClose, trade MobilePressMoney). DxGameStage places the partner
+    window beside the bag panel. LDPlayer: visiting a stall shows the new bag at the right, X closes
+    both. Not tested (needs a second player / cards / NPCs): trade, own stall, rebuild, garbage,
+    mix, transfer.
+  - Builds: arm64, x86_64, PC MiniA/Emulator/ServerAgent/ServerField.
+- Follow-up 3 (user, 2026-10-09):
+  - Trade window: CMobileTradeWindowPanel hosts TRADE_WINDOW, left of the bag panel: both grids,
+    money (tap = classic trade-money input), lock/accept state per side (text + ring), big Lock /
+    Accept / Cancel following ApplyButtonUpdate. Redirect() keeps it shut until the server closes a
+    cancelled trade. Not tested on device (needs a second player).
+  - Chat box restyled in place (BasicChat*, ChatShowFlag, MobileChatChannelBar/MacroBar): dark
+    panel, 7 filter pills + filter button 44 tall, drag-scroll with a thumb, big channel picker
+    (52-tall rows, colour strips), A/ก button, input field with hint. Default 480x210 (was PC width
+    x155). LDPlayer: tabs fit, picker opens and closes, no overlap with F1-F4 or the joystick.
+  - Mini party HUD compact: 190 wide, 36-tall rows (8 members 309 units, was 458). Not seen on
+    device (no party).
+  - Level box sits under the EXP bar (BasicInfoView::MobileExpBar). LDPlayer verified.
+  - Builds: arm64, x86_64, PC MiniA/Emulator/ServerAgent/ServerField.
+- Chat macro editor: each line has a channel button (ทั่วไป/ปาร์ตี้/คลับ/พันธมิตร/พื้นที่/โทรโข่ง/กระซิบ
+  with the chat's colours) opening a 52-tall picker like the chat's. Stored as the line's first
+  character (# % ! ^ $ @), which AddChatMacro already reads. LDPlayer: party saved + reloaded, then
+  set back to empty general.
+- Follow-up 4 (user, 2026-10-09):
+  - Crystal uses the Tactical HUD sheet (its pale-blue mobile_hud4 read as dimmed).
+  - Chat: resize-grip lines moved in to 9,8 (were outside the rounded corner in Crystal and Royal);
+    the open-chat fold plate is now a kit button in the window style (CBasicChat m_pMFold +
+    drawn minus); shim RanTouch_SetChatPlateArt(0) stops the painted plate, press unchanged.
+    LDPlayer: Crystal and Royal look right, fold and unfold work.
+  - Icons: tools/icon-art/classic-restyle.py tones the later flat icons (finder, ranking,
+    competition, boss, auction, item shop, crafting, Q box, GM, settings, exit, chat macro, item
+    bank, item mall) into the classic sepia look inside the classic black frame; mini party gets the
+    frame. Written into CLIENT/textures/gui/mobile_icons.dds (backup in the session scratchpad);
+    icons_classic.png updated. THE PATCH MUST CARRY textures/gui/mobile_icons.dds. Re-running
+    make-silver-hud.py rewrites icons_classic.png and loses this - run classic-restyle.py after it.
+  - Same day, user: "why do the icons look dim brown?" - the sepia toning was wrong. KEEP_COLOUR:
+    the later icons keep their own colours (slight contrast, dark rim), only the classic black frame
+    is shared. Menu header: 56-tall bar, FONT_TITLE name, the windows' close button
+    (CMobileMenuWindow::TitleH/WinH; DxGameStage lays the grid under it). LDPlayer verified.
+- Text on white buttons (selected tabs, primary buttons, chat tabs, pickers): COL_ONACCENT is white,
+  drawn with the kit fonts' black outline. LDPlayer: item shop and chat checked.
+- Follow-up 5 (user, 2026-10-09):
+  - Character select: one kit panel behind the window, list, buttons and the account rows
+    (CSelectCharacterPage m_pMBack; CSelectCharacterButton::MobileContentBottom). LDPlayer verified.
+  - Mini party HUD: one panel behind all rows (rows KIND_INNER on it). Not seen on device (no party).
+  - CMobileList scrolls smoothly: pixel offset under the finger, fling with ~1 s decay, rows shown
+    only while wholly inside (no clipping in the UI). LDPlayer: boss map list mid-drag offset and
+    glide after release. Quest list / ranking / boss drops (CMobileDragScroll) still step by row.
+  - Skill window: a tap on a row keeps the skill detail up (MobileShowSkillInfoPinned) until the
+    same row is tapped again, the page changes or the window closes. Pages kept (user: leave it).
+    Fix (user: detail kept following the finger): any press not on a skill row dismisses it; a
+    press on another row switches to that skill. LDPlayer verified.
+- HP section sized in the HUD editor drew squashed rows under scaled text, level box misplaced
+  (user, 2026-10-09; same with classicui). Cause, logged: MobileArrangeHudWindows moved
+  BASIC_INFO_VIEW (editor offset, root 53,17) without its dummy, and MoveBasicInfoWindow snapped it
+  back to the dummy (56,14) every frame, re-anchoring the bars at their unscaled offsets just before
+  drawing. Fix: MobileFollowBasicInfoDummies after the move. LDPlayer at 160%: rows, labels and
+  values line up, level box under EXP.
+- Bag (user, 2026-10-09): Sort / break-down / costume buttons moved under the bag grid. Detergent
+  (ITEM_CLEANSER / ITEM_DISJUNCTION): item sheet offers ใช้งาน -> CMobileBagPanel::BeginApply turns the
+  bag into a picker (only items wearing a costume lit, header MOBILE_PANEL 75/76); confirm runs
+  MobileApplyHeld (PC carry-and-use). LDPlayer: picker opens and exits; the wash itself NOT run (would
+  spend the account's detergent). Point box: comma figures, money/point 55/45, beside-mode point
+  box 112 wide. Item shop cart totals: "<currency>  <figure>" instead of the long total label.
+- Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
+  which completed a step of the score-card quest.
+- Still open:
+  - [ ] Not testable solo / on this server: auction (only while an auction is live), bus (needs
+        the NPC talk), player menu (needs a second player), mini party + party actions (needs a
+        party), club actions (test01 has no club), gift send (no friends), kill feed (needs the
+        card item), friend add/delete (would change the account).
+  - [ ] Tab S9 check.
+  - [ ] Ship: flip `newui` default, patch Android + iOS together (waiting for the user).
 
 ## 2026-10-08 — Goal: TestFlight + Google Play (planned, waiting on user decisions)
 
@@ -34,9 +208,29 @@ If anything here disagrees with another file, this file wins.
   predictive back), the Tab S9, a 16 KB-page emulator.
 - Found while testing: Back (ESC) does not open the ESC menu in either build - 4 presses in
   the direct build, nothing. Same in both, so not the store change.
+- 2026-10-08 later: Play account in Google identity review; Apple enrollment paid, pending.
+- **iOS store build done on branch `store`**: CMake RAN_IOS_STORE=ON (com.legacym.online, "Legacy M
+  Online", no Files.app sharing, ITSAppUsesNonExemptEncryption NO, CFBundleIconName + asset catalog
+  with a 1024 icon upscaled by tools/icon-hd/make-appicon-1024.py). Launcher: store build's minIos
+  stop says update in TestFlight, button opens itms-beta:// (App Store page if TestFlight missing) -
+  same text as Android's Play stop.
+- CI `ios-testflight.yml` (manual, `gh workflow run ios-testflight.yml --ref store`), macos-26:
+  run 37791077684 green on **Xcode 26.6 / iOS 26.5 SDK** (Apple's upload minimum since 2026-04-28):
+  build, actool, toolchain keys (DTXcode 2660, DTSDKName iphoneos26.5, UIDeviceFamily 1,2), bundle
+  checks. Sign + upload steps wait for the secrets. Needed shim fix for Xcode 26 libc++:
+  `namespace std { using ::ran_fopen; }` in shim/win/windows.h (store branch; Android arm64 builds).
+- `tools/patch/ios-signing-setup.py`: once the Apple key exists, makes bundle id, distribution
+  cert, App Store profile via the API and stores all GitHub secrets (never printed).
+- `store/privacy.html` (Thai + English, two [placeholders]) and `store/listing.md` (names,
+  description, age rating, Data safety, App Privacy, reviewer notes). In-app registration is off
+  (bFeatureRegister unset), so account deletion = request via contact, no in-app flow required.
+- 2026-10-09: Play identity check passed. **`tools/play-mcp`**: MCP server `google-play` (registered in `DEV EP9/.mcp.json`) with 14 tools: status, upload bundle to a track, promote/rollout/halt, listing, images, details, testers, reviews, internal sharing, data safety. It needs a service-account key at `native/.play/service-account.json` (gitignored; setup in its README). Selftest passes: the tools list and a clean "no key" answer. The API cannot create the app, and a new app's first .aab must be uploaded by hand in Play Console.
 - Still open:
-  - [ ] User: open Apple ($99/yr) and Play ($25) accounts.
-  - [ ] Claude: test the store build on the Tab S9 / an Android 15+ device; iOS signed IPA + TestFlight upload.
+  - [x] User: app created in Play Console (com.legacym.online, default th); service account play-publisher@legacy-m-play.iam.gserviceaccount.com invited. play_status answers 2026-10-09: 4 empty tracks, no bundles. The API could see the app before any upload; whether the first .aab still has to go by hand is unknown until we try.
+  - [ ] **NEXT (paused 2026-10-09 for game bugs):** Claude: merge main into `store` (48 commits behind), build STORE=1 .aab (1.1.60), test on LDPlayer, upload to the internal track with play_upload_bundle. Before any public track: hide เติมเงิน in the store build (Play payments policy), and the user answers whether shop boxes are random (rating questionnaire).
+  - [ ] User: Apple enrollment approval, then App Store Connect app record + API key (Admin) into native/.appstore/.
+  - [ ] User: fill privacy.html placeholders (name, contact email) and upload it; reviewer account; gacha odds question.
+  - [ ] Claude: run ios-signing-setup.py, then ios-testflight.yml with upload; test store Android build on the Tab S9 / Android 15+.
   - [ ] Privacy policy, account deletion, data safety, content rating, reviewer account.
 
 ---

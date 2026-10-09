@@ -128,6 +128,18 @@ public class RanLauncher extends Activity {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        //  The game is already running (back from the top-up page, or any
+        //  other app, through the app icon): bring it forward, do not patch
+        //  and boot a second one over it.
+        if (RanActivity.sAlive) {
+            Log.i(TAG, "game already running; bringing it forward");
+            Intent i = new Intent();
+            i.setComponent(new ComponentName(getPackageName(), "com.ran.launcher.RanActivity"));
+            i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            startActivity(i);
+            finish();
+            return;
+        }
         sCurrent = this;
 
         /*  The game's own loading screen, as the patch screen.

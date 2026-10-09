@@ -79,8 +79,21 @@ public class RanActivity extends NativeActivity {
      *  just close the keyboard, so anything typed was dropped on the floor. */
     private static native void nativeEnter();
 
+    /*  A game is running in this process. RanLauncher reads it: the app icon
+     *  starts the launcher again whenever the task's root (the launcher,
+     *  long finished) is gone, and it used to boot a second game on top of
+     *  the first - the dark, empty screen a player met after the top-up page
+     *  (2026-10-09).                                                        */
+    static volatile boolean sAlive = false;
+
+    @Override protected void onDestroy() {
+        sAlive = false;
+        super.onDestroy();
+    }
+
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        sAlive = true;
         mIme = new ImeView(this);
         //  Deliberately NOT attached here - see attach() below.
     }
