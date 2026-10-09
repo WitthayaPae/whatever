@@ -343,6 +343,20 @@ extern "C" int RanPlat_MemHeadroomMB(void) {
     return kb > 0 ? (int)(kb / 1024) : -1;
 }
 
+//  The Google Play build (STORE=1, android/store-bundle.sh) installs under its
+//  own package id; the direct build is com.ran.native. The client hides what
+//  store rules forbid in the store build - the website top-up button
+//  (ItemShopWindow, MobileItemShopPanel). Same test as RanLauncher.isStore().
+extern "C" int RanPlat_IsStore(void) {
+    static int s = -1;
+    if (s < 0) {
+        const char *p = (g_app && g_app->activity) ? g_app->activity->internalDataPath : NULL;
+        if (!p) return 0;               //  not known yet: the direct build's answer, not cached
+        s = strstr(p, "/com.ran.native/") ? 0 : 1;
+    }
+    return s;
+}
+
 //  Hand a link to the browser, through the activity.
 //
 //  Same shape as the keyboard calls above: attach to the VM, find the method on

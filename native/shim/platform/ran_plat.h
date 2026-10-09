@@ -58,6 +58,11 @@ int         RanPlat_DiagExists ( const char *name );
 //  ACTION_VIEW on Android, openURL: on iOS.
 void        RanPlat_OpenURL ( const char *url );
 
+//  1 in the store builds (Google Play com.legacym.online, App Store / TestFlight),
+//  0 in the direct builds. Store rules forbid sending players to the website to
+//  pay, so the client hides the item shop's top-up button there.
+int         RanPlat_IsStore ( void );
+
 //  MB left before the platform starts killing: iOS the app's own limit
 //  (os_proc_available_memory), Android the system's MemAvailable. -1 unknown.
 int         RanPlat_MemHeadroomMB ( void );
