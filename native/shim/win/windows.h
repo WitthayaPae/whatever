@@ -559,6 +559,8 @@ clock_t RanWin_clock(void);
 DWORD  GetTickCount(void);
 DWORD  timeGetTime(void);
 void   Sleep(DWORD ms);
+//  Sleep without the idle back-off (win_impl.cpp): the network wait.
+void   RanSleepExact(DWORD ms);
 BOOL   QueryPerformanceCounter(LARGE_INTEGER *p);
 BOOL   QueryPerformanceFrequency(LARGE_INTEGER *p);
 DWORD  GetCurrentThreadId(void);

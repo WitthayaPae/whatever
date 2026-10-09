@@ -32,6 +32,12 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-09 — To do (user, queued)
+
+- [ ] Skill window: an "edit slots" button so the player can remove skills they do not use from the quick slots.
+- [ ] HUD editor: let the player remove buttons from the HUD as well as move and scale them.
+- [ ] iPhone heat: profile `part:skinned` (5 ms CPU per frame while hunting) with a real profiler before changing anything; GPU skinning exists in the shim but no draw uses it (palette counters 0).
+
 ## 2026-10-09 — Original message boxes: PC text panel back (patch 733, APK 246, iOS 1.0.246; awaiting upload)
 
 - Found while testing the store build. Original's window body is the PC's see-through light grey, and the mobile skin had hidden the PC's dark inner panel behind a message box's text (BASIC_LINE_BOX_BODY_MINIPARTY, black at 132). So login messages sat directly on the login window. `CModalWindow` now shows that panel in the Original style only. Checked on LDPlayer (store build, "กรุณากรอกชื่อและรหัสผ่าน"). Not checked: Tab S9, iPhone.

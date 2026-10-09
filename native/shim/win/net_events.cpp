@@ -164,7 +164,7 @@ DWORD RanNet_WaitForMultiple(DWORD count, const HANDLE *handles, BOOL waitAll, D
         }
 
         if (ms != INFINITE && (GetTickCount() - start) >= ms) return WAIT_TIMEOUT;
-        Sleep(1);
+        RanSleepExact(1);       //  the network keeps its 1 ms (win_impl.cpp Sleep)
     }
 }
 
