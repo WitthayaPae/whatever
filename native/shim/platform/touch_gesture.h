@@ -34,6 +34,11 @@ void RanGesture_Tick ( void );
 //  another box, so without this the keyboard sits over half the screen.
 void RanGesture_SetImeActive ( int active );
 
+//  A finger is resting on the screen and has not yet become a drag, a scroll
+//  or a long press: the client has no button down yet (that waits for the
+//  lift), so this is how a button knows to show itself pressed.
+int RanGesture_Holding ( void );
+
 #ifdef __cplusplus
 }
 #endif

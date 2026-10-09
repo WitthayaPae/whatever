@@ -146,6 +146,11 @@ void gesturePress ( int button ) {
 
 extern "C" void RanGesture_SetImeActive ( int active ) { g_imeActive = ( active != 0 ); }
 
+extern "C" int RanGesture_Holding ( void ) {
+    if (!g_gesture.active || g_gesture.moved || g_gesture.scrolling) return 0;
+    return ( g_gesture.pressed && g_gesture.button != 0 ) ? 0 : 1;
+}
+
 extern "C" void RanGesture_Tick ( void ) {
     //  The fling: keep moving the list at the finger's last speed, slowing.
     if (g_fling.on) {
