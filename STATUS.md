@@ -220,7 +220,7 @@ the patch ships a needless APK bump).
 - 2026-10-09: Play identity check passed. **`tools/play-mcp`**: MCP server `google-play` (registered in `DEV EP9/.mcp.json`) with 14 tools: status, upload bundle to a track, promote/rollout/halt, listing, images, details, testers, reviews, internal sharing, data safety. It needs a service-account key at `native/.play/service-account.json` (gitignored; setup in its README). Selftest passes: the tools list and a clean "no key" answer. The API cannot create the app, and a new app's first .aab must be uploaded by hand in Play Console.
 - Still open:
   - [x] User: app created in Play Console (com.legacym.online, default th); service account play-publisher@legacy-m-play.iam.gserviceaccount.com invited. play_status answers 2026-10-09: 4 empty tracks, no bundles. The API could see the app before any upload; whether the first .aab still has to go by hand is unknown until we try.
-  - [ ] Claude: merge main into `store` (48 commits behind), build STORE=1 .aab for the first hand upload.
+  - [ ] **NEXT (paused 2026-10-09 for game bugs):** Claude: merge main into `store` (48 commits behind), build STORE=1 .aab (1.1.60), test on LDPlayer, upload to the internal track with play_upload_bundle. Before any public track: hide เติมเงิน in the store build (Play payments policy), and the user answers whether shop boxes are random (rating questionnaire).
   - [ ] User: Apple enrollment approval, then App Store Connect app record + API key (Admin) into native/.appstore/.
   - [ ] User: fill privacy.html placeholders (name, contact email) and upload it; reviewer account; gacha odds question.
   - [ ] Claude: run ios-signing-setup.py, then ios-testflight.yml with upload; test store Android build on the Tab S9 / Android 15+.
