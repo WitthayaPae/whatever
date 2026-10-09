@@ -107,6 +107,10 @@ the patch ships a needless APK bump).
     device (no party).
   - Level box sits under the EXP bar (BasicInfoView::MobileExpBar). LDPlayer verified.
   - Builds: arm64, x86_64, PC MiniA/Emulator/ServerAgent/ServerField.
+- Chat macro editor: each line has a channel button (ทั่วไป/ปาร์ตี้/คลับ/พันธมิตร/พื้นที่/โทรโข่ง/กระซิบ
+  with the chat's colours) opening a 52-tall picker like the chat's. Stored as the line's first
+  character (# % ! ^ $ @), which AddChatMacro already reads. LDPlayer: party saved + reloaded, then
+  set back to empty general.
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:
