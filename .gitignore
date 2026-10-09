@@ -101,3 +101,7 @@ native/.appstore/
 *.p8
 # The Play upload key passwords - see native/android/store-bundle.sh (store branch).
 native/.signing-upload
+
+# Google Play API service-account key (tools/play-mcp)
+native/.play/
+tools/play-mcp/node_modules/

@@ -217,7 +217,10 @@ the patch ships a needless APK bump).
 - `store/privacy.html` (Thai + English, two [placeholders]) and `store/listing.md` (names,
   description, age rating, Data safety, App Privacy, reviewer notes). In-app registration is off
   (bFeatureRegister unset), so account deletion = request via contact, no in-app flow required.
+- 2026-10-09: Play identity check passed. **`tools/play-mcp`**: MCP server `google-play` (registered in `DEV EP9/.mcp.json`) with 14 tools: status, upload bundle to a track, promote/rollout/halt, listing, images, details, testers, reviews, internal sharing, data safety. It needs a service-account key at `native/.play/service-account.json` (gitignored; setup in its README). Selftest passes: the tools list and a clean "no key" answer. The API cannot create the app, and a new app's first .aab must be uploaded by hand in Play Console.
 - Still open:
+  - [ ] User: create the app in Play Console; make the service account + key and invite it (tools/play-mcp/README.md).
+  - [ ] Claude: merge main into `store` (48 commits behind), build STORE=1 .aab for the first hand upload.
   - [ ] User: Apple enrollment approval, then App Store Connect app record + API key (Admin) into native/.appstore/.
   - [ ] User: fill privacy.html placeholders (name, contact email) and upload it; reviewer account; gacha odds question.
   - [ ] Claude: run ios-signing-setup.py, then ios-testflight.yml with upload; test store Android build on the Tab S9 / Android 15+.
