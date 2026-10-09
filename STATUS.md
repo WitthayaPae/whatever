@@ -32,6 +32,10 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-09 — Original message boxes: PC text panel back (patch 733, APK 246, iOS 1.0.246; awaiting upload)
+
+- Found while testing the store build. Original's window body is the PC's see-through light grey, and the mobile skin had hidden the PC's dark inner panel behind a message box's text (BASIC_LINE_BOX_BODY_MINIPARTY, black at 132). So login messages sat directly on the login window. `CModalWindow` now shows that panel in the Original style only. Checked on LDPlayer (store build, "กรุณากรอกชื่อและรหัสผ่าน"). Not checked: Tab S9, iPhone.
+
 ## 2026-10-09 — Drag released over a button clicked it (patch 731, APK 245, iOS 1.0.245; awaiting upload)
 
 - **Cause, measured:** a left drag (one that starts on something draggable: a list row, a scroll thumb, an item) is pressed where the finger went down and released where it lifts. `CUIControl::Update` handed every control the release with "pointer inside", wherever the press began, so the control under the lift took it as a click. A drag from empty space is a camera drag (middle button) and never clicked, which is why it only showed on lists and scroll bars.
