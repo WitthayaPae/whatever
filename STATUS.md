@@ -65,7 +65,8 @@ the patch ships a needless APK bump).
   crafting (recipe, materials), item search (typing, suggestions, server search).
   NPC windows were opened with a temporary test trigger, removed before the build.
 - Builds: arm64 + x86_64 0 errors; PC MiniA, Emulator, ServerAgent, ServerField build.
-- iOS: shared SOURCE + data only, no platform code. Not built in CI yet, not run on an iPhone.
+- iOS: shared SOURCE + data only, no platform code. CI run 37882522036 built SOURCE 54575cf; the
+  binary contains MOBILE_SOCIAL / MOBILE_TOOL and the panel log line. Not run on an iPhone.
 - Still open:
   - [ ] Not testable solo / on this server: auction (only while an auction is live), bus (needs
         the NPC talk), player menu (needs a second player), mini party + party actions (needs a
