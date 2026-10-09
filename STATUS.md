@@ -146,6 +146,12 @@ the patch ships a needless APK bump).
   back to the dummy (56,14) every frame, re-anchoring the bars at their unscaled offsets just before
   drawing. Fix: MobileFollowBasicInfoDummies after the move. LDPlayer at 160%: rows, labels and
   values line up, level box under EXP.
+- Bag (user, 2026-10-09): Sort / break-down / costume buttons moved under the bag grid. Detergent
+  (ITEM_CLEANSER / ITEM_DISJUNCTION): item sheet offers ใช้งาน -> CMobileBagPanel::BeginApply turns the
+  bag into a picker (only items wearing a costume lit, header MOBILE_PANEL 75/76); confirm runs
+  MobileApplyHeld (PC carry-and-use). LDPlayer: picker opens and exits; the wash itself NOT run (would
+  spend the account's detergent). Point box: comma figures, money/point 55/45, beside-mode point
+  box 112 wide. Item shop cart totals: "<currency>  <figure>" instead of the long total label.
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:
