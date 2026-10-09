@@ -16,6 +16,11 @@ name: iOS build
 
 on:
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "SOURCE branch to build (a test build of a branch; default main)"
+        required: false
+        default: main
   push:
     #  main only: the store branch has its own workflow (ios-testflight.yml).
     branches: [main]
@@ -52,7 +57,7 @@ jobs:
           #  Browse.VC.db, a dozen 150-190 MB .ipch) that GitHub refuses, so this built a
           #  squashed copy on ci/ios-source. They were stripped from the history and
           #  .vs/ is ignored (2026-09-15), so main is pushed and built directly.
-          ref: main
+          ref: ${{ github.event.inputs.source_ref || 'main' }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
           path: SOURCE
 
