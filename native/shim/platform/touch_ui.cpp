@@ -162,6 +162,26 @@ int       g_winCount = 0;
 SlotAdj   g_winAdj[kWinMax];
 SlotAdj   g_winBefore[kWinMax];
 
+//  Taken off the HUD by the player (the user, 2026-10-09: "let the player
+//  remove buttons in the HUD editor"). A hidden control is not drawn and takes
+//  no touch while playing; in the editor it stays, crossed out, so it can be
+//  put back. Never the stick, the attack button, the menu (the way back into
+//  the editor) or a game window. The client's own slots (skill, potion, corner
+//  icon) ask RanTouch_Is*Hidden and park the control off screen.
+bool g_hidGrp[kGrpCount]                     = { };
+bool g_hidSkill[RANTOUCH_MAX_SKILL_CIRCLES] = { };
+bool g_hidPot[kPotMax]                       = { };
+bool g_hidPage[kPageMax]                     = { };
+bool g_hidCorner[kCornerMax]                 = { };
+bool g_hidGrpB[kGrpCount], g_hidSkillB[RANTOUCH_MAX_SKILL_CIRCLES], g_hidPotB[kPotMax],
+     g_hidPageB[kPageMax], g_hidCornerB[kCornerMax];     //  for cancel
+const int kHideSaved = kGrpCount + RANTOUCH_MAX_SKILL_CIRCLES + kPotMax + kPageMax + kCornerMax;
+bool canHideGroup(int g) {
+    return g != kGrpStick && g != kGrpAttack && g != kGrpMenu && g != kGrpWin;
+}
+//  The size a control is laid out at: none while hidden, outside the editor.
+float shownScale(bool hidden, float s);
+
 //  --- movement stick -----------------------------------------------------
 struct Stick {
     Vec2  centre    = { 0, 0 };     // where the ring sits
@@ -970,13 +990,13 @@ void placeRideButtons() {
     const HudAdj &av = g_adj[kGrpVehicle];
     const HudAdj &af = g_adj[kGrpFist];
 
-    veh.radius   = g_modeR * av.scale;
+    veh.radius   = g_modeR * shownScale(g_hidGrp[kGrpVehicle], av.scale);
     veh.centre.x = bx + av.dx * g_unit;
     veh.centre.y = by + av.dy * g_unit;
 
     //  From the ride button's own place, not where the player moved it: the
     //  two are arranged separately.
-    fist.radius   = g_modeR * af.scale;
+    fist.radius   = g_modeR * shownScale(g_hidGrp[kGrpFist], af.scale);
     fist.centre.x = bx - g_modeR * 2.3f + af.dx * g_unit;
     fist.centre.y = by + af.dy * g_unit;
 
@@ -1141,7 +1161,7 @@ void layout() {
     for (int k = 0; k < 7; ++k) {
         Button &b = g_buttons[single[k][0]];
         const HudAdj &a = g_adj[single[k][1]];
-        b.radius   *= a.scale;
+        b.radius   *= shownScale(g_hidGrp[single[k][1]], a.scale);
         b.centre.x += a.dx * g_unit;
         b.centre.y += a.dy * g_unit;
         Clamp::to(b.centre, b.radius, W, H);
@@ -1164,8 +1184,10 @@ void placePageRow() {
     const float W = (float)g_width, H = (float)g_height;
     const HudAdj &a = g_adj[kGrpPage];
 
-    const float r    = g_unit * 0.19f * a.scale;
-    const float step = r * 2.15f;
+    const float r    = g_unit * 0.19f * shownScale(g_hidGrp[kGrpPage], a.scale);
+    //  Spaced by the row's own size, hidden or not, so a page button hidden
+    //  alone leaves the other three where they were.
+    const float step = g_unit * 0.19f * a.scale * 2.15f;
 
     //  Where the row sits before the player moves it: centred under slot 1.
     //  Without an arc - out of the world, or the tray not laid out yet - it
@@ -1206,7 +1228,7 @@ void placePageRow() {
         Button &b  = g_buttons[col[k]];
         const SlotAdj &p = g_pageAdj[k];
         b.slot     = slot[k];
-        b.radius   = r * p.scale;
+        b.radius   = r * shownScale(g_hidPage[k], p.scale);
         b.centre.x = cx + ((float)k - 1.5f) * step + p.dx * g_unit;
         b.centre.y = cy + p.dy * g_unit;
         //  One button dragged on its own still has to stay on the screen.
@@ -1263,7 +1285,7 @@ SlotAdj g_pageBefore[kPageMax];
 //  The toolbar across the top: cancel, reset all, size -, size +, opacity -,
 //  opacity +, save. Positions in surface pixels, recomputed from the unit.
 enum { kToolCancel, kToolReset, kToolSizeDn, kToolSizeUp, kToolAlphaDn, kToolAlphaUp,
-       kToolSave, kToolCount };
+       kToolHide, kToolSave, kToolCount };
 //  The toolbar can be moved out of the way.
 //
 //  It sits across the top, which is where the status bars, the corner icons
@@ -1273,12 +1295,27 @@ enum { kToolCancel, kToolReset, kToolSizeDn, kToolSizeUp, kToolAlphaDn, kToolAlp
 //  working as taps. In pixels, and cleared with everything else by reset.
 float g_toolDX = 0.0f, g_toolDY = 0.0f;
 
+//  The hidden flag of whatever is selected, or NULL when it cannot be hidden:
+//  a slot on its own, a whole group only where canHideGroup allows.
+bool *hidFlag() {
+    if (g_editSel < 0) return NULL;
+    if (g_editSlot >= 0) {
+        if (g_editSel == kGrpSkill  && g_editSlot < RANTOUCH_MAX_SKILL_CIRCLES) return &g_hidSkill[g_editSlot];
+        if (g_editSel == kGrpPotion && g_editSlot < kPotMax)    return &g_hidPot[g_editSlot];
+        if (g_editSel == kGrpPage   && g_editSlot < kPageMax)   return &g_hidPage[g_editSlot];
+        if (g_editSel == kGrpCorner && g_editSlot < kCornerMax) return &g_hidCorner[g_editSlot];
+        return NULL;
+    }
+    if (g_editSel == kGrpSkill || g_editSel == kGrpPotion || g_editSel == kGrpCorner) return NULL;
+    return canHideGroup(g_editSel) ? &g_hidGrp[g_editSel] : NULL;
+}
+
 void toolCircle(int t, Vec2 &c, float &r) {
     r = g_unit * 0.26f;
     const float step = g_unit * 0.66f;
-    //  cancel, reset | size - [value] + | opacity - [value] + | save
-    static const float slot[kToolCount] = { 0.0f, 1.0f, 2.6f, 4.4f, 5.6f, 7.4f, 9.0f };
-    const float total = 9.0f * step;
+    //  cancel, reset | size - [value] + | opacity - [value] + | hide | save
+    static const float slot[kToolCount] = { 0.0f, 1.0f, 2.6f, 4.4f, 5.6f, 7.4f, 9.0f, 10.4f };
+    const float total = 10.4f * step;
     c.x = (float)g_width * 0.5f - total * 0.5f + slot[t] * step + g_toolDX;
     //  A third of the way down, not on the top edge: the health section, the
     //  level box and the potion tray are editable now (2026-10-07) and the
@@ -1494,8 +1531,14 @@ void editDefaultsAll() {
     for (int i = 0; i < kWinMax; ++i) {
         g_winAdj[i].dx = g_winAdj[i].dy = 0.0f; g_winAdj[i].scale = 1.0f;
     }
+    //  And everything taken off comes back.
+    memset(g_hidGrp, 0, sizeof(g_hidGrp));     memset(g_hidSkill, 0, sizeof(g_hidSkill));
+    memset(g_hidPot, 0, sizeof(g_hidPot));     memset(g_hidPage, 0, sizeof(g_hidPage));
+    memset(g_hidCorner, 0, sizeof(g_hidCorner));
     g_toolDX = g_toolDY = 0.0f;
 }
+
+float shownScale(bool hidden, float s) { return (hidden && !g_edit) ? 0.0f : s; }
 
 void editEnd() {
     g_edit = false;
@@ -1731,6 +1774,9 @@ int RanTouch_PointerDown(int id, float x, float y) {
                     memcpy(g_cornerAdj, g_cornerBefore, sizeof(g_cornerAdj));
                     memcpy(g_winAdj, g_winBefore, sizeof(g_winAdj));
                     memcpy(g_pageAdj, g_pageBefore, sizeof(g_pageAdj));
+                    memcpy(g_hidGrp, g_hidGrpB, sizeof(g_hidGrp));       memcpy(g_hidSkill, g_hidSkillB, sizeof(g_hidSkill));
+                    memcpy(g_hidPot, g_hidPotB, sizeof(g_hidPot));       memcpy(g_hidPage, g_hidPageB, sizeof(g_hidPage));
+                    memcpy(g_hidCorner, g_hidCornerB, sizeof(g_hidCorner));
                     editEnd();
                     break;
                 case kToolReset:  editDefaultsAll(); break;
@@ -1742,6 +1788,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
                 case kToolSizeUp: if (pScale) { *pScale += 0.1f; if (*pScale > 1.6f) *pScale = 1.6f; } break;
                 case kToolAlphaDn: if (a) { a->alpha -= 0.1f; if (a->alpha < 0.2f) a->alpha = 0.2f; } break;
                 case kToolAlphaUp: if (a) { a->alpha += 0.1f; if (a->alpha > 1.0f) a->alpha = 1.0f; } break;
+                case kToolHide: { bool *h = hidFlag(); if (h) *h = !*h; } break;
                 case kToolSave:
                     editEnd();
                     ++g_hudSavedGen;
@@ -2679,6 +2726,18 @@ extern "C" void RanTouch_GetCornerAdjust(int i, float *dx, float *dy, float *sca
     if (scale) *scale = gs * g_cornerAdj[i].scale;
 }
 
+//  Taken off the HUD by the player, and so parked off screen by the client -
+//  never while the editor is up, where it has to be seen to come back.
+extern "C" int RanTouch_IsSkillSlotHidden(int i) {
+    return (i >= 0 && i < RANTOUCH_MAX_SKILL_CIRCLES && g_hidSkill[i] && !g_edit) ? 1 : 0;
+}
+extern "C" int RanTouch_IsPotionSlotHidden(int i) {
+    return (i >= 0 && i < kPotMax && g_hidPot[i] && !g_edit) ? 1 : 0;
+}
+extern "C" int RanTouch_IsCornerHidden(int i) {
+    return (i >= 0 && i < kCornerMax && g_hidCorner[i] && !g_edit) ? 1 : 0;
+}
+
 //  How big the player has asked the skill slots to be.
 //
 //  The arc's own radius already carries this (RanTouch_GetSkillArc), which
@@ -3303,6 +3362,30 @@ void drawEditor() {
         }
     }
 
+    //  What is taken off the HUD: crossed out, so it can be found and put back.
+    {
+        struct X { static void at(float x, float y, float rr, float u) {
+            const float k = rr * 0.6f;
+            drawCapsule(x - k, y - k, x + k, y + k, u * 0.03f, alpha(kCrim, 0.85f));
+            drawCapsule(x - k, y + k, x + k, y - k, u * 0.03f, alpha(kCrim, 0.85f));
+        } };
+        for (int i = 0; i < g_skillCircleCount && i < RANTOUCH_MAX_SKILL_CIRCLES; ++i)
+            if (g_hidSkill[i]) X::at(g_skillCircles[i].x, g_skillCircles[i].y, g_skillCircles[i].r, u);
+        for (int i = 0; i < g_potCount && i < kPotMax; ++i)
+            if (g_hidPot[i]) X::at(g_potX[i], g_potY[i], g_potRad[i], u);
+        for (int i = 0; i < g_cornerCount && i < kCornerMax; ++i)
+            if (g_hidCorner[i] && g_cornerBox[i].has) X::at(g_cornerBox[i].x, g_cornerBox[i].y, g_cornerBox[i].r, u);
+        for (int k = 0; k < 4; ++k) {
+            const Button &b = g_buttons[kPageBtn[k]];
+            if ((g_hidPage[k] || g_hidGrp[kGrpPage]) && b.radius > 0.0f) X::at(b.centre.x, b.centre.y, b.radius, u);
+        }
+        for (int g = 0; g < kGrpCount; ++g) {
+            if (!g_hidGrp[g] || g == kGrpPage) continue;
+            Vec2 c; float r;
+            if (groupCircle(g, c, r)) X::at(c.x, c.y, r * 0.8f, u);
+        }
+    }
+
     emit();
 
     //  Toolbar plate, which is also the handle it is dragged by.
@@ -3315,8 +3398,9 @@ void drawEditor() {
     for (int t = 0; t < kToolCount; ++t) {
         Vec2 c; float r;
         toolCircle(t, c, r);
-        const bool needsSel = (t >= kToolSizeDn && t <= kToolAlphaUp);
-        const float dim = (needsSel && !haveSel) ? 0.35f : 1.0f;
+        const bool needsSel = (t >= kToolSizeDn && t <= kToolHide);
+        float dim = (needsSel && !haveSel) ? 0.35f : 1.0f;
+        if (t == kToolHide && !hidFlag()) dim = 0.35f;      //  this one cannot be taken off
         chromeDisc(c.x, c.y, r, dim, kFace, kFaceE);
         const Col ink = alpha(t == kToolSave ? kCyan : (t == kToolCancel ? kCrim : kInk), dim);
         const float s = r * 0.46f, w = r * 0.09f;
@@ -3336,6 +3420,17 @@ void drawEditor() {
             case kToolSizeDn: case kToolAlphaDn:
                 drawCapsule(c.x - s, c.y, c.x + s, c.y, w, ink);
                 break;
+            case kToolHide: {
+                //  An eye, struck through while the selection is hidden.
+                bool *h = hidFlag();
+                drawRing(c.x, c.y, s * 0.30f, s * 0.48f, ink.r, ink.g, ink.b, ink.a);
+                drawCapsule(c.x - s, c.y, c.x - s * 0.5f, c.y - s * 0.45f, w, ink);
+                drawCapsule(c.x + s, c.y, c.x + s * 0.5f, c.y - s * 0.45f, w, ink);
+                drawCapsule(c.x - s, c.y, c.x - s * 0.5f, c.y + s * 0.45f, w, ink);
+                drawCapsule(c.x + s, c.y, c.x + s * 0.5f, c.y + s * 0.45f, w, ink);
+                if (h && *h) drawCapsule(c.x - s, c.y + s, c.x + s, c.y - s, w * 1.2f, alpha(kCrim, dim));
+                break;
+            }
             case kToolSizeUp: case kToolAlphaUp:
                 drawCapsule(c.x - s, c.y, c.x + s, c.y, w, ink);
                 drawCapsule(c.x, c.y - s, c.x, c.y + s, w, ink);
@@ -4171,6 +4266,9 @@ extern "C" void RanTouch_SetEditMode(int on) {
         memcpy(g_cornerBefore, g_cornerAdj, sizeof(g_cornerAdj));
         memcpy(g_winBefore, g_winAdj, sizeof(g_winAdj));
         memcpy(g_pageBefore, g_pageAdj, sizeof(g_pageAdj));
+        memcpy(g_hidGrpB, g_hidGrp, sizeof(g_hidGrp));       memcpy(g_hidSkillB, g_hidSkill, sizeof(g_hidSkill));
+        memcpy(g_hidPotB, g_hidPot, sizeof(g_hidPot));       memcpy(g_hidPageB, g_hidPage, sizeof(g_hidPage));
+        memcpy(g_hidCornerB, g_hidCorner, sizeof(g_hidCorner));
         g_stick.pointer = -1; g_stick.held = false; g_stick.magnitude = 0.0f;
         g_stick.knob = g_stick.origin = g_stick.centre;
         for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; g_buttons[i].pressedEdge = false; }
@@ -4209,7 +4307,8 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
                 + kPageMax * 3                          //  F1-F4, appended 2026-10-05
                 + (kGrpCount - kGrpPreBot) * 4          //  auto-hunt button, appended 2026-10-05
                 + kWinMax * 3                           //  HUD windows, appended 2026-10-06
-                + (kCornerMax - kCornerSaved) * 3;      //  corner icons 5-8, appended 2026-10-07
+                + (kCornerMax - kCornerSaved) * 3       //  corner icons 5-8, appended 2026-10-07
+                + kHideSaved;                           //  hidden flags, appended 2026-10-09
     if (!out || max < n) return n;
     for (int i = 0; i < kGrpLegacy; ++i) {
         out[i * 4]     = g_adj[i].dx;    out[i * 4 + 1] = g_adj[i].dy;
@@ -4238,6 +4337,11 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     for (int i = kCornerSaved; i < kCornerMax; ++i) {
         out[w++] = g_cornerAdj[i].dx; out[w++] = g_cornerAdj[i].dy; out[w++] = g_cornerAdj[i].scale;
     }
+    for (int i = 0; i < kGrpCount; ++i)                  out[w++] = g_hidGrp[i] ? 1.0f : 0.0f;
+    for (int i = 0; i < RANTOUCH_MAX_SKILL_CIRCLES; ++i) out[w++] = g_hidSkill[i] ? 1.0f : 0.0f;
+    for (int i = 0; i < kPotMax; ++i)                    out[w++] = g_hidPot[i] ? 1.0f : 0.0f;
+    for (int i = 0; i < kPageMax; ++i)                   out[w++] = g_hidPage[i] ? 1.0f : 0.0f;
+    for (int i = 0; i < kCornerMax; ++i)                 out[w++] = g_hidCorner[i] ? 1.0f : 0.0f;
     return n;
 }
 
@@ -4320,6 +4424,14 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (!(sc >= 0.6f && sc <= 1.6f))  sc = 1.0f;
             g_cornerAdj[i].dx = dx; g_cornerAdj[i].dy = dy; g_cornerAdj[i].scale = sc;
         }
+        //  What the player took off. Older files stop before it: nothing hidden.
+        bool *const hidden[5] = { g_hidGrp, g_hidSkill, g_hidPot, g_hidPage, g_hidCorner };
+        const int   count[5]  = { kGrpCount, RANTOUCH_MAX_SKILL_CIRCLES, kPotMax, kPageMax, kCornerMax };
+        for (int a = 0; a < 5; ++a)
+            for (int i = 0; i < count[a]; ++i)
+                hidden[a][i] = (r < n) ? (in[r++] > 0.5f) : false;
+        for (int g = 0; g < kGrpCount; ++g)
+            if (!canHideGroup(g) || g == kGrpSkill || g == kGrpPotion || g == kGrpCorner) g_hidGrp[g] = false;
     }
     if (g_inited) layout();
 }

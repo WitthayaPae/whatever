@@ -32,10 +32,13 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-09 — To do (user, queued)
+## 2026-10-09 — Skill-slot removal, HUD hide, smooth lists, AUTO in duels, idle-thread power fix (patch 736+, APK 248, iOS 1.0.248)
 
-- [ ] Skill window: an "edit slots" button so the player can remove skills they do not use from the quick slots.
-- [ ] HUD editor: let the player remove buttons from the HUD as well as move and scale them.
+- [x] Skill window: "แก้ไขช่องสกิล" opens the ring picker in remove mode (ReqSkillQuickReSet, server-confirmed); stays open, "เสร็จ" closes. LDPlayer: slot 2 cleared, shown "ว่าง", and the HUD ring empties too. MOBILE_PANEL 78-80.
+- [x] HUD editor: a hide/show (eye) tool. Hidden controls are not drawn and take no touch in play; in the editor they show crossed out and can be shown again. Reset brings everything back. Never the stick, the attack button, the menu (the way back in) or a game window. The client parks hidden skill, potion and corner slots off screen (`RanTouch_Is*Hidden`). Saved: layout grows 174 to 219 floats, and older files still load. LDPlayer: camera button and one skill slot hidden; still hidden after an app restart; reset restored both.
+- Smooth lists: CMobileSmoothScroll (quest, ranking, boss drops) and CMobileList ease onto a whole row at rest. LDPlayer ranking: rows mid-slide on two captures 0.35 s apart, at rest aligned.
+- AUTO in duels: MobileFindDuelOpponent (nearest live ISCONFRONT_TAR); plain-attack fallback; no loot or walk home while fighting; GetCONFT_TAR pairRange bug fixed. Builds; **not tested** (needs a second player to duel).
+- iPhone heat (iPhone 15, iOS 27, hunting): the 31 fps is our own pacing at heat "serious" (gap exactly 33.3 ms). GPU ~25% at 30 fps. The process had more kernel time than user time (275 s against 151 s) and ~6,000 switches a second. Cause: six idle Sleep(1) polling threads at ~980 wake-ups/s each. Fix: idle Sleep(1) backs off to 10 ms (net wait exempt). LDPlayer: loaders ~110/s each, process 6,900 to 3,355/s. Not yet measured on the iPhone.
 - [ ] iPhone heat: profile `part:skinned` (5 ms CPU per frame while hunting) with a real profiler before changing anything; GPU skinning exists in the shim but no draw uses it (palette counters 0).
 
 ## 2026-10-09 — Original message boxes: PC text panel back (patch 733, APK 246, iOS 1.0.246; awaiting upload)
