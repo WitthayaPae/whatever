@@ -77,6 +77,23 @@ the patch ships a needless APK bump).
   ranking rich tab rows 6-11 after a drag, boss drops moved one row. Item shop, NPC shop, item
   exchange and party finder keep pages because the classic windows had page buttons; every
   CMobileList (categories, maps, friends, results...) already scrolled.
+- Follow-up 2 (user, 2026-10-09):
+  - Scroll bars: kit MobilePlaceThumb; ranking, boss drops and the quest list show one.
+  - Quest list: scrolls (drag/wheel, a drag does not select), no page buttons - the classic one scrolled.
+  - Bag item menu: "ใส่ช่องลัด" for what the potion tray takes (the server's list in
+    MsgReqActionQSet: cure, recall, pet card, buff card, level-up card, Q-item); the rows then become
+    the 6 slots ("ช่อง N: item / ว่าง", MOBILE_ITEM_SHEET 21). Lift + ReqItemQuickSet; the server
+    puts the item back. LDPlayer: MP potion into slot 5, back in its cell; slot 5 cleared again.
+    The server saves the tray with a delay: a clear right before a force-stop came back once.
+  - Old bag still shown beside some windows: every side bag (TRADEINVENTORY = trade, private
+    stall owner/visitor, rebuild mode; REBUILDINVENTORY; GARBAGEINVENTORY; ITEM_MIX_INVEN;
+    ITEM_TRANSFER_INVEN - classes CInventoryUI_Trade/Rebuild/Trash/ItemMix, CItemTransferInvenWindow)
+    is now hosted and the new bag panel drives it (CMobileBagPanel::Redirect; per window
+    MobileFrame/MobileTouchCell/MobileClose, trade MobilePressMoney). DxGameStage places the partner
+    window beside the bag panel. LDPlayer: visiting a stall shows the new bag at the right, X closes
+    both. Not tested (needs a second player / cards / NPCs): trade, own stall, rebuild, garbage,
+    mix, transfer.
+  - Builds: arm64, x86_64, PC MiniA/Emulator/ServerAgent/ServerField.
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:
