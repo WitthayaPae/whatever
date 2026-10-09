@@ -32,7 +32,7 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-09 — Skill-slot removal, HUD hide, smooth lists, AUTO in duels, idle-thread power fix (patch 736+, APK 248, iOS 1.0.248)
+## 2026-10-09 — Skill-slot removal, HUD hide, smooth lists, AUTO in duels, idle-thread power fix (patch 737, APK 249, iOS 1.0.249; awaiting upload)
 
 - [x] Skill window: "แก้ไขช่องสกิล" opens the ring picker in remove mode (ReqSkillQuickReSet, server-confirmed); stays open, "เสร็จ" closes. LDPlayer: slot 2 cleared, shown "ว่าง", and the HUD ring empties too. MOBILE_PANEL 78-80.
 - [x] HUD editor: a hide/show (eye) tool. Hidden controls are not drawn and take no touch in play; in the editor they show crossed out and can be shown again. Reset brings everything back. Never the stick, the attack button, the menu (the way back in) or a game window. The client parks hidden skill, potion and corner slots off screen (`RanTouch_Is*Hidden`). Saved: layout grows 174 to 219 floats, and older files still load. LDPlayer: camera button and one skill slot hidden; still hidden after an app restart; reset restored both.
