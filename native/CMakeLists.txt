@@ -14,6 +14,8 @@ option(RAN_ASAN "Build with AddressSanitizer" OFF)
 #  whose size the compiler knows, which is the shape of the bug being hunted -
 #  a four-byte write landing on somebody else's pointer.
 option(RAN_BOUNDS "Build with trapping array-bounds checks" OFF)
+#  Profiling only: route our memcpy calls through an unwindable wrapper.
+option(RAN_WRAPMEMCPY "Wrap memcpy for the profiler" OFF)
 if(RAN_BOUNDS)
     add_compile_options(-fsanitize=array-bounds -fsanitize-trap=array-bounds -g)
     message(STATUS "array-bounds trapping: on")
@@ -361,6 +363,11 @@ elseif(APP_SRC)
   # -u keeps ANativeActivity_onCreate (referenced only by the OS) from being stripped.
   target_link_options(ran PRIVATE
     -Wl,--error-limit=0 -Wl,--no-dependent-libraries -u ANativeActivity_onCreate)
+endif()
+if(RAN_WRAPMEMCPY AND NOT RAN_IOS)
+  target_sources(ran PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shim/platform/memcpy_wrap.c)
+  target_link_options(ran PRIVATE -Wl,--wrap=memcpy)
+  message(STATUS "memcpy wrapped for profiling")
 endif()
 
 # third-party C libraries must not see the Win32 emulation defines
