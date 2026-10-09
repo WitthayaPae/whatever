@@ -3,6 +3,13 @@
 //  Publish the iOS build as an AltStore source, so a phone updates itself.
 //
 //      node make-ios-source.js <RanLegacyM-unsigned.ipa> [--notes "what changed"]
+//      node make-ios-source.js <RanLegacyM-unsigned.ipa> --notes-file notes.txt
+//
+//  Thai notes: use --notes-file (UTF-8). Passed on the command line from Git
+//  Bash on Windows, Thai arrives mangled - read through the wrong code page,
+//  with lone surrogate halves in it - and source.json then holds invalid
+//  Unicode that AltStore refuses to read, so no phone can update (2026-10-09,
+//  build 249). Notes like that are now refused instead of published.
 //
 //  iOS will not run code that was not signed into the bundle, so a code change
 //  cannot arrive through the data patcher the way an Android one does - that
@@ -36,7 +43,15 @@ if (!ipaPath || !fs.existsSync(ipaPath)) {
   process.exit(1);
 }
 const notesAt = args.indexOf('--notes');
-const notes = notesAt >= 0 ? (args[notesAt + 1] || '') : '';
+const notesFileAt = args.indexOf('--notes-file');
+let notes = notesAt >= 0 ? (args[notesAt + 1] || '') : '';
+if (notesFileAt >= 0) notes = fs.readFileSync(args[notesFileAt + 1], 'utf8').replace(/^\uFEFF/, '').trim();
+//  A lone surrogate half or a replacement character is text that was decoded
+//  wrongly on the way in; it makes the JSON unreadable on the phone.
+if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]|\uFFFD/.test(notes)) {
+  console.error('[!] the notes are not valid text (wrong code page on the command line?) - use --notes-file with a UTF-8 file');
+  process.exit(1);
+}
 
 function findRoot(dir) {
   for (let i = 0; i < 8; i++) {
