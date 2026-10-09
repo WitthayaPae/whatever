@@ -38,7 +38,12 @@ the patch ships a needless APK bump).
 - It stops first (drain, glFinish, context back to the main thread) for the loading screen's thread (RanGL_ReleaseContext), Android surface lost/restore, iOS resize, iOS resign-active/background, and shutdown. It restarts from the next main-thread Present. So those paths run exactly as before.
 - **Opt-in:** diag `glthread` turns it on within a second; `noglthread` wins. Off, every gl* call is one extra branch.
 - **LDPlayer, 250-player SG crowd, interleaved 3 rounds:** on 36 ms/frame (28 fps), off 55 ms (18 fps). 0 syncs per frame; ~5 MB/frame queued. The GL thread is now the limit there (busy ~35 ms: the emulator's GL transport). Checked with it on: login page (typing), entering the world through the loading screen, crowd 1:1 (characters, weapons, effects, names, HUD), inventory, HOME + return (it stopped, surface released/restored, restarted), runtime on/off six times.
-- **iPhone: to measure** after this patch: `tools/ios-device.sh flag glthread`, then ios_ab with `noglthread`. Expected ceiling from the nulldraw test: ~60 fps. If it holds, make it the default.
+- **iPhone 15, 1.0.252, SG crowd (251 drawn), measured 2026-10-10 03:20:**
+  - Turned on remotely with `glthread`. 0 syncs a frame, ~7 MB a frame queued, the game thread never waits for it, no crash.
+  - At heat fair: game thread 16-20 ms, GL thread 18-20 ms. That reads 30.0 fps: each frame is just over one 16.7 ms vsync, so it lands on every second one. Before (off), the game thread alone was 29-34 ms.
+  - Within a minute the phone reached heat **serious**. iOS halves the clocks and both threads double (game 30-33 ms, GL 27-31 ms).
+  - Interleaved A/B there (3 rounds, `noheatpace` so pacing does not cap it): on 26-29 fps, off 25-26. A small gain, because the hot phone is short of total CPU, not of threads.
+  - Conclusion: the GL thread moves work, it does not remove it. In this crowd the iPhone is limited by heat, so 60 fps needs less total work a frame (CPU and GPU). Left on for a soak on the test phone; not the default yet.
 
 ## 2026-10-10 — Crowd CPU tail + render-thread ceiling (built on LDPlayer, not released)
 
