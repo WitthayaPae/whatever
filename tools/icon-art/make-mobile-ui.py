@@ -233,14 +233,20 @@ def block(cv, theme):
         cv.paste(L, bx + 168, 112)
     elif theme == 3:    # D Original - the PC client's own pieces
         R = ('round', 3)
-        # window: the classic dark body with its grey hairline and a black edge
-        paint_cell(cv, bx, 0, R, (0, 0, 0, 225), (90, 90, 90, 255), 1, inner=((0, 0, 0, 255), 1.5))
-        paint_cell(cv, bx, 1, R, (0, 0, 0, 90), (70, 70, 70, 255), 1)       # line box
+        # window: the PC's CreateBaseWindowLightGray body - BASIC_WINDOW_BODY_MAIN_LIGHTGRAY
+        # (114,114,114 at 179) inside the 2px black BASIC_WINDOW_BODY_LEFT/RIGHT edge.
+        # The first cut used a near-black body and read far darker than the PC
+        # (the user, 2026-10-09: "the real original is more white gray").
+        paint_cell(cv, bx, 0, R, (114, 114, 114, 179), (0, 0, 0, 255), 2)
+        # line box: the PC's are black at 153 (BASIC_LINE_BOX_BODY_OUTER) with a 1px
+        # black line; at that weight the bag's sections cover most of the window and
+        # bring the dark back, so a lighter 70 keeps the sections and the grey.
+        paint_cell(cv, bx, 1, R, (0, 0, 0, 70), (0, 0, 0, 255), 1)
         classic_cell(cv, bx, 2, (316, 23, 371, 44), 4)                        # dark chrome button
         classic_cell(cv, bx, 3, (316, 0, 371, 21), 4)                         # light chrome button
         classic_cell(cv, bx, 4, (316, 23, 371, 44), 4, tint=(1.9, 0.75, 0.7)) # the dark one, red
         classic_cell(cv, bx, 5, (0, 162, 40, 203), 5)                         # the item slot frame
-        paint_cell(cv, bx, 6, R, (0, 0, 0, 170), (110, 110, 110, 255), 1)    # input field
+        paint_cell(cv, bx, 6, R, (0, 0, 0, 132), (0, 0, 0, 255), 1)          # input field (QUEST_LIST well)
         paint_cell(cv, bx, 7, R, (255, 165, 0, 55), None)                     # selection (classic orange)
         paint_cell(cv, bx, 8, R, (0, 0, 0, 0), (255, 200, 40, 255), 2.5)     # ring
         paint_cell(cv, bx, 9, R, (0, 0, 0, 120), None)
