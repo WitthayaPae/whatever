@@ -219,7 +219,7 @@ the patch ships a needless APK bump).
   (bFeatureRegister unset), so account deletion = request via contact, no in-app flow required.
 - 2026-10-09: Play identity check passed. **`tools/play-mcp`**: MCP server `google-play` (registered in `DEV EP9/.mcp.json`) with 14 tools: status, upload bundle to a track, promote/rollout/halt, listing, images, details, testers, reviews, internal sharing, data safety. It needs a service-account key at `native/.play/service-account.json` (gitignored; setup in its README). Selftest passes: the tools list and a clean "no key" answer. The API cannot create the app, and a new app's first .aab must be uploaded by hand in Play Console.
 - Still open:
-  - [ ] User: create the app in Play Console; make the service account + key and invite it (tools/play-mcp/README.md).
+  - [x] User: app created in Play Console (com.legacym.online, default th); service account play-publisher@legacy-m-play.iam.gserviceaccount.com invited. play_status answers 2026-10-09: 4 empty tracks, no bundles. The API could see the app before any upload; whether the first .aab still has to go by hand is unknown until we try.
   - [ ] Claude: merge main into `store` (48 commits behind), build STORE=1 .aab for the first hand upload.
   - [ ] User: Apple enrollment approval, then App Store Connect app record + API key (Admin) into native/.appstore/.
   - [ ] User: fill privacy.html placeholders (name, contact email) and upload it; reviewer account; gacha odds question.
