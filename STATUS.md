@@ -32,6 +32,13 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-09 — Crowd performance: diagnostic stat in the draw (patch 739, APK 250, iOS 1.0.250; awaiting upload)
+
+- iPhone 15 in the SG load-test crowd (252 players drawn): 5.8 fps, ~150 ms game CPU a frame. Cost switches on the phone, interleaved: palette uploads and light block = noise; all draws (nulldraw) = only ~20 ms. So the cost is game-side CPU before any GL. LDPlayer does the same crowd in ~37 ms on a slower CPU.
+- simpleperf (LDPlayer, debuggable): 9.5% of the process in RanPlat_DiagExists -> __faccessat. The cache had 64 slots for 72 names; past that every name was stat'd live, some per draw (nomeshvbo in RanMesh::DrawSubset). The iPhone log has the same "diagnostic cache full at 64 names". Fix: list the diag folder once a second and compare in memory. LDPlayer: 9.5% -> 0.4%, game CPU ~46 -> ~37 ms. **iPhone after the fix: to measure.**
+- Ruled out with measurements: the 43-51% memcpy on LDPlayer is the emulator's GL encoder (our own memcpy 0.1%, via WRAPMEMCPY=1); skinning already runs on the GPU; palette and light uploads cost the iPhone nothing measurable.
+- [ ] Next: re-measure the iPhone in the same crowd; if game CPU is still high, find a way to sample-profile iOS (or instrument the sections) before changing anything.
+
 ## 2026-10-09 — Skill-slot removal, HUD hide, smooth lists, AUTO in duels, idle-thread power fix (patch 737, APK 249, iOS 1.0.249; awaiting upload)
 
 - [x] Skill window: "แก้ไขช่องสกิล" opens the ring picker in remove mode (ReqSkillQuickReSet, server-confirmed); stays open, "เสร็จ" closes. LDPlayer: slot 2 cleared, shown "ว่าง", and the HUD ring empties too. MOBILE_PANEL 78-80.
