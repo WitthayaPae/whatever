@@ -138,6 +138,8 @@ the patch ships a needless APK bump).
     glide after release. Quest list / ranking / boss drops (CMobileDragScroll) still step by row.
   - Skill window: a tap on a row keeps the skill detail up (MobileShowSkillInfoPinned) until the
     same row is tapped again, the page changes or the window closes. Pages kept (user: leave it).
+    Fix (user: detail kept following the finger): any press not on a skill row dismisses it; a
+    press on another row switches to that skill. LDPlayer verified.
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:
