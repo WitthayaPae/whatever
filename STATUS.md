@@ -127,6 +127,8 @@ the patch ships a needless APK bump).
     the later icons keep their own colours (slight contrast, dark rim), only the classic black frame
     is shared. Menu header: 56-tall bar, FONT_TITLE name, the windows' close button
     (CMobileMenuWindow::TitleH/WinH; DxGameStage lays the grid under it). LDPlayer verified.
+- Text on white buttons (selected tabs, primary buttons, chat tabs, pickers): COL_ONACCENT is white,
+  drawn with the kit fonts' black outline. LDPlayer: item shop and chat checked.
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:
