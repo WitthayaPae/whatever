@@ -4067,6 +4067,9 @@ extern "C" void RanTouch_SetChatButton(float cx, float cy, float r, int mode) {
     }
 }
 
+static bool g_chatPlateArt = true;
+extern "C" void RanTouch_SetChatPlateArt(int on) { g_chatPlateArt = on != 0; }
+
 extern "C" void RanTouch_SetVehicleButton(float cx, float cy, int show) {
     g_vehShow  = show != 0;
     g_vehFracX = cx;
@@ -4361,6 +4364,7 @@ extern "C" void RanTouch_GetSkillSlotOffset(int i, float *fx, float *fy) {
 //  asked for, so each layer gets exactly its own case.
 extern "C" void RanTouch_RenderChatMode(int mode) {
     if (!g_inited || !g_active || !g_prog || g_chatMode == 0 || g_chatMode != mode) return;
+    if (g_chatMode == 1 && !g_chatPlateArt) return;     //  the client draws it
 
     glUseProgram(g_prog);
     glBindVertexArray(g_vao);

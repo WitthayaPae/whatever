@@ -111,6 +111,18 @@ the patch ships a needless APK bump).
   with the chat's colours) opening a 52-tall picker like the chat's. Stored as the line's first
   character (# % ! ^ $ @), which AddChatMacro already reads. LDPlayer: party saved + reloaded, then
   set back to empty general.
+- Follow-up 4 (user, 2026-10-09):
+  - Crystal uses the Tactical HUD sheet (its pale-blue mobile_hud4 read as dimmed).
+  - Chat: resize-grip lines moved in to 9,8 (were outside the rounded corner in Crystal and Royal);
+    the open-chat fold plate is now a kit button in the window style (CBasicChat m_pMFold +
+    drawn minus); shim RanTouch_SetChatPlateArt(0) stops the painted plate, press unchanged.
+    LDPlayer: Crystal and Royal look right, fold and unfold work.
+  - Icons: tools/icon-art/classic-restyle.py tones the later flat icons (finder, ranking,
+    competition, boss, auction, item shop, crafting, Q box, GM, settings, exit, chat macro, item
+    bank, item mall) into the classic sepia look inside the classic black frame; mini party gets the
+    frame. Written into CLIENT/textures/gui/mobile_icons.dds (backup in the session scratchpad);
+    icons_classic.png updated. THE PATCH MUST CARRY textures/gui/mobile_icons.dds. Re-running
+    make-silver-hud.py rewrites icons_classic.png and loses this - run classic-restyle.py after it.
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:

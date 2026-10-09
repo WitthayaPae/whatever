@@ -106,6 +106,9 @@ extern "C" void RanTouch_SetMenuAlert(int on);
 //  so it comes out identical to the attack ring and the mode toggles rather
 //  than merely similar to them.
 extern "C" void RanTouch_SetVehicleButton(float cx, float cy, int show);
+//  0: the client draws the open chat's fold plate itself (the redesigned
+//  chat, in the chosen window style); the press is still taken here.
+extern "C" void RanTouch_SetChatPlateArt(int on);
 
 //  Where to put the chat button, and which one it is.
 //
