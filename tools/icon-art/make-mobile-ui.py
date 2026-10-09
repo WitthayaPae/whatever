@@ -1,16 +1,18 @@
 """The art for the mobile window kit (MobileUiKit.cpp, UI-MOBILE-PLAN.md).
 
-Three window themes the player picks in Settings (RANPARAM::dwMobileUiTheme),
-approved 2026-10-08, default C:
+Four window themes the player picks in Settings (RANPARAM::dwMobileUiTheme),
+approved 2026-10-08 (D added 2026-10-09), default C:
     A  Crystal   decorated glass, lit top edge, ornaments, corner brackets
     B  Royal     gold double border, title plaque, filigree corners, ribbons
     C  Tactical  cut corners, edge accents, slanted marker, dashed rules
-All at 92% opacity with white buttons.
+    D  Original  the game's own art: grey chrome buttons, the classic slot
+                 frame and title strip, cut from textures/gui/interface_main.dds
+All at 92% opacity with white buttons (D: the original grey ones).
 
-One atlas, three 256x256 blocks side by side (A | B | C) in the same layout, so
-a theme is only a UV offset:
-  CLIENT/textures/gui/mobile_ui.dds      768x256
-  CLIENT/textures/gui_hd/mobile_ui.png   3072x1024 (4x; the loader uses it on
+One atlas, four 256x256 blocks side by side (A | B | C | D) in the same layout,
+so a theme is only a UV offset:
+  CLIENT/textures/gui/mobile_ui.dds      1024x256
+  CLIENT/textures/gui_hd/mobile_ui.png   4096x1024 (4x; the loader uses it on
                                          mobile, so edges stay sharp at 4K)
 
 Inside a block:
@@ -18,7 +20,7 @@ Inside a block:
                PANEL INNER BTN PRIMARY / WARN SLOT FIELD ROWHL / RING VEIL
   y=180        16x16 flats: LINE WHITE HP GREEN, then SHEEN (16x32, x=64)
   (0,200)      48x48 close X
-  (64,200)     96x24 deco 1   A: ornament line+diamond   B: title plaque   C: -
+  (64,200)     96x24 deco 1   A: ornament line+diamond   B: title plaque   C: -   D: title strip
   (64,228)     96x8  deco 2   A: glow line               B: ribbon band    C: dashed rule
   (168,112)    32x32 corner   A: bracket                 B: filigree       C: slanted marker
 The table in MobileUiKit.cpp (block layout) must agree with this file.
@@ -34,6 +36,8 @@ DDS = os.path.join(ROOT, 'CLIENT', 'textures', 'gui', 'mobile_ui.dds')
 PNG = os.path.join(ROOT, 'CLIENT', 'textures', 'gui_hd', 'mobile_ui.png')
 BLOCK, CELL, PITCH, SEG = 256, 48, 56, 16
 SS = 8   # supersample
+NTHEME = 4
+CLASSIC = os.path.join(ROOT, 'CLIENT', 'textures', 'gui', 'interface_main.dds')
 W = (255, 255, 255)
 GOLD = (201, 162, 76)
 GOLD_L = (232, 200, 120)
@@ -45,7 +49,7 @@ class Canvas:
     """Draw in block-local 1x coordinates; renders at scale * SS."""
     def __init__(self, scale):
         self.s = scale
-        self.im = Image.new('RGBA', (BLOCK * 3 * scale, BLOCK * scale), (0, 0, 0, 0))
+        self.im = Image.new('RGBA', (BLOCK * NTHEME * scale, BLOCK * scale), (0, 0, 0, 0))
 
     def paste(self, layer, x, y):
         self.im.alpha_composite(layer.resize((layer.width // SS, layer.height // SS), Image.LANCZOS), (x * self.s, y * self.s))
@@ -122,6 +126,40 @@ def close_x(cv, bx):
     d.line([(48 * k - m, m), (m, 48 * k - m)], fill=(240, 240, 240, 255), width=wd)
     cv.paste(L, bx + 0, 200)
 
+_CLASSIC = None
+def classic():
+    global _CLASSIC
+    if _CLASSIC is None:
+        _CLASSIC = Image.open(CLASSIC).convert('RGBA')
+    return _CLASSIC
+
+def nine_from(src, c, w, h, cs):
+    """A w x h image from src cut in nine: corners of c source px drawn at cs,
+    pixel art kept (nearest) - the edges and middle stretched."""
+    out = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    sw, sh = src.size
+    xs = [(0, c, 0, cs), (c, sw - c, cs, w - cs), (sw - c, sw, w - cs, w)]
+    ys = [(0, c, 0, cs), (c, sh - c, cs, h - cs), (sh - c, sh, h - cs, h)]
+    for (sx0, sx1, dx0, dx1) in xs:
+        for (sy0, sy1, dy0, dy1) in ys:
+            if sx1 <= sx0 or sy1 <= sy0 or dx1 <= dx0 or dy1 <= dy0:
+                continue
+            piece = src.crop((sx0, sy0, sx1, sy1)).resize((dx1 - dx0, dy1 - dy0), Image.NEAREST)
+            out.alpha_composite(piece, (dx0, dy0))
+    return out
+
+def classic_cell(cv, bx, idx, rect, c, tint=None):
+    src = classic().crop(rect)
+    if tint:
+        r, g, b, a = src.split()
+        lum = src.convert('L')
+        src = Image.merge('RGBA', [lum.point(lambda v: int(v * tint[0])), lum.point(lambda v: int(v * tint[1])),
+                                   lum.point(lambda v: int(v * tint[2])), a])
+    k = cv.s
+    img = nine_from(src, c, CELL * k, CELL * k, SEG * k)
+    x, y = cell_xy(idx)
+    cv.im.alpha_composite(img, ((bx + x) * k, y * k))
+
 def block(cv, theme):
     bx = theme * BLOCK
     if theme == 0:      # A Crystal
@@ -193,6 +231,24 @@ def block(cv, theme):
         d.ellipse([18 * k, 1 * k, 24 * k, 7 * k], outline=g, width=int(1.5 * k))
         d.ellipse([1 * k, 18 * k, 7 * k, 24 * k], outline=g, width=int(1.5 * k))
         cv.paste(L, bx + 168, 112)
+    elif theme == 3:    # D Original - the PC client's own pieces
+        R = ('round', 3)
+        # window: the classic dark body with its grey hairline and a black edge
+        paint_cell(cv, bx, 0, R, (0, 0, 0, 225), (90, 90, 90, 255), 1, inner=((0, 0, 0, 255), 1.5))
+        paint_cell(cv, bx, 1, R, (0, 0, 0, 90), (70, 70, 70, 255), 1)       # line box
+        classic_cell(cv, bx, 2, (316, 23, 371, 44), 4)                        # dark chrome button
+        classic_cell(cv, bx, 3, (316, 0, 371, 21), 4)                         # light chrome button
+        classic_cell(cv, bx, 4, (316, 23, 371, 44), 4, tint=(1.9, 0.75, 0.7)) # the dark one, red
+        classic_cell(cv, bx, 5, (0, 162, 40, 203), 5)                         # the item slot frame
+        paint_cell(cv, bx, 6, R, (0, 0, 0, 170), (110, 110, 110, 255), 1)    # input field
+        paint_cell(cv, bx, 7, R, (255, 165, 0, 55), None)                     # selection (classic orange)
+        paint_cell(cv, bx, 8, R, (0, 0, 0, 0), (255, 200, 40, 255), 2.5)     # ring
+        paint_cell(cv, bx, 9, R, (0, 0, 0, 120), None)
+        # the title strip, 3-sliced by the code: classic BASIC_WINDOW_TITLE art
+        strip = classic().crop((0, 0, 120, 18))
+        k = cv.s
+        img = nine_from(strip, 6, 96 * k, 24 * k, 6 * k)
+        cv.im.alpha_composite(img, ((bx + 64) * k, 200 * k))
     else:               # C Tactical
         CH = ('chamfer', 14, ('tl', 'br'))
         BOXC = ('chamfer', 12, ('tr',))
@@ -215,7 +271,7 @@ def block(cv, theme):
         L, d, k = cv.layer(32, 32)
         d.polygon([(12 * k, 0), (22 * k, 0), (14 * k, 32 * k), (4 * k, 32 * k)], fill=(255, 255, 255, 255))
         cv.paste(L, bx + 168, 112)
-    flat(cv, bx, 0, 180, 16, 16, W + (22,) if theme != 1 else GOLD + (90,))      # LINE
+    flat(cv, bx, 0, 180, 16, 16, ( W + (22,) if theme != 1 else GOLD + (90,) ) if theme != 3 else (90, 90, 90, 255))      # LINE
     flat(cv, bx, 16, 180, 16, 16, (238, 238, 238, 255))                         # WHITE / bar
     flat(cv, bx, 32, 180, 16, 16, (224, 72, 72, 255))                           # HP
     flat(cv, bx, 48, 180, 16, 16, (155, 225, 93, 255))                          # GREEN
@@ -224,7 +280,7 @@ def block(cv, theme):
 
 def paint(scale):
     cv = Canvas(scale)
-    for t in range(3):
+    for t in range(NTHEME):
         block(cv, t)
     return cv.im
 
