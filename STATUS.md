@@ -67,6 +67,18 @@ the patch ships a needless APK bump).
 - Builds: arm64 + x86_64 0 errors; PC MiniA, Emulator, ServerAgent, ServerField build.
 - iOS: shared SOURCE + data only, no platform code. CI run 37882522036 built SOURCE 54575cf; the
   binary contains MOBILE_SOCIAL / MOBILE_TOOL and the panel log line. Not run on an iPhone.
+- Follow-up (user, 2026-10-09): "the inventory has 10 lines, 5 a page; beside the locker it showed 3
+  pages". The grid is EM_INVENSIZE_Y = 11 rows (5 base + 1 premium + 5 inventory-card rows). The bag
+  panel now shows 5 rows a page in both shapes (it was 6, and 5 beside a shop or locker = 3 pages);
+  a third page appears only when the 11th row is open or holds an item. LDPlayer: pages 1-2 alone
+  and beside break-down.
+- "Most pages used to scroll": the classic ranking and boss drop lists scrolled, so those panels
+  now drag-scroll (kit CMobileDragScroll; the drop tooltip stays off during a drag). Verified:
+  ranking rich tab rows 6-11 after a drag, boss drops moved one row. Item shop, NPC shop, item
+  exchange and party finder keep pages because the classic windows had page buttons; every
+  CMobileList (categories, maps, friends, results...) already scrolled.
+- Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
+  which completed a step of the score-card quest.
 - Still open:
   - [ ] Not testable solo / on this server: auction (only while an auction is live), bus (needs
         the NPC talk), player menu (needs a second player), mini party + party actions (needs a
