@@ -67,6 +67,7 @@ void RanIME_Backspace ( void );
 //  the mixer runs on the audio callback thread and would otherwise play on
 //  over whatever the player switched to.
 void RanAudioSink_Pause ( int paused );
+void RanGLT_Stop ( void );          //  shim/gl/gl_thread.cpp
 void RanAudioSink_KeepAlive ( int on );
 
 const char *RanIOS_DataRoot ( void );
@@ -1326,8 +1327,17 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
 static const double kBackgroundGraceSec = 600.0;
 static NSInteger    s_bgGeneration = 0;
 
+//  Before anything else leaves the foreground: the GL thread (gl_thread.h) may
+//  still be replaying the last frame, and iOS kills a process that touches the
+//  GPU from the background. Drained here, it starts again with the next frame
+//  drawn in front.
+- (void)applicationWillResignActive:(UIApplication *)app
+{
+    RanGLT_Stop ();
+}
 - (void)applicationDidEnterBackground:(UIApplication *)app
 {
+    RanGLT_Stop ();
     RanAudioSink_KeepAlive ( 1 );
     RanCrash_SetForeground ( 0 );
     const NSInteger gen = ++s_bgGeneration;

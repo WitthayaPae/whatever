@@ -36,6 +36,8 @@
 
 #include "gl_context.h"
 #include "gl_render.h"
+//  Last: from here on gl* calls are recorded for the GL thread when it is on.
+#include "gl_thunks.h"
 
 #define LOGI(...) RanPlat_Log(RANLOG_INFO,  "RanGL", __VA_ARGS__)
 #define LOGE(...) RanPlat_Log(RANLOG_ERROR, "RanGL", __VA_ARGS__)
@@ -1686,7 +1688,10 @@ void useVariant(unsigned key) {
     std::map<unsigned, Variant>::iterator it = g_variants.find(key);
     if (it == g_variants.end()) {
         Variant v;
-        if (!buildVariant(key, v)) {
+        bool built = false;
+        //  Compiling and linking answers (status, logs, locations): one trip.
+        RanGLT_RunSync([&]() { built = buildVariant(key, v); });
+        if (!built) {
             //  Fall back to whatever is bound rather than drawing nothing.
             g_variantKey = 0xFFFFFFFFu;
             return;
@@ -2805,8 +2810,80 @@ struct RingBuffer {
         lapFence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     }
 
+    //  The same write with the GL thread on (gl_thread.h). The cursor, the
+    //  capacity and every decision about wrapping stay here, so the offset is
+    //  known at once; the bytes travel in the queue and the copy into the
+    //  buffer - and the wait at a wrap - happen on the GL thread, in order with
+    //  the draws around them.
+    GLintptr writeQueued(const void *data, GLsizei size) {
+        if (!buffer) glGenBuffers(1, &buffer);
+        if (target == GL_ARRAY_BUFFER) bindArray(buffer); else bindElements(buffer);
+
+        if (g_havePersistentMap && !noPersistent) {
+            if (!mapped) {
+                //  Creating immutable storage answers with a pointer: do it
+                //  there, once, and wait.
+                RingBuffer *self = this;
+                const GLsizei want = size * 4 < (16 << 20) ? (16 << 20) : size * 4;
+                RanGLT_RunSync([&]() {
+                    if (!self->createPersistent(want)) {
+                        glDeleteBuffers(1, &self->buffer);
+                        glGenBuffers(1, &self->buffer);
+                        if (self->target == GL_ARRAY_BUFFER) { g_gl.arrayBuffer = 0; bindArray(self->buffer); }
+                        else                                 { g_gl.elementBuffer = 0; bindElements(self->buffer); }
+                        g_havePersistentMap = false;
+                        LOGE("persistent mapping failed; streaming through glBufferSubData");
+                    }
+                });
+            }
+            if (mapped) {
+                if (size > capacity) return 0;
+                const bool wrap = cursor + size > capacity;
+                if (wrap) cursor = 0;
+                const GLintptr offset = cursor;
+                RingBuffer *self = this;
+                RanGLT_PostData(data, (unsigned)size, [self, offset, size, wrap](const void *p) {
+                    if (wrap) { self->markLap(); self->waitForLap(); }
+                    memcpy(self->mapped + offset, p, (size_t)size);
+                });
+                cursor += size;
+                cursor = (cursor + 15) & ~15;
+                return offset;
+            }
+        }
+
+        if (size > capacity || capacity == 0) {
+            capacity = size * 4;
+            if (capacity < (8 << 20)) capacity = 8 << 20;
+            glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+            ++g_callsBuffer;
+            cursor = 0;
+        } else if (cursor + size > capacity) {
+            glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+            ++g_callsBuffer;
+            cursor = 0;
+        }
+        const GLintptr offset = cursor;
+        const GLenum tgt = target;
+        RanGLT_PostData(data, (unsigned)size, [tgt, offset, size](const void *p) {
+            bool wrote = false;
+#if defined(__APPLE__)
+            //  Unsynchronised, for the reason given in write() below.
+            void *dst = ::glMapBufferRange(tgt, offset, size, GL_MAP_WRITE_BIT |
+                                           GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+            if (dst) { memcpy(dst, p, (size_t)size); ::glUnmapBuffer(tgt); wrote = true; }
+#endif
+            if (!wrote) ::glBufferSubData(tgt, offset, size, p);
+        });
+        ++g_callsBuffer;
+        cursor += size;
+        cursor = (cursor + 15) & ~15;
+        return offset;
+    }
+
     //  Returns the byte offset the data was written at.
     GLintptr write(const void *data, GLsizei size) {
+        if (g_ranGLTOn) return writeQueued(data, size);
         if (!buffer) glGenBuffers(1, &buffer);
         if (target == GL_ARRAY_BUFFER) bindArray(buffer); else bindElements(buffer);
 
@@ -4107,7 +4184,7 @@ void collectGpuSections() {
 
 //  One section at a time: the passes worth measuring do not nest.
 extern "C" void RanGLR_GpuSectionBegin(const char *name) {
-    if (!g_inited || !gpuTimerReady() || g_gpuActive >= 0) return;
+    if (!g_inited || g_ranGLTOn || !gpuTimerReady() || g_gpuActive >= 0) return;
     const int i = gpuSectionIndex(name);
     if (i < 0 || g_gpuSections[i].query) return;      // last one not collected yet
     GLuint q = 0;
@@ -4120,12 +4197,13 @@ extern "C" void RanGLR_GpuSectionBegin(const char *name) {
 
 extern "C" void RanGLR_GpuSectionEnd(void) {
     if (g_gpuActive < 0) return;
+    if (g_ranGLTOn) { g_gpuActive = -1; return; }     //  begun before the switch
     p_glEndQueryEXT(RAN_GL_TIME_ELAPSED_EXT);
     g_gpuActive = -1;
 }
 
 extern "C" void RanGLR_ReportGpuSections(unsigned frames) {
-    if (!g_gpuTimerOn || !frames || !g_gpuSectionCount) return;
+    if (!g_gpuTimerOn || !frames || !g_gpuSectionCount || g_ranGLTOn) return;
     collectGpuSections();
     char line[512] = "FRAME gpu:";
     for (unsigned i = 0; i < g_gpuSectionCount; ++i) {
@@ -4213,6 +4291,22 @@ extern "C" void RanGLR_UpdateBufferRangeUnsync(unsigned buffer, int isIndex, uns
     const double t0 = nowSeconds();
     const GLenum target = isIndex ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     if (isIndex) bindElements(buffer); else bindArray(buffer);
+    if (g_ranGLTOn) {
+        //  The map answers with a pointer, so the whole write goes over.
+        RanGLT_PostData(data, size, [target, offset, size](const void *p) {
+            void *d = ::glMapBufferRange(target, (GLintptr)offset, (GLsizeiptr)size,
+                                         GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT |
+                                         GL_MAP_INVALIDATE_RANGE_BIT);
+            if (d) { memcpy(d, p, size); ::glUnmapBuffer(target); }
+            else ::glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, p);
+        });
+        ++g_callsBuffer;
+        ++g_bufUploads;
+        g_bufUploadBytes += size;
+        { const double dt = nowSeconds() - t0; g_bufUploadSeconds += dt; noteBufKind(2, dt); }
+        if (isIndex) g_gl.elementBuffer = 0xFFFFFFFFu;
+        return;
+    }
     void *dst = glMapBufferRange(target, (GLintptr)offset, (GLsizeiptr)size,
                                  GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT |
                                  GL_MAP_INVALIDATE_RANGE_BIT);
@@ -4714,6 +4808,26 @@ extern "C" unsigned RanGLR_UploadTextureLevel(unsigned existing, int level, int 
 
     // DXT first: it is what nearly every shipped texture is.
     if (isDXT(d3dFormat)) {
+        if (haveS3TC() && g_ranGLTOn) {
+            //  On the GL thread the upload and its check go together, and so
+            //  does the fallback: a refused upload is decoded there.
+            const GLenum internal = s3tcInternal(d3dFormat);
+            RanGLT_PostData(bits, dataSize, [=](const void *p) {
+                while (::glGetError() != GL_NO_ERROR) {}
+                ::glCompressedTexImage2D(GL_TEXTURE_2D, level, internal, width, height, 0,
+                                         (GLsizei)dataSize, p);
+                const GLenum err = ::glGetError();
+                if (err == GL_NO_ERROR) return;
+                LOGE("compressed upload rejected (0x%04X) for a %dx%d DXT texture — "
+                     "decoding DXT on the CPU from now on", err, width, height);
+                g_haveS3TC = false;
+                std::vector<GLubyte> rgba;
+                if (decodeDXT(d3dFormat, width, height, (const GLubyte *)p, dataSize, rgba))
+                    ::glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, width, height, 0, GL_RGBA,
+                                   GL_UNSIGNED_BYTE, &rgba[0]);
+            });
+            return tex;
+        }
         if (haveS3TC()) {
             //  Clear any older error so the check below is about this upload.
             while (glGetError() != GL_NO_ERROR) {}
@@ -4895,7 +5009,15 @@ extern "C" unsigned RanGLR_UploadTextureLevelHalf(unsigned existing, int level, 
 //  be colour-renderable in GLES 3.0, so the attachment is legal for the formats
 //  this is used for; if a driver disagrees, the caller is told and falls back
 //  to the full upload.
+static int allocClearTextureLevel(unsigned *pTex, int width, int height, int d3dFormat);
 extern "C" int RanGLR_AllocClearTextureLevel(unsigned *pTex, int width, int height, int d3dFormat) {
+    //  Asks GL several questions (errors, completeness, the bound framebuffer,
+    //  the colour mask); once per glyph atlas, so it simply runs there.
+    int r = 0;
+    RanGLT_RunSync([&]() { r = allocClearTextureLevel(pTex, width, height, d3dFormat); });
+    return r;
+}
+static int allocClearTextureLevel(unsigned *pTex, int width, int height, int d3dFormat) {
     if (!g_inited || !pTex || width <= 0 || height <= 0) return 0;
 
     GLenum internal = 0, fmt = 0;
@@ -5069,6 +5191,21 @@ extern "C" unsigned RanGLR_UploadCubeFaceLevel(unsigned existing, int face, int 
     const GLenum target = (GLenum)(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face);
 
     if (isDXT(d3dFormat)) {
+        if (haveS3TC() && g_ranGLTOn) {
+            const GLenum internal = s3tcInternal(d3dFormat);
+            RanGLT_PostData(bits, dataSize, [=](const void *p) {
+                while (::glGetError() != GL_NO_ERROR) {}
+                ::glCompressedTexImage2D(target, level, internal, width, height, 0,
+                                         (GLsizei)dataSize, p);
+                if (::glGetError() == GL_NO_ERROR) return;
+                g_haveS3TC = false;
+                std::vector<GLubyte> rgba;
+                if (decodeDXT(d3dFormat, width, height, (const GLubyte *)p, dataSize, rgba))
+                    ::glTexImage2D(target, level, GL_RGBA, width, height, 0, GL_RGBA,
+                                   GL_UNSIGNED_BYTE, &rgba[0]);
+            });
+            return tex;
+        }
         if (haveS3TC()) {
             while (glGetError() != GL_NO_ERROR) {}
             glCompressedTexImage2D(target, level, s3tcInternal(d3dFormat), width, height, 0,
@@ -5124,7 +5261,15 @@ extern "C" void RanGLR_FinishTexture(unsigned tex, int levels, int d3dFormat) {
     if (!g_inited || !tex) return;
     ++g_texFullUploads;
     bindTex2D(tex);
-    if (levels <= 1 && !isDXT(d3dFormat)) {
+    if (levels <= 1 && !isDXT(d3dFormat) && g_ranGLTOn) {
+        RanGLT_Post([=]() {
+            while (::glGetError() != GL_NO_ERROR) {}
+            ::glGenerateMipmap(GL_TEXTURE_2D);
+            const GLenum e = ::glGetError();
+            if (e != GL_NO_ERROR) LOGE("glGenerateMipmap FAILED 0x%04X tex=%u d3dfmt=%d", e, tex, d3dFormat);
+        });
+        levels = 2;
+    } else if (levels <= 1 && !isDXT(d3dFormat)) {
         while (glGetError() != GL_NO_ERROR) {}
         glGenerateMipmap(GL_TEXTURE_2D);
         {
@@ -5152,7 +5297,8 @@ extern "C" void RanGLR_LogStats(void) {
     LOGI("draws=%lu (ui=%lu textured=%lu) verts=%lu texfull=%lu texrect=%lu (%lu KB) vao=%lu new/%lu hit (%u live) glErr=0x%04X",
          g_drawCalls, g_uiDraws, g_texturedDraws, g_vertsDrawn,
          g_texFullUploads, g_texUpdates, g_texUpdateBytes / 1024,
-         g_vaoCreated, g_vaoHits, (unsigned)g_vaoCache.size(), glGetError());
+         g_vaoCreated, g_vaoHits, (unsigned)g_vaoCache.size(),
+         g_ranGLTOn ? 0u : (unsigned)glGetError());
     LOGI("ES3.0 layout respecs per 300 frames: stream %lu (fvf %lu stride %lu base %lu buf %lu) | vb %lu (fvf %lu stride %lu base %lu buf %lu)",
          g_respecCount[0], g_respecWhy[0][0], g_respecWhy[0][1], g_respecWhy[0][2], g_respecWhy[0][3],
          g_respecCount[1], g_respecWhy[1][0], g_respecWhy[1][1], g_respecWhy[1][2], g_respecWhy[1][3]);

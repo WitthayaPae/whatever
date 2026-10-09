@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-09
+- **Last updated:** 2026-10-10
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -31,6 +31,26 @@ the patch ships a needless APK bump).
 2026-10-08). Full list in the dated sections below.
 
 ---
+
+## 2026-10-10 — GL on its own thread ("glthread", built; opt-in until the iPhone is measured)
+
+- `shim/gl/gl_thread.{h,cpp}` + `gl_thunks.{h,cpp}`. While the game loop runs, the GL context lives on a thread of its own ("RanGL"). gl_render.cpp, touch_ui.cpp and splash.cpp include gl_thunks.h last, so every gl* call there is recorded into a command queue (1 MB blocks), with any data it reads copied, and replayed in order on that thread. One frame in flight. Calls that answer (glGet*, glCreate*, status) run there while the caller waits ("syncs"). Per-frame answers come from shadow state instead: caps for glIsEnabled, live textures for glIsTexture, unpack alignment. glGen* names come from batches generated ahead. Streaming ring writes keep their cursor on the game thread and copy on the GL thread. DXT upload + error check + decode fallback run together there. Shader variants and glyph-atlas clears run there in one trip. GPU timer sections are off while it is on.
+- It stops first (drain, glFinish, context back to the main thread) for the loading screen's thread (RanGL_ReleaseContext), Android surface lost/restore, iOS resize, iOS resign-active/background, and shutdown. It restarts from the next main-thread Present. So those paths run exactly as before.
+- **Opt-in:** diag `glthread` turns it on within a second; `noglthread` wins. Off, every gl* call is one extra branch.
+- **LDPlayer, 250-player SG crowd, interleaved 3 rounds:** on 36 ms/frame (28 fps), off 55 ms (18 fps). 0 syncs per frame; ~5 MB/frame queued. The GL thread is now the limit there (busy ~35 ms: the emulator's GL transport). Checked with it on: login page (typing), entering the world through the loading screen, crowd 1:1 (characters, weapons, effects, names, HUD), inventory, HOME + return (it stopped, surface released/restored, restarted), runtime on/off six times.
+- **iPhone: to measure** after this patch: `tools/ios-device.sh flag glthread`, then ios_ab with `noglthread`. Expected ceiling from the nulldraw test: ~60 fps. If it holds, make it the default.
+
+## 2026-10-10 — Crowd CPU tail + render-thread ceiling (built on LDPlayer, not released)
+
+- Profiled the 250-player SG crowd on LDPlayer with `nulldraw` on, so the emulator's GL encoder is out of the picture and only game CPU is left (~22 ms a frame). No single hot spot; fixed every measurable one (simpleperf before/after, % of game thread):
+  - GLCharClient::Render took the half-alpha effect off every visible player every frame (string compare over every effect of every piece): **1.71% -> 0.09%**. Now only when the state changes (`m_nMobileHalfAlpha`).
+  - RanPlat_DiagExists strcmp'd the query against every file in the diag folder: hashed (FNV) + DrawSubset asks for `nomeshvbo` every 512 draws: **0.98% -> 0.09%**.
+  - Texture last-use stamp read steady_clock on every bind; now the clock at the last Present: **1.05% -> 0.72%**.
+  - D3DXMatrixMultiply four-wide rows: **3.42% -> 2.91%**. UpdateBones scratch matrix local, not thread_local (1% TLS init).
+  - Frame time change is ~1 ms, inside the crowd's own noise; checked visually 1:1 (characters normal) and `posecheck` (largest diff 1.9e-6).
+- **Ceiling of a render thread, LDPlayer, interleaved 3 rounds:** `nulldraw` 61 -> 27 ms a frame (16 -> 37 fps). A perfect GL thread would still leave ~22 ms of game CPU on this emulator.
+- **iPhone 15, 1.0.251, SG crowd (~247 drawn), heat nominal, interleaved 3 rounds:** baseline 25-31 fps (render 28-34 ms: submit 10-15, engine 18-20; swap 0.2 ms). **`nulldraw` -> 59.5-60.1 fps** (render 10-14 ms). `sectionskip world-eff` (the biggest GPU fill item, ~39 GPU points in September, little CPU) -> only +1.5 fps. dvt graphics: GPU 76% at ~24 fps.
+  - So the iPhone frame is CPU-bound on GL calls (submit plus the state/uniform/upload calls counted under "engine"), not GPU-bound. A GL thread that takes those calls off the game thread is the lever; its ceiling on this phone is ~60 fps. Decision: build it (next section of work).
 
 ## 2026-10-10 — Parallel character posing (patch 741, APK 251, iOS 1.0.251; awaiting upload)
 

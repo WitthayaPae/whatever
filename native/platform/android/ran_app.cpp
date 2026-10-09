@@ -53,6 +53,7 @@ extern "C" int RanPath_HealCaseTwins(const char *root);
 extern "C" void RanShim_SetClientSize(int w, int h);
 extern "C" void RanD3D_LogStats(void);
 extern "C" void RanD3D_ReportBuffers(unsigned frames);
+#include "../../shim/gl/gl_thread.h"
 extern "C" void RanPath_ProbeVersionFile(void);
 
 namespace {
@@ -585,6 +586,18 @@ extern "C" void RanProf_Frame(double fUpdate, double fRender, double fPresent) {
     LOGI("FRAME buffers: %lu uploads/frame, %lu KB/frame, %.1f ms/frame",
          bufCount / s_frames, bufBytes / 1024 / s_frames, bufSeconds * 1000.0 / s_frames);
     RanD3D_ReportBuffers(s_frames);
+    {
+        //  The GL thread (shim/gl/gl_thread.h): how long it was busy replaying,
+        //  how long this thread waited for it, and how often a call had to wait
+        //  for an answer (each one drains the queue).
+        unsigned long syncs = 0, bytes = 0, frames = 0; double busy = 0.0, waited = 0.0;
+        RanGLT_TakeStats(&syncs, &bytes, &busy, &waited, &frames);
+        if (frames)
+            LOGI("FRAME glthread: on | gl busy %.1f ms/frame, game waited %.1f ms/frame, "
+                 "%.1f syncs/frame, %lu KB/frame queued",
+                 busy * 1000.0 / frames, waited * 1000.0 / frames,
+                 (double)syncs / frames, bytes / 1024 / frames);
+    }
     RanGLR_ReportBufferKinds(s_frames);
     RanGLR_ReportGpuSections(s_frames);
 

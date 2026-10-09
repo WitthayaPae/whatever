@@ -18,6 +18,8 @@
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+//  Last: gl* calls are recorded for the GL thread when it is on.
+#include "../gl/gl_thunks.h"
 
 extern "C" void RanGLR_InvalidateStateCache(void);
 extern "C" void RanInput_PointerWheel(int dz);
