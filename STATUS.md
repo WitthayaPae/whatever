@@ -32,6 +32,13 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-09 — Drag released over a button clicked it (patch 731, APK 245, iOS 1.0.245; awaiting upload)
+
+- **Cause, measured:** a left drag (one that starts on something draggable: a list row, a scroll thumb, an item) is pressed where the finger went down and released where it lifts. `CUIControl::Update` handed every control the release with "pointer inside", wherever the press began, so the control under the lift took it as a click. A drag from empty space is a camera drag (middle button) and never clicked, which is why it only showed on lists and scroll bars.
+- **Fix (shared SOURCE, so Android and iOS):** each control remembers whether the press began inside it (`m_bMobilePressIn`, tested on the press frame with the pointer that control is given) and drops the release otherwise. While something is carried for a drop (hold item, drag-lift, lift pending, item-cell press, skill press or skill to tray) `CUIControl::s_bMobileCarry` lets the release through; `CInnerInterface::FrameMove` sets it each frame and keeps it one frame after it ends. Controls hidden on the press frame get no click from its release, which also stops taps leaking into controls the tap itself showed.
+- First attempt, one global press point, broke every tap on the login page: magnified windows give their children their own coordinates. Replaced by the per-control flag.
+- **Verified on LDPlayer, v729 against the new build:** ranking row dragged onto ร่ำรวย switched the tab on v729, not on the new build. Scroll thumb dragged onto ✕ closed the window on v729; now it stays open and the list scrolls. Tap tab, tap ✕, login, and bag item drag (column 4 to 6) all work. Not tested: skill drag to the quick bar, potion tray drag, Tab S9, iPhone.
+
 ## 2026-10-09 — Original default, pressed buttons, top-up return fix (patch 729, APK 244, iOS 1.0.244; awaiting upload)
 
 - **Original is the default style.** `dwMobileUiTheme` defaults to 3. It is now saved under a new key, `dwMobileUiStyle`, because every existing option.ini already stores the old default (2, Tactical) under the old key, which would have kept those players on Tactical. Settings marks Original as ค่าเริ่มต้น.
