@@ -32,7 +32,7 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-10 — GL on its own thread ("glthread", built; opt-in until the iPhone is measured)
+## 2026-10-10 — GL on its own thread, opt-in; crowd CPU fixes (patch 743, APK 252, iOS 1.0.252; awaiting upload)
 
 - `shim/gl/gl_thread.{h,cpp}` + `gl_thunks.{h,cpp}`. While the game loop runs, the GL context lives on a thread of its own ("RanGL"). gl_render.cpp, touch_ui.cpp and splash.cpp include gl_thunks.h last, so every gl* call there is recorded into a command queue (1 MB blocks), with any data it reads copied, and replayed in order on that thread. One frame in flight. Calls that answer (glGet*, glCreate*, status) run there while the caller waits ("syncs"). Per-frame answers come from shadow state instead: caps for glIsEnabled, live textures for glIsTexture, unpack alignment. glGen* names come from batches generated ahead. Streaming ring writes keep their cursor on the game thread and copy on the GL thread. DXT upload + error check + decode fallback run together there. Shader variants and glyph-atlas clears run there in one trip. GPU timer sections are off while it is on.
 - It stops first (drain, glFinish, context back to the main thread) for the loading screen's thread (RanGL_ReleaseContext), Android surface lost/restore, iOS resize, iOS resign-active/background, and shutdown. It restarts from the next main-thread Present. So those paths run exactly as before.
