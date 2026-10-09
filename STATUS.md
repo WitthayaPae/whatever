@@ -94,6 +94,19 @@ the patch ships a needless APK bump).
     both. Not tested (needs a second player / cards / NPCs): trade, own stall, rebuild, garbage,
     mix, transfer.
   - Builds: arm64, x86_64, PC MiniA/Emulator/ServerAgent/ServerField.
+- Follow-up 3 (user, 2026-10-09):
+  - Trade window: CMobileTradeWindowPanel hosts TRADE_WINDOW, left of the bag panel: both grids,
+    money (tap = classic trade-money input), lock/accept state per side (text + ring), big Lock /
+    Accept / Cancel following ApplyButtonUpdate. Redirect() keeps it shut until the server closes a
+    cancelled trade. Not tested on device (needs a second player).
+  - Chat box restyled in place (BasicChat*, ChatShowFlag, MobileChatChannelBar/MacroBar): dark
+    panel, 7 filter pills + filter button 44 tall, drag-scroll with a thumb, big channel picker
+    (52-tall rows, colour strips), A/ก button, input field with hint. Default 480x210 (was PC width
+    x155). LDPlayer: tabs fit, picker opens and closes, no overlap with F1-F4 or the joystick.
+  - Mini party HUD compact: 190 wide, 36-tall rows (8 members 309 units, was 458). Not seen on
+    device (no party).
+  - Level box sits under the EXP bar (BasicInfoView::MobileExpBar). LDPlayer verified.
+  - Builds: arm64, x86_64, PC MiniA/Emulator/ServerAgent/ServerField.
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:
