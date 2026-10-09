@@ -32,7 +32,7 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-09 — Original default, pressed buttons, top-up return fix (patch 728, APK 244, iOS 1.0.244; awaiting upload)
+## 2026-10-09 — Original default, pressed buttons, top-up return fix (patch 729, APK 244, iOS 1.0.244; awaiting upload)
 
 - **Original is the default style.** `dwMobileUiTheme` defaults to 3. It is now saved under a new key, `dwMobileUiStyle`, because every existing option.ini already stores the old default (2, Tactical) under the old key, which would have kept those players on Tactical. Settings marks Original as ค่าเริ่มต้น.
 - **Buttons show they are pressed** (user: no click animation). `CMobileButton`, every `CBasicButton` (menu icons and other image buttons) and the redesigned `CBasicTextButton` darken to 55% while a finger rests on them, and for 0.12 s after a tap. The gesture layer only presses a button when the finger lifts, so a resting finger is read from the new shared `RanGesture_Holding()` in `shim/platform/touch_gesture.cpp` (Android and iOS). Measured on LDPlayer: เรียง 79 at rest, 43 while held; the menu icon darkens the same way. The round touch-HUD buttons already had their own ring.
