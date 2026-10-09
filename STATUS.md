@@ -129,6 +129,15 @@ the patch ships a needless APK bump).
     (CMobileMenuWindow::TitleH/WinH; DxGameStage lays the grid under it). LDPlayer verified.
 - Text on white buttons (selected tabs, primary buttons, chat tabs, pickers): COL_ONACCENT is white,
   drawn with the kit fonts' black outline. LDPlayer: item shop and chat checked.
+- Follow-up 5 (user, 2026-10-09):
+  - Character select: one kit panel behind the window, list, buttons and the account rows
+    (CSelectCharacterPage m_pMBack; CSelectCharacterButton::MobileContentBottom). LDPlayer verified.
+  - Mini party HUD: one panel behind all rows (rows KIND_INNER on it). Not seen on device (no party).
+  - CMobileList scrolls smoothly: pixel offset under the finger, fling with ~1 s decay, rows shown
+    only while wholly inside (no clipping in the UI). LDPlayer: boss map list mid-drag offset and
+    glide after release. Quest list / ranking / boss drops (CMobileDragScroll) still step by row.
+  - Skill window: a tap on a row keeps the skill detail up (MobileShowSkillInfoPinned) until the
+    same row is tapped again, the page changes or the window closes. Pages kept (user: leave it).
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:
