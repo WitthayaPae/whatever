@@ -23,7 +23,8 @@ INNER = 13              # the classic frame's width (bevel + black)
 RESTYLE = [8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 23, 25, 26, 27]
 NO_RIM = [8, 9, 10, 15, 18]   # pictures, not flat glyphs: tone only
 FRAME_ONLY = [24]       # classic art already, only its frame differs
-PLATE_CUT = 14          # the flat icons' own rounded plate
+PLATE_CUT = 14
+KEEP_COLOUR = True      # the user, 2026-10-09: the sepia toning looked dim and brown          # the flat icons' own rounded plate
 
 # Sepia ramp sampled from the classic cells: shadow, body, highlight.
 RAMP = [(0.00, (24, 20, 17)), (0.30, (92, 80, 66)), (0.55, (150, 128, 98)),
@@ -71,6 +72,20 @@ def main(src, dst):
                 if n not in NO_RIM and rp[xx, yy] and not gp[xx, yy]:
                     col = tuple(int(k * 0.30) for k in col)
                 bp[xx, yy] = col
+        if KEEP_COLOUR:
+            #	The icon's own colours, brightened a little, a dark outline round
+            #	its light glyph so it reads like the classic figures.
+            from PIL import ImageEnhance
+            col = inner.resize((size, size), Image.LANCZOS)
+            col = ImageEnhance.Contrast(col).enhance(1.15)
+            cp = col.load()
+            if n not in NO_RIM:
+                for yy in range(size):
+                    for xx in range(size):
+                        if rp[xx, yy] and not gp[xx, yy]:
+                            r_, g_, b_ = cp[xx, yy]
+                            cp[xx, yy] = (int(r_ * 0.25), int(g_ * 0.25), int(b_ * 0.25))
+            body = col
         out = frame.copy()
         out.paste(body.convert('RGBA'), (INNER, INNER))
         # keep the classic frame's own pixels on top (its inner shadow)

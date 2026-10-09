@@ -123,6 +123,10 @@ the patch ships a needless APK bump).
     frame. Written into CLIENT/textures/gui/mobile_icons.dds (backup in the session scratchpad);
     icons_classic.png updated. THE PATCH MUST CARRY textures/gui/mobile_icons.dds. Re-running
     make-silver-hud.py rewrites icons_classic.png and loses this - run classic-restyle.py after it.
+  - Same day, user: "why do the icons look dim brown?" - the sepia toning was wrong. KEEP_COLOUR:
+    the later icons keep their own colours (slight contrast, dark rim), only the classic black frame
+    is shared. Menu header: 56-tall bar, FONT_TITLE name, the windows' close button
+    (CMobileMenuWindow::TitleH/WinH; DxGameStage lays the grid under it). LDPlayer verified.
 - Side effect while testing: a stray tap opened the map and walked test01 into classroom 1-9,
   which completed a step of the score-card quest.
 - Still open:
