@@ -662,6 +662,11 @@ public:
     RAN_D3D9_STUBS_IDIRECT3DTEXTURE9
 };
 
+//  The GL name behind a D3D texture (render targets included). Diagnostics.
+extern "C" unsigned RanD3D_GlTextureOf(IDirect3DTexture9 *pTex) {
+    return pTex ? ((RanTexture *)pTex)->GlTexture() : 0;
+}
+
 //  The loaders know the path; the texture object is where it has to live.
 extern "C" void RanD3D_NoteTexturePath(IDirect3DTexture9 *pTex, const char *szPath) {
     if (pTex && szPath) ((RanTexture *)pTex)->m_srcPath = szPath;

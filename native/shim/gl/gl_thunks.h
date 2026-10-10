@@ -36,6 +36,14 @@ template <class Fn, class... A> inline void RanGLT_Call(Fn fn, A... a) {
     if (g_ranGLTProf) RanGLT_TagCmd(p, RanGLT_TagFor((const void *)fn));
 }
 
+//  ---- "passlog" (gl_render.cpp): which framebuffer each draw and clear goes
+//  to, in order, so the render passes a frame makes can be counted. A flag
+//  check when it is off.
+extern volatile int g_ranPassOn;
+extern "C" void RanPass_Bind(GLenum target, GLuint fbo);
+extern "C" void RanPass_Work(int kind, GLbitfield mask);    //  0 draw, 1 clear, 2 blit
+extern "C" void RanPass_Invalidate(GLenum target, GLsizei n, const GLenum *att);
+
 //  ---- shadow state (gl_thunks.cpp)
 void      RanGLT_ShadowCap(GLenum cap, bool on);
 int       RanGLT_ShadowIsEnabled(GLenum cap, GLboolean *out);   //  1 if tracked
@@ -210,7 +218,8 @@ inline void    RanGLT_glDeleteSync(GLsync s)             { RanGLT_Call(&::glDele
 #define glDeleteVertexArrays(...)      RanGLT_glDeleteVertexArrays(__VA_ARGS__)
 #define glDeleteFramebuffers(...)      RanGLT_glDeleteFramebuffers(__VA_ARGS__)
 #define glDeleteRenderbuffers(...)     RanGLT_glDeleteRenderbuffers(__VA_ARGS__)
-#define glInvalidateFramebuffer(...)   RanGLT_glInvalidateFramebuffer(__VA_ARGS__)
+#define glInvalidateFramebuffer(t, n, a) do { if (g_ranPassOn) RanPass_Invalidate((t), (n), (a)); \
+                                             RanGLT_glInvalidateFramebuffer((t), (n), (a)); } while (0)
 #define glBufferData(...)              RanGLT_glBufferData(__VA_ARGS__)
 #define glBufferSubData(...)           RanGLT_glBufferSubData(__VA_ARGS__)
 #define glUniform1iv(...)              RanGLT_glUniform1iv(__VA_ARGS__)
@@ -246,14 +255,17 @@ inline void    RanGLT_glDeleteSync(GLsync s)             { RanGLT_Call(&::glDele
 #define glActiveTexture(...)           RanGLT_Call(&::glActiveTexture, __VA_ARGS__)
 #define glAttachShader(...)            RanGLT_Call(&::glAttachShader, __VA_ARGS__)
 #define glBindBuffer(...)              RanGLT_Call(&::glBindBuffer, __VA_ARGS__)
-#define glBindFramebuffer(...)         RanGLT_Call(&::glBindFramebuffer, __VA_ARGS__)
+#define glBindFramebuffer(t, f)        do { if (g_ranPassOn) RanPass_Bind((t), (f)); \
+                                             RanGLT_Call(&::glBindFramebuffer, (t), (f)); } while (0)
 #define glBindRenderbuffer(...)        RanGLT_Call(&::glBindRenderbuffer, __VA_ARGS__)
 #define glBindTexture(...)             RanGLT_Call(&::glBindTexture, __VA_ARGS__)
 #define glBindVertexArray(...)         RanGLT_Call(&::glBindVertexArray, __VA_ARGS__)
 #define glBlendEquation(...)           RanGLT_Call(&::glBlendEquation, __VA_ARGS__)
 #define glBlendFunc(...)               RanGLT_Call(&::glBlendFunc, __VA_ARGS__)
-#define glBlitFramebuffer(...)         RanGLT_Call(&::glBlitFramebuffer, __VA_ARGS__)
-#define glClear(...)                   RanGLT_Call(&::glClear, __VA_ARGS__)
+#define glBlitFramebuffer(...)         do { if (g_ranPassOn) RanPass_Work(2, 0); \
+                                             RanGLT_Call(&::glBlitFramebuffer, __VA_ARGS__); } while (0)
+#define glClear(m)                     do { if (g_ranPassOn) RanPass_Work(1, (m)); \
+                                             RanGLT_Call(&::glClear, (m)); } while (0)
 #define glClearColor(...)              RanGLT_Call(&::glClearColor, __VA_ARGS__)
 #define glClearDepthf(...)             RanGLT_Call(&::glClearDepthf, __VA_ARGS__)
 #define glClearStencil(...)            RanGLT_Call(&::glClearStencil, __VA_ARGS__)
@@ -266,8 +278,10 @@ inline void    RanGLT_glDeleteSync(GLsync s)             { RanGLT_Call(&::glDele
 #define glDepthMask(...)               RanGLT_Call(&::glDepthMask, __VA_ARGS__)
 #define glDepthRangef(...)             RanGLT_Call(&::glDepthRangef, __VA_ARGS__)
 #define glDisableVertexAttribArray(...) RanGLT_Call(&::glDisableVertexAttribArray, __VA_ARGS__)
-#define glDrawArrays(...)              RanGLT_Call(&::glDrawArrays, __VA_ARGS__)
-#define glDrawElements(...)            RanGLT_Call(&::glDrawElements, __VA_ARGS__)
+#define glDrawArrays(...)              do { if (g_ranPassOn) RanPass_Work(0, 0); \
+                                             RanGLT_Call(&::glDrawArrays, __VA_ARGS__); } while (0)
+#define glDrawElements(...)            do { if (g_ranPassOn) RanPass_Work(0, 0); \
+                                             RanGLT_Call(&::glDrawElements, __VA_ARGS__); } while (0)
 #define glEnableVertexAttribArray(...) RanGLT_Call(&::glEnableVertexAttribArray, __VA_ARGS__)
 #define glFramebufferRenderbuffer(...) RanGLT_Call(&::glFramebufferRenderbuffer, __VA_ARGS__)
 #define glFramebufferTexture2D(...)    RanGLT_Call(&::glFramebufferTexture2D, __VA_ARGS__)

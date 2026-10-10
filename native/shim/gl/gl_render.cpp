@@ -588,6 +588,8 @@ bool g_noStableSkip = false;
 bool g_clearLog = false;         //  see RanGLR_Clear
 bool g_drawGroups = false;       //  see noteDrawGroup
 bool g_ringOrphan = false;       //  see RingBuffer (Apple)
+bool g_passLog = false;          //  see RanPass_Work
+bool g_noRtDepthFix = false;     //  see rtLeave
 unsigned long g_stableSends = 0, g_stableSkips = 0;
 //  "stablecheck": on every skipped block, compare each of its uniforms with
 //  the program's cache as the send path would, and count any that would have
@@ -852,6 +854,13 @@ struct RanRT { GLuint fbo = 0, depth = 0; int w = 0, h = 0; unsigned depthFrame 
 unsigned g_rtFrame = 1;
 std::map<GLuint, RanRT> g_rts;
 bool g_rtActive = false;
+//  The bound target, and whether its per-frame depth clear (see
+//  RanGLR_SetRenderTargetTexture) is still owed. Owed, not done at bind: most
+//  binds are the effect targets (DxImageMove), whose draws never touch depth,
+//  and clearing it at bind opened every one of their passes with a clear the
+//  engine's own colour clear then followed mid-pass (passlog: 52 a frame).
+RanRT *g_rtCur = NULL;
+bool g_rtDepthPending = false;
 int  g_rtW = 0, g_rtH = 0;
 //  Which framebuffer the renderer is drawing into, so a blit can put it back.
 GLuint g_rtFbo = 0;
@@ -1286,6 +1295,8 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
         { "nouisharp", &g_noUiSharp, "the sharper magnification filter on interface art" },
         { "vaocache",  &g_vaoCacheOn, "NOT using a VAO per client buffer layout (on while present)" },
         { "novaocache", &g_noVaoCache, "the VAO per client buffer layout (Apple default)" },
+        { "nortdepthfix", &g_noRtDepthFix, "owing render-target depth clears (clear at bind instead)" },
+        { "passlog",   &g_passLog,   "NOT counting render passes (on while present)" },
         { "ringorphan", &g_ringOrphan, "the fenced two-half stream ring on Apple (orphan on wrap instead)" },
         { "drawgroups", &g_drawGroups, "NOT counting which character draws could be combined (on while present)" },
         { "clearlog",  &g_clearLog,  "NOT logging clears by section (on while present)" },
@@ -1433,6 +1444,7 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
             LOGI("diagnostic: %s %s", on ? "skipping" : "restored", diag[i].what);
         }
     }
+    g_ranPassOn = g_passLog ? 1 : 0;
 }
 
 //  Read every uniform location out of one program.
@@ -1988,8 +2000,34 @@ extern "C" int RanGLR_BlitTexture(unsigned srcTex, int sx0, int sy0, int sx1, in
     return 1;
 }
 
+//  The owed clear, now: before the first draw that tests or writes depth.
+static void rtClearDepthNow(void) {
+    if (!g_rtDepthPending || !g_rtCur) return;
+    g_rtDepthPending = false;
+    g_rtCur->depthFrame = g_rtFrame;
+    const GLboolean scis = glIsEnabled(GL_SCISSOR_TEST);
+    if (scis) glDisable(GL_SCISSOR_TEST);
+    const int maskWas = g_gl.depthMask;
+    if (!maskWas) glDepthMask(GL_TRUE);
+    glClearDepthf(1.0f);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    if (!maskWas) glDepthMask(GL_FALSE);
+    if (scis) glEnable(GL_SCISSOR_TEST);
+}
+
+//  Leaving a target whose depth was never used this frame: its contents are
+//  dead (it is cleared before any use), so tell the driver not to write it out
+//  to memory (Apple, OpenGL ES guide: invalidate unneeded attachments when
+//  switching framebuffers). "nortdepthfix" restores clear-at-bind.
+static void rtLeave(void) {
+    if (!g_rtActive || !g_rtDepthPending) return;
+    const GLenum att = GL_DEPTH_ATTACHMENT;
+    glInvalidateFramebuffer(GL_FRAMEBUFFER, 1, &att);
+}
+
 extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
     if (!g_inited) return;
+    rtLeave();
 
     if (!glTex || w <= 0 || h <= 0) {
         if (g_rtActive) {
@@ -1997,6 +2035,8 @@ extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
             g_rtActive = false;
             ++g_rtSwitches;
         }
+        g_rtCur = NULL;
+        g_rtDepthPending = false;
         viewportFull();
         return;
     }
@@ -2046,6 +2086,7 @@ extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
                 glClearDepthf(1.0f);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 if (scis) glEnable(GL_SCISSOR_TEST);
+                rt.depthFrame = g_rtFrame;          //  depth is clear for this frame
             }
         }
 
@@ -2071,22 +2112,45 @@ extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
     //  session. Start each frame from far, on the first bind of the frame, so
     //  the pieces drawn in one frame still sort against each other. The scene
     //  depth itself cannot be shared: it is the panel's size, not the target's.
-    if (rt.depthFrame != g_rtFrame) {
-        rt.depthFrame = g_rtFrame;
-        const GLboolean scis = glIsEnabled(GL_SCISSOR_TEST);
-        if (scis) glDisable(GL_SCISSOR_TEST);
-        const int maskWas = g_gl.depthMask;
-        if (!maskWas) glDepthMask(GL_TRUE);
-        glClearDepthf(1.0f);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        if (!maskWas) glDepthMask(GL_FALSE);
-        if (scis) glEnable(GL_SCISSOR_TEST);
-    }
+    //
+    //  Owed rather than done here (g_rtDepthPending): RanGLR_Clear folds it into
+    //  the engine's own clear, drawInternal does it before the first draw that
+    //  uses depth, and a target left without either never pays for it.
+    g_rtCur = &rt;
+    g_rtDepthPending = (rt.depthFrame != g_rtFrame);
+    if (g_rtDepthPending && g_noRtDepthFix) rtClearDepthNow();
 
     g_rtActive = true;
     g_rtFbo = rt.fbo;
     g_rtW = w; g_rtH = h;
     glViewport(0, 0, w, h);
+}
+
+//  Diagnostic: compare two render targets pixel by pixel (both the same size).
+//  Returns the number of pixels that differ and the largest channel
+//  difference; -1 when either is not a render target. Reads back from the GPU:
+//  measurement only ("multitexcheck").
+extern "C" int RanGLR_DiffTargets(unsigned texA, unsigned texB, int *maxDiff) {
+    if (maxDiff) *maxDiff = 0;
+    std::map<GLuint, RanRT>::iterator a = g_rts.find(texA), b = g_rts.find(texB);
+    if (a == g_rts.end() || b == g_rts.end() || !a->second.fbo || !b->second.fbo) return -1;
+    const int w = a->second.w, h = a->second.h;
+    if (w != b->second.w || h != b->second.h || w <= 0 || h <= 0) return -1;
+    std::vector<unsigned char> pa((size_t)w * h * 4), pb((size_t)w * h * 4);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, a->second.fbo);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, &pa[0]);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, b->second.fbo);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, &pb[0]);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_rtActive ? g_rtFbo : baseFramebuffer());
+    int n = 0, mx = 0;
+    for (size_t i = 0; i < pa.size(); i += 4) {
+        int d = 0;
+        for (int k = 0; k < 4; ++k) { const int e = abs((int)pa[i + k] - (int)pb[i + k]); if (e > d) d = e; }
+        if (d) { ++n; if (d > mx) mx = d; }
+    }
+    if (maxDiff) *maxDiff = mx;
+    return n;
 }
 
 //  Diagnostic: write whatever is bound for drawing right now - a render target
@@ -2378,6 +2442,22 @@ extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil
         g_frameDraw = 0;
         g_frameClearedColor = true;
     }
+    //  A render target that still owes its per-frame depth clear: one clear
+    //  for both, at the start of the pass. Not when the clear is scissored to
+    //  a rectangle - the owed one covers the whole target.
+    bool foldDepth = false;
+    if (g_rtActive && g_rtDepthPending) {
+        if (flags & D3DCLEAR_ZBUFFER) {
+            g_rtDepthPending = false;                   //  the client clears it itself
+            if (g_rtCur) g_rtCur->depthFrame = g_rtFrame;
+        } else if (glIsEnabled(GL_SCISSOR_TEST)) {
+            rtClearDepthNow();
+        } else {
+            foldDepth = true;
+            g_rtDepthPending = false;
+            if (g_rtCur) g_rtCur->depthFrame = g_rtFrame;
+        }
+    }
     GLbitfield mask = 0;
     if (flags & D3DCLEAR_TARGET) {
         // D3DCOLOR is ARGB, packed 0xAARRGGBB.
@@ -2398,7 +2478,14 @@ extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil
         glClearStencil((GLint)stencil);
         mask |= GL_STENCIL_BUFFER_BIT;
     }
+    const int foldMaskWas = g_gl.depthMask;
+    if (foldDepth) {
+        glClearDepthf(1.0f);
+        if (!foldMaskWas) glDepthMask(GL_TRUE);
+        mask |= GL_DEPTH_BUFFER_BIT;
+    }
     if (mask) glClear(mask);
+    if (foldDepth && !foldMaskWas) glDepthMask(GL_FALSE);
 }
 
 extern "C" void RanGLR_SetViewport(int x, int y, int w, int h) {
@@ -4407,6 +4494,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     //  What a pass SUBMITS can be counted anywhere, and for the alpha-blended
     //  effect passes - where the cost is overdraw, not geometry - the triangle
     //  count is the closest proxy there is to how much fill they ask for.
+    if (g_rtDepthPending && g_rtActive && (g_dsZ || g_dsZW)) rtClearDepthNow();
     RanGLR_NoteSectionDraw(vcount, icount ? icount : vcount, g_dsBlend != 0);
     if (g_drawGroups) noteDrawGroup(glVB, glIB, ibByteOffset, icount, vbByteOffset, glTexture);
 
@@ -5671,6 +5759,91 @@ extern "C" void RanGLR_FinishTexture(unsigned tex, int levels, int d3dFormat) {
     ++g_texSamplerEpoch;
 }
 
+//  ---- "passlog": the render passes a frame makes.
+//
+//  On a tile GPU every change of framebuffer ends a render pass: the tiles are
+//  written out to memory and, if the target is drawn into again later in the
+//  frame without having been cleared, read back in (Apple, OpenGL ES guide,
+//  "Performance": logical buffer store and load). A pass here is a run of
+//  draws, clears and blits into one framebuffer between two binds of a
+//  different one. Each kind is keyed by target (the panel or scene = MAIN, or
+//  a render target and its size), how it starts (a clear lets the driver skip
+//  the load; a draw into a target already drawn this frame means a load) and
+//  the frame section it starts in; the first of each kind logs a backtrace.
+//  Counts are per frame, logged with the stats. Measurement only.
+namespace {
+GLuint s_pcFbo = 0xFFFFFFFFu;
+bool s_pcWork = false;
+unsigned s_pcFrame = 0xFFFFFFFFu;
+std::unordered_map<GLuint, int> s_pcThisFrame;      //  passes per target this frame
+unsigned long s_pcFrames = 0, s_pcPasses = 0, s_pcMain = 0, s_pcMainResumed = 0,
+              s_pcResumedRT = 0, s_pcMidClears = 0, s_pcInval = 0, s_pcBinds = 0;
+std::map<std::string, unsigned long> s_pcKinds;
+
+void pcTarget(GLuint fbo, bool *isMain, int *w, int *h) {
+    *isMain = (g_sceneFbo && fbo == g_sceneFbo) || fbo == RanGL_DefaultFramebuffer();
+    *w = *h = 0;
+    if (g_sceneFbo && fbo == g_sceneFbo) { *w = g_sceneW; *h = g_sceneH; return; }
+    if (fbo == RanGL_DefaultFramebuffer()) { *w = RanGL_Width(); *h = RanGL_Height(); return; }
+    for (std::map<GLuint, RanRT>::const_iterator it = g_rts.begin(); it != g_rts.end(); ++it)
+        if (it->second.fbo == fbo) { *w = it->second.w; *h = it->second.h; return; }
+}
+}  // namespace
+
+extern "C" void RanPass_Bind(GLenum target, GLuint fbo) {
+    if (target == GL_READ_FRAMEBUFFER) return;
+    ++s_pcBinds;
+    if (fbo == s_pcFbo) return;
+    s_pcFbo = fbo;
+    s_pcWork = false;
+}
+
+extern "C" void RanPass_Invalidate(GLenum, GLsizei, const GLenum *) { ++s_pcInval; }
+
+extern "C" void RanPass_Work(int kind, GLbitfield mask) {
+    const unsigned f = RanGL_FrameIndex();
+    if (f != s_pcFrame) { s_pcFrame = f; ++s_pcFrames; s_pcThisFrame.clear(); s_pcWork = false; }
+    if (s_pcWork) { if (kind == 1) ++s_pcMidClears; return; }
+    s_pcWork = true;
+    ++s_pcPasses;
+    bool isMain = false; int w = 0, h = 0;
+    pcTarget(s_pcFbo, &isMain, &w, &h);
+    const int nth = ++s_pcThisFrame[s_pcFbo];
+    const bool resumed = nth > 1;
+    if (isMain) { ++s_pcMain; if (resumed) ++s_pcMainResumed; }
+    else if (resumed) ++s_pcResumedRT;
+    const char *how = kind == 1 ? ((mask & GL_COLOR_BUFFER_BIT) ? "clear" : "depth-clear")
+                                : (kind == 2 ? "blit" : "draw");
+    const char *sec = (g_sectionTop > 0) ? g_sectionStack[(g_sectionTop < 16 ? g_sectionTop : 16) - 1] : NULL;
+    char key[200];
+    snprintf(key, sizeof(key), "%s %dx%d starts-with %s%s | %s", isMain ? "MAIN" : "RT", w, h, how,
+             resumed ? " (drawn before this frame: load)" : "", sec ? sec : "-");
+    unsigned long &n = s_pcKinds[key];
+    if (n++ == 0 && s_pcKinds.size() < 80) {
+        char bt[1500];
+        RanDiag_Backtrace(bt, sizeof(bt));
+        LOGI("passlog new: %s | %s", key, bt);
+    }
+}
+
+static void logPasses() {
+    if (!g_ranPassOn || !s_pcFrames) return;
+    const double fr = (double)s_pcFrames;
+    LOGI("passlog per frame: %.1f passes (%.1f main, %.1f main resumed = splits), %.1f render-target "
+         "passes resumed, %.1f clears after draws, %.1f invalidates, %.1f binds",
+         s_pcPasses / fr, s_pcMain / fr, s_pcMainResumed / fr, s_pcResumedRT / fr,
+         s_pcMidClears / fr, s_pcInval / fr, s_pcBinds / fr);
+    std::vector<std::pair<unsigned long, std::string> > v;
+    for (std::map<std::string, unsigned long>::const_iterator it = s_pcKinds.begin(); it != s_pcKinds.end(); ++it)
+        v.push_back(std::make_pair(it->second, it->first));
+    std::sort(v.rbegin(), v.rend());
+    for (size_t i = 0; i < v.size() && i < 30; ++i)
+        LOGI("passlog %6.1f/frame  %s", v[i].first / fr, v[i].second.c_str());
+    for (std::map<std::string, unsigned long>::iterator it = s_pcKinds.begin(); it != s_pcKinds.end(); ++it)
+        it->second = 0;
+    s_pcFrames = s_pcPasses = s_pcMain = s_pcMainResumed = s_pcResumedRT = s_pcMidClears = s_pcInval = s_pcBinds = 0;
+}
+
 extern "C" void RanGLR_LogStats(void) {
     //  The frame profiler only runs in the game stage, so the flag files were
     //  unreadable at character select - which is exactly where the character
@@ -5685,6 +5858,7 @@ extern "C" void RanGLR_LogStats(void) {
          g_respecCount[0], g_respecWhy[0][0], g_respecWhy[0][1], g_respecWhy[0][2], g_respecWhy[0][3],
          g_respecCount[1], g_respecWhy[1][0], g_respecWhy[1][1], g_respecWhy[1][2], g_respecWhy[1][3]);
     LOGI("ES3.0 base-only layouts per 300 frames: %lu", g_baseOnlyHits);
+    logPasses();
     logDrawGroups();
     if (g_clearLog) {
         for (std::map<std::string, unsigned long>::iterator it = g_clearKinds.begin(); it != g_clearKinds.end(); ++it)

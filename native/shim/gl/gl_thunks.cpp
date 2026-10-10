@@ -21,6 +21,12 @@ bool g_cap[kCapCount];
 bool g_capKnown = false;
 
 std::unordered_set<GLuint> g_liveTextures;
+
+}  // namespace
+
+volatile int g_ranPassOn = 0;
+
+namespace {
 GLint g_unpackAlign = 4;
 
 int capIndex(GLenum cap) {
