@@ -32,7 +32,16 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-10 — Analysis first: pass census; main-pass splits 25.7 -> 7.1 (built on LDPlayer, not released)
+## 2026-10-10 — Render-pass splits 25.7 -> 3.5 a frame, every change proven pixel-exact (patch 757, APK 259, iOS 1.0.259; awaiting upload)
+
+- Shadow casters (user: "do them all"): recorded between ClearShadow and the end of the crowd with their bones (skeleton + attachments), full device state (RanD3D_StateSave) and texture scope, replayed in order in one block, then bones and state put back (DxShadowMap::MobileShadowBatchBegin/End). `noshadowbatch` = in place.
+  - `shadowcheck` draws both ways in the same frame and compares per caster: **0 differing frames** on the 512 target. The way there: early frames differed only on the second shadow surface; ruled out texture uploads, loader-thread completions, piece changes, device state and the quad batch one by one with counters; then logged that LastImageBlur's first pass runs with blending off over the whole surface, so its previous contents never reach the screen.
+- `MobilePrepass` (before RanGLR_SceneBegin): the player's MultiTex textures and ClearShadow (only DxShadowMap uses those targets).
+- passlog now names the pass that split the scene. Left, ~1 each: crowd MultiTex pre-pass (needs Render_MobItem's visible list), shadow replay + blur (needs this frame's poses, before the ground reads it), glow -> final blit, water wave, scene/panel start.
+- `multitexcheck` rerun after the move: 14,000 compared, 0 differ. PC GameClient2, Emulator, ServerAgent, ServerField build.
+- Not on the phone yet.
+
+## 2026-10-10 — Analysis first: pass census; main-pass splits 25.7 -> 7.1 (superseded by the section above)
 
 - User, 2026-10-10: stop going back and forth; do the real analysis (research if needed) before implementing.
 - Research (Apple docs, WWDC19-606, WWDC20-10632/10602, ANGLE Metal source): on a tile GPU every framebuffer switch stores the tiles and a return reloads them ("attachment ping-ponging"); load/store traffic is the majority of system bandwidth and costs power and heat; invalidate unneeded attachments when leaving; glClear at pass start becomes a free clear load action; blending/discard disable HSR; GL-on-Metal is closed, Xcode GPU capture (needs a Mac) is the only way to see its load/store actions.
