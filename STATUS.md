@@ -32,6 +32,17 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-10 — Analysis first: pass census; main-pass splits 25.7 -> 7.1 (built on LDPlayer, not released)
+
+- User, 2026-10-10: stop going back and forth; do the real analysis (research if needed) before implementing.
+- Research (Apple docs, WWDC19-606, WWDC20-10632/10602, ANGLE Metal source): on a tile GPU every framebuffer switch stores the tiles and a return reloads them ("attachment ping-ponging"); load/store traffic is the majority of system bandwidth and costs power and heat; invalidate unneeded attachments when leaving; glClear at pass start becomes a free clear load action; blending/discard disable HSR; GL-on-Metal is closed, Xcode GPU capture (needs a Mac) is the only way to see its load/store actions.
+- 1.0.258 on the iPhone: 59 fps at heat fair (both threads ~15 ms); serious within ~1 min, then GPU 90-94% and both threads slowed. Native resolution 2556x1179 (world scale 100% default) - a decision for the user, not changed.
+- `passlog` census (LDPlayer, iPhone option.ini, crowd), per frame, before -> after: passes 144 -> 90, **main splits 25.7 -> 7.1**, clears after draws 55 -> 0, render targets re-opened 61 -> 4.
+  - Fixed: MultiTex on attachment pieces (DxAttBone, ~19 splits) and on the player's own character (~5) now in the pre-pass; each pooled target drawn in one bind; target depth clears owed/folded/invalidated.
+  - Proof: `multitexcheck` 20,000 prepared textures compared with the original path in the same frame: 0 pixels differ.
+- Remaining splits: shadow casters ~3.8 (each player's shadow is drawn right after its body because both read the shared skeleton's pose; attachments pose their own shared skeletons inside their render, and re-posing steps their animation clock - a pre-pass needs stored per-character poses for attachments too), tree shadow 1, world 1, scene blit 1.
+- Not yet measured on the phone. Next: shadow design, then foliage (eff:alphapiece ~25% GPU) measurement at capped fps.
+
 ## 2026-10-10 — iPhone on 1.0.257: GL thread 29 -> 17 ms; stream ring and HUD without waits (patch 755, APK 258, iOS 1.0.258; awaiting upload)
 
 - **iPhone 15, 1.0.257, crowd 250, heat serious:** GL thread **16-17 ms/frame** (1.0.256 at heat fair: 29). glClear 152 a frame x 8 us = 1.3 ms (was 98 x 115 us = 11.4). Game thread 12-16 ms. Paced at 30 by the heat clamp.
