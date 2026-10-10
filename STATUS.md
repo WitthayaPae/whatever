@@ -32,7 +32,7 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-10 — VAO per mesh buffer on Apple (built, not released)
+## 2026-10-10 — VAO per mesh buffer on Apple (patch 745, APK 253, iOS 1.0.253; awaiting upload)
 
 - **iPhone 15, 1.0.252 + glthread, SG crowd, what the 44k GL calls a frame are:** attribute setup 22.6k, uniforms 10.9k, draws 5.2k; 2,034 program switches. Cost switches there: `nolightblock` (light uploads) no change, `nopaletteuni` (bone palettes) ~2 ms. `vaocache` (one VAO per vertex buffer + layout, the old key): calls 43k -> 37k, GL thread 35 -> 29 ms, 3 rounds, but it thrashed: ~1,000 new VAOs a frame, 77% hits, the whole cache dropped at 2,048 every couple of seconds.
 - Cause: the key included the draw's start offset, and the engine's dynamic buffers are appended to, so each draw from one is a new key. Now only draws from offset 0 use the cache (characters, the world: one layout for the buffer's life); cap 8,192.
