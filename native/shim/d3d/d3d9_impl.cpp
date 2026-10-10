@@ -845,6 +845,8 @@ extern "C" void RanD3D_OtherCharScope(int bIn) {
     if (bIn) ++g_otherCharScope;
     else if (g_otherCharScope > 0) --g_otherCharScope;
 }
+//  For a draw replayed later (DxShadowMap's batch): the scope it was issued in.
+extern "C" int RanD3D_OtherCharScopeDepth(void) { return g_otherCharScope; }
 
 // ---------------------------------------------------------- cube texture
 //  The hair and armour specular passes bind one of these to stage 1 and sample
@@ -2645,6 +2647,88 @@ public:
 
     RAN_D3D9_STUBS_IDIRECT3DDEVICE9
 };
+
+//  The whole fixed-function state of the device, to replay a draw later under
+//  exactly the state it was issued in (DxShadowMap's caster batch). Restored
+//  through the device's own setters, so every cache below sees the change the
+//  ordinary way; a state block being recorded is held off, as Apply does.
+namespace {
+struct RanDeviceState {
+    DWORD renderState[256];
+    DWORD textureStageState[8][33];
+    DWORD samplerState[16][14];
+    D3DMATRIX transform[512];
+    IDirect3DBaseTexture9 *texture[16];
+    D3DLIGHT9 light[16];
+    BOOL lightEnabled[16];
+    D3DMATERIAL9 material;
+    D3DVIEWPORT9 viewport;
+    DWORD fvf;
+    IDirect3DVertexBuffer9 *stream0; UINT stream0Offset, stream0Stride;
+    IDirect3DIndexBuffer9 *indices;
+};
+}
+
+extern "C" void *RanD3D_StateSave(IDirect3DDevice9 *dev) {
+    if (!dev) return NULL;
+    RanDevice *d = (RanDevice *)dev;
+    RanDeviceState *st = new RanDeviceState;
+    memcpy(st->renderState, d->m_renderState, sizeof(st->renderState));
+    memcpy(st->textureStageState, d->m_textureStageState, sizeof(st->textureStageState));
+    memcpy(st->samplerState, d->m_samplerState, sizeof(st->samplerState));
+    memcpy(st->transform, d->m_transform, sizeof(st->transform));
+    memcpy(st->texture, d->m_texture, sizeof(st->texture));
+    memcpy(st->light, d->m_light, sizeof(st->light));
+    memcpy(st->lightEnabled, d->m_lightEnabled, sizeof(st->lightEnabled));
+    st->material = d->m_material;
+    st->viewport = d->m_viewport;
+    st->fvf = d->m_fvf;
+    st->stream0 = d->m_stream0; st->stream0Offset = d->m_stream0Offset; st->stream0Stride = d->m_stream0Stride;
+    st->indices = d->m_indices;
+    return st;
+}
+
+extern "C" void RanD3D_StateRestore(IDirect3DDevice9 *dev, const void *p) {
+    if (!dev || !p) return;
+    RanDevice *d = (RanDevice *)dev;
+    const RanDeviceState *st = (const RanDeviceState *)p;
+    RanStateBlock *save = d->m_recording;
+    d->m_recording = NULL;
+    for (int i = 0; i < 256; ++i)
+        if (d->m_renderState[i] != st->renderState[i]) d->SetRenderState((D3DRENDERSTATETYPE)i, st->renderState[i]);
+    for (int s = 0; s < 8; ++s)
+        for (int t = 0; t < 33; ++t)
+            if (d->m_textureStageState[s][t] != st->textureStageState[s][t])
+                d->SetTextureStageState((DWORD)s, (D3DTEXTURESTAGESTATETYPE)t, st->textureStageState[s][t]);
+    for (int s = 0; s < 16; ++s)
+        for (int t = 0; t < 14; ++t)
+            if (d->m_samplerState[s][t] != st->samplerState[s][t])
+                d->SetSamplerState((DWORD)s, (D3DSAMPLERSTATETYPE)t, st->samplerState[s][t]);
+    for (int i = 0; i < 512; ++i)
+        if (memcmp(&d->m_transform[i], &st->transform[i], sizeof(D3DMATRIX)) != 0)
+            d->SetTransform((D3DTRANSFORMSTATETYPE)i, &st->transform[i]);
+    for (int i = 0; i < 16; ++i)
+        if (d->m_texture[i] != st->texture[i]) d->SetTexture((DWORD)i, st->texture[i]);
+    for (int i = 0; i < 16; ++i) {
+        if (memcmp(&d->m_light[i], &st->light[i], sizeof(D3DLIGHT9)) != 0) d->SetLight((DWORD)i, &st->light[i]);
+        if (d->m_lightEnabled[i] != st->lightEnabled[i]) d->LightEnable((DWORD)i, st->lightEnabled[i]);
+    }
+    if (memcmp(&d->m_material, &st->material, sizeof(D3DMATERIAL9)) != 0) d->SetMaterial(&st->material);
+    if (memcmp(&d->m_viewport, &st->viewport, sizeof(D3DVIEWPORT9)) != 0) d->SetViewport(&st->viewport);
+    if (d->m_fvf != st->fvf) d->SetFVF(st->fvf);
+    if (d->m_stream0 != st->stream0 || d->m_stream0Offset != st->stream0Offset || d->m_stream0Stride != st->stream0Stride)
+        d->SetStreamSource(0, st->stream0, st->stream0Offset, st->stream0Stride);
+    if (d->m_indices != st->indices) d->SetIndices(st->indices);
+    d->m_recording = save;
+}
+
+extern "C" void RanD3D_StateFree(void *p) { delete (RanDeviceState *)p; }
+
+//  Send draws the device is still holding (the screen-space quad batch) to GL,
+//  so a read-back sees everything issued so far. Diagnostics.
+extern "C" void RanD3D_FlushPending(IDirect3DDevice9 *dev) {
+    if (dev) ((RanDevice *)dev)->flushUIBatch();
+}
 
 HRESULT RanStateBlock::Capture() {
     // Re-read the device's current values for everything this block covers.

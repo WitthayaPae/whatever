@@ -993,6 +993,10 @@ extern "C" unsigned long RanGL_GLCalls(void) {
 //  Texture traffic: full chain uploads against partial rectangle updates,
 //  the difference between a glyph costing an atlas and costing a scanline.
 unsigned long g_texUpdates = 0, g_texUpdateBytes = 0, g_texFullUploads = 0;
+//  Never reset: texture uploads since start, for checks that compare two draws
+//  of the same thing a moment apart ("shadowcheck").
+unsigned long g_texUploadsEver = 0;
+extern "C" unsigned long RanGLR_TexUploadsEver(void) { return g_texUploadsEver; }
 //  Separate attribute format (ES 3.1). The format of a vertex - which
 //  attribute sits at which offset - changes only when the FVF changes, while
 //  the buffer and the offset within it change on nearly every draw. Describing
@@ -2124,6 +2128,21 @@ extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
     g_rtFbo = rt.fbo;
     g_rtW = w; g_rtH = h;
     glViewport(0, 0, w, h);
+}
+
+//  Diagnostic: a 64-bit FNV-1a of a render target's pixels, 0 when it is not
+//  one ("shadowcheck"). Reads back from the GPU: measurement only.
+extern "C" unsigned long long RanGLR_TargetHash(unsigned tex) {
+    std::map<GLuint, RanRT>::iterator a = g_rts.find(tex);
+    if (a == g_rts.end() || !a->second.fbo || a->second.w <= 0 || a->second.h <= 0) return 0;
+    std::vector<unsigned char> px((size_t)a->second.w * a->second.h * 4);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, a->second.fbo);
+    glReadPixels(0, 0, a->second.w, a->second.h, GL_RGBA, GL_UNSIGNED_BYTE, &px[0]);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_rtActive ? g_rtFbo : baseFramebuffer());
+    unsigned long long h = 1469598103934665603ull;
+    for (size_t i = 0; i < px.size(); ++i) { h ^= px[i]; h *= 1099511628211ull; }
+    return h ? h : 1;
 }
 
 //  Diagnostic: compare two render targets pixel by pixel (both the same size).
@@ -5729,6 +5748,7 @@ extern "C" void RanGLR_FinishCubeTexture(unsigned tex, int levels) {
 extern "C" void RanGLR_FinishTexture(unsigned tex, int levels, int d3dFormat) {
     if (!g_inited || !tex) return;
     ++g_texFullUploads;
+    ++g_texUploadsEver;
     bindTex2D(tex);
     if (levels <= 1 && !isDXT(d3dFormat) && g_ranGLTOn) {
         RanGLT_Post([=]() {
@@ -5779,6 +5799,7 @@ std::unordered_map<GLuint, int> s_pcThisFrame;      //  passes per target this f
 unsigned long s_pcFrames = 0, s_pcPasses = 0, s_pcMain = 0, s_pcMainResumed = 0,
               s_pcResumedRT = 0, s_pcMidClears = 0, s_pcInval = 0, s_pcBinds = 0;
 std::map<std::string, unsigned long> s_pcKinds;
+char s_pcPrev[96] = "";             //  the pass before this one: what split the scene
 
 void pcTarget(GLuint fbo, bool *isMain, int *w, int *h) {
     *isMain = (g_sceneFbo && fbo == g_sceneFbo) || fbo == RanGL_DefaultFramebuffer();
@@ -5815,9 +5836,11 @@ extern "C" void RanPass_Work(int kind, GLbitfield mask) {
     const char *how = kind == 1 ? ((mask & GL_COLOR_BUFFER_BIT) ? "clear" : "depth-clear")
                                 : (kind == 2 ? "blit" : "draw");
     const char *sec = (g_sectionTop > 0) ? g_sectionStack[(g_sectionTop < 16 ? g_sectionTop : 16) - 1] : NULL;
-    char key[200];
-    snprintf(key, sizeof(key), "%s %dx%d starts-with %s%s | %s", isMain ? "MAIN" : "RT", w, h, how,
-             resumed ? " (drawn before this frame: load)" : "", sec ? sec : "-");
+    char key[300];
+    snprintf(key, sizeof(key), "%s %dx%d starts-with %s%s | %s%s%s", isMain ? "MAIN" : "RT", w, h, how,
+             resumed ? " (drawn before this frame: load)" : "", sec ? sec : "-",
+             (isMain && resumed) ? " | after " : "", (isMain && resumed) ? s_pcPrev : "");
+    snprintf(s_pcPrev, sizeof(s_pcPrev), "%s %dx%d in %s", isMain ? "MAIN" : "RT", w, h, sec ? sec : "-");
     unsigned long &n = s_pcKinds[key];
     if (n++ == 0 && s_pcKinds.size() < 80) {
         char bt[1500];
