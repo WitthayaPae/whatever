@@ -585,6 +585,7 @@ struct StableSnap {
 StableSnap g_stableSnap;
 //  "nostableskip": every uniform checked one by one again, to A/B it.
 bool g_noStableSkip = false;
+bool g_clearLog = false;         //  see RanGLR_Clear
 unsigned long g_stableSends = 0, g_stableSkips = 0;
 //  "stablecheck": on every skipped block, compare each of its uniforms with
 //  the program's cache as the send path would, and count any that would have
@@ -1283,6 +1284,7 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
         { "nouisharp", &g_noUiSharp, "the sharper magnification filter on interface art" },
         { "vaocache",  &g_vaoCacheOn, "NOT using a VAO per client buffer layout (on while present)" },
         { "novaocache", &g_noVaoCache, "the VAO per client buffer layout (Apple default)" },
+        { "clearlog",  &g_clearLog,  "NOT logging clears by section (on while present)" },
         { "nostableskip", &g_noStableSkip, "skipping the rarely-changing uniforms as one block" },
         { "stablecheck", &g_stableCheck, "NOT checking skipped uniform blocks against the cache (on while present)" },
         { "nobaseonly", &g_noBaseOnly, "re-issuing only pointers when just the vertex source moved" },
@@ -2344,8 +2346,27 @@ extern "C" int RanGLR_FrameDrawCount(void) { return g_frameDraw; }
 static void drainDeadTextures(void);
 extern "C" void RanGLR_FrameEnd(void) { g_frameClearedColor = false; ++g_rtFrame; drainDeadTextures(); }
 
+//  "clearlog": every distinct clear (innermost frame section, flags, render
+//  target or not, target size) once with a backtrace, then counts per 300
+//  frames from RanGLR_LogStats. On the iPhone a glClear costs ~115 us of the
+//  GL thread and the frame made 98 of them.
+std::map<std::string, unsigned long> g_clearKinds;
+static void noteClear(DWORD flags) {
+    const char *sec = (g_sectionTop > 0) ? g_sectionStack[(g_sectionTop < 16 ? g_sectionTop : 16) - 1] : NULL;
+    char key[160];
+    snprintf(key, sizeof(key), "%s flags=%lu rt=%d %dx%d", sec ? sec : "-", (unsigned long)flags,
+             g_rtActive ? 1 : 0, curWidth(), curHeight());
+    unsigned long &n = g_clearKinds[key];
+    if (n++ == 0 && g_clearKinds.size() < 64) {
+        char bt[1500];
+        RanDiag_Backtrace(bt, sizeof(bt));
+        LOGI("clearlog new: %s | %s", key, bt);
+    }
+}
+
 extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil) {
     if (!g_inited) return;
+    if (g_clearLog) noteClear(flags);
     //  The client clears the frame once at the top of the scene, which is the
     //  only frame boundary visible from this layer.
     if (!g_rtActive && (flags & D3DCLEAR_TARGET)) {
@@ -5492,6 +5513,10 @@ extern "C" void RanGLR_LogStats(void) {
          g_respecCount[0], g_respecWhy[0][0], g_respecWhy[0][1], g_respecWhy[0][2], g_respecWhy[0][3],
          g_respecCount[1], g_respecWhy[1][0], g_respecWhy[1][1], g_respecWhy[1][2], g_respecWhy[1][3]);
     LOGI("ES3.0 base-only layouts per 300 frames: %lu", g_baseOnlyHits);
+    if (g_clearLog) {
+        for (std::map<std::string, unsigned long>::iterator it = g_clearKinds.begin(); it != g_clearKinds.end(); ++it)
+            if (it->second) { LOGI("clearlog per 300 frames: %6lu  %s", it->second, it->first.c_str()); it->second = 0; }
+    }
     g_baseOnlyHits = 0;
     LOGI("stable uniforms per 300 frames: %lu sent, %lu skipped%s",
          g_stableSends, g_stableSkips, g_noStableSkip ? " (nostableskip)" : "");
