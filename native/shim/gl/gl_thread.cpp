@@ -10,6 +10,8 @@
 #include <time.h>
 #include <vector>
 #include <deque>
+#include <algorithm>
+#include <dlfcn.h>
 #ifdef __APPLE__
 #include <pthread/qos.h>
 #endif
@@ -21,6 +23,7 @@ void RanGLT_InitShadows(void);     //  gl_thunks.cpp
 
 volatile int g_ranGLTOn = 0;
 pthread_t    g_ranGLTThread;
+volatile int g_ranGLTProf = 0;
 
 namespace {
 
@@ -104,6 +107,67 @@ void *alloc(unsigned argBytes, unsigned payloadBytes, void (*exec)(void *), void
     return a;
 }
 
+//  ---- "glprof"
+//  Tags: index + 1 into this table of GL entry points. Appended by the
+//  producer only; the GL thread reads entries below the published count.
+const int kMaxTags = 512;
+const void *g_tagFn[kMaxTags];
+volatile int g_tagCount = 0;
+
+struct ProfSlot { uintptr_t key; unsigned long calls; double seconds; };
+const int kProfSlots = 1024;                //  GL thread only
+ProfSlot g_prof[kProfSlots];
+double g_profSince = 0.0, g_profBusy = 0.0;
+unsigned long g_profFrames = 0;
+
+void profNote(uintptr_t key, double dt) {
+    size_t h = (size_t)((key >> 4) * 2654435761u) & (kProfSlots - 1);
+    for (int i = 0; i < kProfSlots; ++i, h = (h + 1) & (kProfSlots - 1)) {
+        ProfSlot &s = g_prof[h];
+        if (s.key == key || !s.key) { s.key = key; ++s.calls; s.seconds += dt; return; }
+    }
+}
+
+//  "image!symbol+off": the GL entry point, or our closure.
+void profName(uintptr_t key, char *out, size_t cap) {
+    const void *addr = (const void *)key;
+    const char *kind = "";
+    if (key < (uintptr_t)kMaxTags + 1) {
+        addr = g_tagFn[key - 1]; kind = "call ";
+    }
+    Dl_info di;
+    if (dladdr(addr, &di) && di.dli_fname) {
+        const char *img = strrchr(di.dli_fname, '/');
+        img = img ? img + 1 : di.dli_fname;
+        if (di.dli_sname) snprintf(out, cap, "%s%s!%s", kind, img, di.dli_sname);
+        else snprintf(out, cap, "%s%s+0x%lx", kind, img,
+                      (unsigned long)((uintptr_t)addr - (uintptr_t)di.dli_fbase));
+    } else {
+        snprintf(out, cap, "%s%p", kind, addr);
+    }
+}
+
+void profReport(double now) {
+    std::vector<ProfSlot> v;
+    for (int i = 0; i < kProfSlots; ++i) if (g_prof[i].key) v.push_back(g_prof[i]);
+    std::sort(v.begin(), v.end(), [](const ProfSlot &a, const ProfSlot &b) { return a.seconds > b.seconds; });
+    const double frames = g_profFrames ? (double)g_profFrames : 1.0;
+    double total = 0.0; for (const ProfSlot &s : v) total += s.seconds;
+    LOGI("glprof: %.1f s, %lu frames, busy %.2f ms/frame, timed %.2f ms/frame",
+         now - g_profSince, g_profFrames, g_profBusy * 1000.0 / frames, total * 1000.0 / frames);
+    for (size_t i = 0; i < v.size() && i < 25; ++i) {
+        char name[200];
+        profName(v[i].key, name, sizeof(name));
+        LOGI("glprof %2u: %7.3f ms/frame %8.1f calls/frame %6.2f us each  %s", (unsigned)i,
+             v[i].seconds * 1000.0 / frames, v[i].calls / frames,
+             v[i].calls ? v[i].seconds * 1e6 / v[i].calls : 0.0, name);
+    }
+    memset(g_prof, 0, sizeof(g_prof));
+    g_profSince = now; g_profBusy = 0.0; g_profFrames = 0;
+}
+
+void execFrameDone(void *);
+
 void *glThreadMain(void *) {
 #ifdef __APPLE__
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
@@ -120,12 +184,33 @@ void *glThreadMain(void *) {
 
         const double t0 = nowSeconds();
         unsigned char *p = b->data, *end = b->data + b->used;
-        while (p < end) {
-            Hdr *h = (Hdr *)p;
-            h->exec(h + 1);
-            p += h->total;
+        if (g_ranGLTProf) {
+            if (g_profSince == 0.0) g_profSince = t0;
+            double last = t0;
+            while (p < end) {
+                Hdr *h = (Hdr *)p;
+                if (h->exec == execFrameDone) ++g_profFrames;
+                const uintptr_t key = h->pad ? (uintptr_t)h->pad : (uintptr_t)h->exec;
+                h->exec(h + 1);
+                const double t = nowSeconds();
+                profNote(key, t - last);
+                last = t;
+                p += h->total;
+            }
+        } else {
+            while (p < end) {
+                Hdr *h = (Hdr *)p;
+                h->exec(h + 1);
+                p += h->total;
+            }
         }
         const double dt = nowSeconds() - t0;
+        if (g_ranGLTProf) {
+            g_profBusy += dt;
+            if (t0 + dt - g_profSince > 2.0) profReport(t0 + dt);
+        } else if (g_profSince != 0.0) {
+            memset(g_prof, 0, sizeof(g_prof)); g_profSince = 0.0; g_profBusy = 0.0; g_profFrames = 0;
+        }
 
         pthread_mutex_lock(&g_lock);
         g_glBusy += dt;
@@ -289,8 +374,18 @@ extern "C" void RanGLT_FrameEnd(double *waited) {
     const double now = t0 + dt;
     if (now - s_lastCheck > 1.0) {
         s_lastCheck = now;
+        g_ranGLTProf = RanPlat_DiagExists("glprof") ? 1 : 0;
         if (!wantedNow()) { LOGI("switched off"); RanGLT_Stop(); }
     }
+}
+
+extern "C" unsigned RanGLT_TagFor(const void *fn) {
+    const int n = g_tagCount;
+    for (int i = 0; i < n; ++i) if (g_tagFn[i] == fn) return (unsigned)(i + 1);
+    if (n >= kMaxTags) return 0;
+    g_tagFn[n] = fn;
+    __atomic_store_n(&g_tagCount, n + 1, __ATOMIC_RELEASE);
+    return (unsigned)(n + 1);
 }
 
 extern "C" unsigned RanGLT_GenName(int kind) {

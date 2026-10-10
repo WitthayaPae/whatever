@@ -3266,6 +3266,8 @@ extern "C" void RanGLR_TakeProgramSwitches(unsigned long *useProgram, unsigned l
     g_progSwitches = g_variantChanges = 0;
 }
 
+extern "C" void RanGLR_ReportBufferKinds(unsigned frames);
+
 //  Logs which variant key bits flip per frame and the uniform uploads made on
 //  draws that switched program, then resets. Measurement only.
 extern "C" void RanGLR_ReportVariantFlips(unsigned frames) {
@@ -3284,6 +3286,7 @@ extern "C" void RanGLR_ReportVariantFlips(unsigned frames) {
     g_uniSwitchCalls = g_uniSwitchBytes = 0;
     RanGLR_LogStageCombos();
     RanGLR_LogSectionDraws(frames);
+    RanGLR_ReportBufferKinds(frames);
 }
 
 extern "C" void RanGLR_TakeUpStream(unsigned long *calls, unsigned long *bytes) {

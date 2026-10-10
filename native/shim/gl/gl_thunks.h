@@ -27,7 +27,13 @@
 //  ---- values
 template <class Fn, class... A> inline void RanGLT_Call(Fn fn, A... a) {
     if (RanGLT_Direct()) { fn(a...); return; }
-    RanGLT_Post([=]() { fn(a...); });
+    auto f = [=]() { fn(a...); };
+    typedef decltype(f) F;
+    void *p = RanGLT_Cmd((unsigned)sizeof(F), &RanGLTClosure<F>::run);
+    if (!p) return;
+    new (p) F(std::move(f));
+    //  The closure is per signature, so "glprof" needs the function itself.
+    if (g_ranGLTProf) RanGLT_TagCmd(p, RanGLT_TagFor((const void *)fn));
 }
 
 //  ---- shadow state (gl_thunks.cpp)

@@ -28,6 +28,7 @@
 #pragma once
 #include <pthread.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,6 +74,16 @@ unsigned RanGLT_GenName(int kind);
 void RanGLT_NoteSync(void);
 void RanGLT_TakeStats(unsigned long *syncs, unsigned long *bytes, double *glBusy,
                       double *waited, unsigned long *frames);
+
+//  "glprof": the GL thread times every command and logs the most expensive
+//  every two seconds, named on the device (dladdr). Commands queued by
+//  RanGLT_Call carry a tag naming the GL function, because their closure is
+//  shared by every function of the same signature; the rest are named by
+//  their closure. Set by the producer once a second.
+extern volatile int g_ranGLTProf;
+unsigned RanGLT_TagFor(const void *fn);
+//  The header's spare word, just before the arguments (see Hdr in gl_thread.cpp).
+static inline void RanGLT_TagCmd(void *args, unsigned tag) { ((uint32_t *)args)[-3] = tag; }
 
 //  Platform: make the context current (1) or not (0) on the calling thread.
 //  gl_context.cpp / gl_context_ios.mm.
