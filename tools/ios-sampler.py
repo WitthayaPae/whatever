@@ -2,6 +2,7 @@
 """Decode samples.bin from the in-app iPhone sampler (platform/ios/ran_ios_sampler.mm).
 
     tools/ios-device.sh flag sampler 10          # start: 10 s of samples
+    tools/ios-device.sh flag samplergl 10        # the GL thread instead
     (wait for the log line "wrote N samples")
     python tools/ios-sampler.py [samples.bin] [app binary] [--top 40]
 
@@ -52,6 +53,15 @@ data = open(samples_path, 'rb').read()
 magic, ver, slide, n, words = struct.unpack_from('<IIQQQ', data, 0)
 assert magic == 0x52534D50, 'not a samples.bin'
 vals = struct.unpack_from('<%dQ' % words, data, 32)
+#  Version 2 appends names for addresses outside the app binary (dladdr on the
+#  phone): Apple's GL driver, Metal, libc.
+sysnames = {}
+if ver >= 2:
+    at = 32 + 8 * words
+    (cnt,) = struct.unpack_from('<Q', data, at); at += 8
+    for _ in range(cnt):
+        a, ln = struct.unpack_from('<QH', data, at); at += 10
+        sysnames[a] = data[at:at + ln].decode('utf-8', 'replace'); at += ln
 stacks = []
 i = 0
 while i < len(vals):
@@ -68,7 +78,7 @@ def unslid(a, is_pc):
 addrs = set()
 for st in stacks:
     for k, a in enumerate(st):
-        addrs.add(unslid(a, k == 0))
+        if a not in sysnames: addrs.add(unslid(a, k == 0))
 addrs = sorted(addrs)
 #  The shipped binary has a symbol table but no DWARF, which llvm-symbolizer
 #  answers with "??" - so look each address up in llvm-nm's sorted list instead.
@@ -92,17 +102,34 @@ for a in addrs:
     else:
         names[a] = '[system] 0x%x' % a
 
+def name_of(a, k):
+    if a in sysnames: return '[' + sysnames[a] + ']'
+    return names[unslid(a, k == 0)]
+
 self_c = collections.Counter()
 incl = collections.Counter()
 for st in stacks:
     if not st:
         continue
-    fs = [names[unslid(a, k == 0)] for k, a in enumerate(st)]
+    fs = [name_of(a, k) for k, a in enumerate(st)]
     self_c[fs[0]] += 1
     for f in set(fs):
         incl[f] += 1
 
 N = float(len(stacks))
+#  For the GL thread: which of our calls the time was spent under (the first
+#  frame in the app binary, counting from the leaf), and which system library.
+ours = collections.Counter(); libs = collections.Counter()
+for st in stacks:
+    if not st: continue
+    fs = [name_of(a, k) for k, a in enumerate(st)]
+    first = next((f for f in fs if not f.startswith('[')), '-')
+    ours[first] += 1
+    libs[fs[0].split('!')[0] + ']' if fs[0].startswith('[') else '(app)'] += 1
+print('--- by library of the leaf')
+for f, c in libs.most_common(15): print('%6.1f%%  %s' % (100 * c / N, f[:140]))
+print('--- by the innermost app function (for the GL thread: which call)')
+for f, c in ours.most_common(top): print('%6.1f%%  %s' % (100 * c / N, f[:160]))
 print('--- self (where the game thread was)')
 for f, c in self_c.most_common(top):
     print('%6.1f%%  %s' % (100 * c / N, f[:140]))
@@ -116,7 +143,7 @@ if under:
     kids = collections.Counter(); leaves = collections.Counter(); parents = collections.Counter(); tot = 0
     for st in stacks:
         if not st: continue
-        fs = [names[unslid(a, k == 0)] for k, a in enumerate(st)]
+        fs = [name_of(a, k) for k, a in enumerate(st)]
         idx = [i for i, f in enumerate(fs) if f.startswith(under)]
         if not idx: continue
         tot += 1; i = idx[-1]

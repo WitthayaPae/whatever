@@ -1,4 +1,5 @@
-//  A sampling profiler for the game thread, for an iPhone with no Mac.
+//  A sampling profiler for the game thread - or, with "samplergl", the GL
+//  thread (shim/gl/gl_thread.h) - for an iPhone with no Mac.
 //
 //  Instruments needs Xcode. This does what its Time Profiler does, inside the
 //  app: a helper thread wakes about every millisecond, pauses the game thread
@@ -15,11 +16,22 @@
 //  While the game thread is paused nothing here may allocate, lock or log: the
 //  thread might be holding the malloc lock. The sample buffer is allocated
 //  before the first pause.
+//
+//  Addresses outside the app binary (Apple's GL driver, Metal, libc) cannot be
+//  named on the PC - the system libraries are not there - so after sampling,
+//  with nothing paused, each distinct one is named here with dladdr and the
+//  names are appended to the file (version 2). Most of the GL thread's time is
+//  inside the driver, and which driver function is the whole question.
 #include "../../shim/platform/ran_plat.h"
 #import <Foundation/Foundation.h>
 #include <mach/mach.h>
 #include <mach-o/dyld.h>
+#include <dlfcn.h>
 #include <pthread.h>
+#include <algorithm>
+#include <string>
+#include <vector>
+#include "../../shim/gl/gl_thread.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +49,7 @@ struct Sampler {
     uint64_t   *buf = 0;
     size_t      cap = 0, used = 0;
     unsigned    samples = 0, misses = 0;
+    bool        gl = false;
 };
 
 Sampler g_s;
@@ -48,15 +61,45 @@ void writeOut () {
     FILE *f = fopen ( path, "wb" );
     if ( !f ) return;
     //  Header: magic, version, slide of the main executable, sample count, words.
-    const uint32_t magic = 0x52534D50, ver = 1;     //  "RSMP"
+    const uint32_t magic = 0x52534D50, ver = 2;     //  "RSMP"
     const uint64_t slide = (uint64_t) _dyld_get_image_vmaddr_slide ( 0 );
     const uint64_t n = g_s.samples, words = g_s.used;
     fwrite ( &magic, 4, 1, f ); fwrite ( &ver, 4, 1, f );
     fwrite ( &slide, 8, 1, f ); fwrite ( &n, 8, 1, f ); fwrite ( &words, 8, 1, f );
     fwrite ( g_s.buf, 8, g_s.used, f );
+
+    //  Version 2: names for the addresses outside the app binary.
+    //  [count u64] then per entry [addr u64][len u16]["image!symbol"].
+    std::vector<uint64_t> sys;
+    const void *mainHdr = _dyld_get_image_header ( 0 );
+    for ( size_t i = 0; i < g_s.used; ) {
+        const size_t d = (size_t) g_s.buf[i];
+        for ( size_t k = 0; k < d; ++k ) sys.push_back ( g_s.buf[i + 1 + k] );
+        i += 1 + d;
+    }
+    std::sort ( sys.begin(), sys.end() );
+    sys.erase ( std::unique ( sys.begin(), sys.end() ), sys.end() );
+    std::vector<uint64_t> keep; std::vector<std::string> nm;
+    for ( uint64_t a : sys ) {
+        Dl_info di;
+        //  A return address points after the call: name the calling instruction.
+        if ( !dladdr ( (const void *)(uintptr_t)( a > 4 ? a - 4 : a ), &di ) ) continue;
+        if ( di.dli_fbase == mainHdr ) continue;
+        const char *img = di.dli_fname ? strrchr ( di.dli_fname, '/' ) : 0;
+        img = img ? img + 1 : ( di.dli_fname ? di.dli_fname : "?" );
+        std::string s = std::string ( img ) + "!" + ( di.dli_sname ? di.dli_sname : "?" );
+        if ( s.size() > 400 ) s.resize ( 400 );
+        keep.push_back ( a ); nm.push_back ( s );
+    }
+    const uint64_t cnt = keep.size();
+    fwrite ( &cnt, 8, 1, f );
+    for ( size_t i = 0; i < keep.size(); ++i ) {
+        const uint16_t len = (uint16_t) nm[i].size();
+        fwrite ( &keep[i], 8, 1, f ); fwrite ( &len, 2, 1, f ); fwrite ( nm[i].data(), 1, len, f );
+    }
     fclose ( f );
-    RanPlat_Log ( RANLOG_INFO, "RanSampler", "wrote %u samples (%u missed) to samples.bin, slide 0x%llx",
-                  g_s.samples, g_s.misses, (unsigned long long) slide );
+    RanPlat_Log ( RANLOG_INFO, "RanSampler", "wrote %u samples (%u missed) of the %s thread to samples.bin, slide 0x%llx, %u system names",
+                  g_s.samples, g_s.misses, g_s.gl ? "GL" : "game", (unsigned long long) slide, (unsigned) cnt );
 }
 
 void *samplerMain ( void * ) {
@@ -95,7 +138,7 @@ void *samplerMain ( void * ) {
         usleep ( 1000 );
     }
     writeOut ();
-    unlink ( RanPlat_DiagPath ( "sampler" ) );
+    unlink ( RanPlat_DiagPath ( g_s.gl ? "samplergl" : "sampler" ) );
     free ( g_s.buf ); g_s.buf = 0;
     g_running = 0;
     return 0;
@@ -105,17 +148,21 @@ void *samplerMain ( void * ) {
 
 //  From the display-link tick, on the game thread. One cached check a frame.
 extern "C" void RanSampler_Tick ( void ) {
-    if ( g_running || !RanPlat_DiagExists ( "sampler" ) ) return;
+    if ( g_running ) return;
+    //  "samplergl" only while the GL thread exists; the game thread otherwise.
+    const bool gl = RanPlat_DiagExists ( "samplergl" ) && g_ranGLTOn;
+    if ( !gl && !RanPlat_DiagExists ( "sampler" ) ) return;
     int seconds = 10;
-    if ( FILE *f = RanPlat_DiagOpen ( "sampler" ) ) {
+    if ( FILE *f = RanPlat_DiagOpen ( gl ? "samplergl" : "sampler" ) ) {
         char b[16] = { 0 };
         if ( fread ( b, 1, sizeof(b) - 1, f ) > 0 ) { const int v = atoi ( b ); if ( v >= 1 && v <= 120 ) seconds = v; }
         fclose ( f );
     }
     g_s = Sampler ();
     g_s.seconds = seconds;
-    g_s.target = mach_thread_self ();       //  this thread: the game thread
-    pthread_t self = pthread_self ();
+    g_s.gl = gl;
+    pthread_t self = gl ? g_ranGLTThread : pthread_self ();
+    g_s.target = gl ? pthread_mach_thread_np ( self ) : mach_thread_self ();
     g_s.stackHi = (uintptr_t) pthread_get_stackaddr_np ( self );
     g_s.stackLo = g_s.stackHi - (uintptr_t) pthread_get_stacksize_np ( self );
     g_s.cap = (size_t) seconds * 1100 * ( kMaxDepth + 2 );
@@ -125,5 +172,5 @@ extern "C" void RanSampler_Tick ( void ) {
     pthread_t t;
     if ( pthread_create ( &t, 0, samplerMain, 0 ) != 0 ) { free ( g_s.buf ); g_s.buf = 0; g_running = 0; return; }
     pthread_detach ( t );
-    RanPlat_Log ( RANLOG_INFO, "RanSampler", "sampling the game thread for %d s", seconds );
+    RanPlat_Log ( RANLOG_INFO, "RanSampler", "sampling the %s thread for %d s", gl ? "GL" : "game", seconds );
 }
