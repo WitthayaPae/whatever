@@ -12,6 +12,7 @@
 #include "windows.h"
 #include <d3dx9.h>
 #include <math.h>
+#include <string.h>
 
 // --------------------------------------------------------------------- vectors
 D3DXVECTOR2 *WINAPI D3DXVec2Normalize(D3DXVECTOR2 *pOut, const D3DXVECTOR2 *pV) {
@@ -99,14 +100,25 @@ D3DXVECTOR3 *WINAPI D3DXVec3CatmullRom(D3DXVECTOR3 *pOut, const D3DXVECTOR3 *pV0
 }
 
 // -------------------------------------------------------------------- matrices
+//  Four-wide rows: row i of the result is the sum over k of M1[i][k] times
+//  row k of M2 - the same products and the same order of additions as the
+//  scalar formula, done a row at a time (NEON on the phones, SSE on the
+//  emulator). It was 3.4% of the game thread in a 250-player crowd with every
+//  draw switched off (simpleperf, 2026-10-10): the pose copy-in alone is a
+//  multiply per bone per character. Every row of M2 is loaded before anything
+//  is stored, so pOut may be either input.
+typedef float RanF4 __attribute__((ext_vector_type(4)));
+static inline RanF4 ranLoad4(const float *p) { RanF4 v; memcpy(&v, p, sizeof v); return v; }
 D3DXMATRIX *WINAPI D3DXMatrixMultiply(D3DXMATRIX *pOut, const D3DXMATRIX *pM1,
                                       const D3DXMATRIX *pM2) {
-    D3DXMATRIX r;
-    for (int i = 0; i < 4; ++i)
-        for (int j = 0; j < 4; ++j)
-            r.m[i][j] = pM1->m[i][0] * pM2->m[0][j] + pM1->m[i][1] * pM2->m[1][j]
-                      + pM1->m[i][2] * pM2->m[2][j] + pM1->m[i][3] * pM2->m[3][j];
-    *pOut = r;
+    const RanF4 b0 = ranLoad4(pM2->m[0]), b1 = ranLoad4(pM2->m[1]),
+                b2 = ranLoad4(pM2->m[2]), b3 = ranLoad4(pM2->m[3]);
+    RanF4 r[4];
+    for (int i = 0; i < 4; ++i) {
+        const float *a = pM1->m[i];
+        r[i] = a[0] * b0 + a[1] * b1 + a[2] * b2 + a[3] * b3;
+    }
+    memcpy(pOut->m, r, sizeof r);
     return pOut;
 }
 

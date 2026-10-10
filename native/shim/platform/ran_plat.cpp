@@ -219,68 +219,91 @@ extern "C" const char *RanPlat_DiagPath ( const char *name )
 //  and a call in a draw loop costs a string compare.
 #include <time.h>
 
+#include <dirent.h>
+
+//  One directory listing a second, not one stat per name.
+//
+//  The table of names above this had 64 slots for the 72 names the client
+//  asks about. Once it filled, every name after it was stat'd live on every
+//  call - and some of those calls are inside the character draw. A sampling
+//  profile in a 250-player crowd (LDPlayer, 2026-10-09) put 9.5% of the whole
+//  process in RanPlat_DiagExists -> __faccessat, under DxSkinMesh9::
+//  RenderDefault. Raising the limit again would only move the cliff.
+//
+//  So the diagnostic root is listed (one opendir/readdir, a few dozen
+//  entries) at most once a second, and a call is a compare against the names
+//  that ARE there - usually none. No name limit, no syscall in a draw loop,
+//  and a file dropped in still takes effect within a second. The listing is
+//  done outside the lock; a reader keeps the previous snapshot meanwhile.
+//  FNV-1a, for RanPlat_DiagExists.
+static unsigned diagNameHash ( const char *s )
+{
+    unsigned h = 2166136261u;
+    while ( *s ) { h ^= (unsigned char) *s++; h *= 16777619u; }
+    return h;
+}
+
 extern "C" int RanPlat_DiagExists ( const char *name )
 {
     if ( !name || !*name ) return 0;
 
-    //  Room for every diagnostic name the client uses, with slack.
-    //
-    //  Sixteen was not enough and the overflow was silent: the table filled,
-    //  every name after it fell through to the live access(), and the whole
-    //  point of the cache was lost for exactly the names that arrived last.
-    //  A sampling profile put 14.8% of the process in __faccessat, under
-    //  DxEffectMesh::Render, which is what "the weapon effect is expensive"
-    //  turned out to be. There are 26 names today.
-    struct Entry { char name[32]; int present; long checkedMs; };
-    static Entry s_cache[64];
-    static int   s_count = 0;
+    enum { kMaxPresent = 128, kNameMax = 64 };
+    static char  s_present[kMaxPresent][kNameMax];
+    //  A hash beside each name: the folder holds dozens of files (logs, caches),
+    //  and a strcmp against each of them on every call was 0.7% of the game
+    //  thread in a crowd (simpleperf, 2026-10-10). Now a call hashes the name
+    //  once and compares integers; strcmp only confirms a hash that matched.
+    static unsigned s_hash[kMaxPresent];
+    static int   s_nPresent = 0;
+    static long  s_listedMs = -100000;
+    static int   s_listing = 0;
     static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 
     struct timespec ts;
+#ifdef CLOCK_MONOTONIC_COARSE
+    clock_gettime ( CLOCK_MONOTONIC_COARSE, &ts );     //  no vDSO precision needed for a 1 s refresh
+#else
     clock_gettime ( CLOCK_MONOTONIC, &ts );
+#endif
     const long nowMs = (long)( ts.tv_sec * 1000 + ts.tv_nsec / 1000000 );
 
+    const unsigned h = diagNameHash ( name );
+
     pthread_mutex_lock ( &s_lock );
-
-    Entry *e = NULL;
-    for ( int i = 0; i < s_count; ++i ) {
-        if ( strcmp ( s_cache[i].name, name ) == 0 ) { e = &s_cache[i]; break; }
-    }
-    if ( !e ) {
-        //  A name that does not fit the table is answered live rather than
-        //  wrongly; sixteen is more diagnostics than anything uses at once.
-        //  Still possible in principle, and it must be loud rather than slow:
-        //  a name that does not fit is answered live, which is correct and
-        //  expensive, so say so once.
-        if ( s_count >= (int)( sizeof(s_cache)/sizeof(s_cache[0]) ) ||
-             strlen ( name ) >= sizeof(s_cache[0].name) ) {
-            static int s_warned = 0;
-            if ( !s_warned ) {
-                s_warned = 1;
-                RanPlat_Log ( RANLOG_WARN, "RanPlat",
-                    "diagnostic cache full at %d names - \"%s\" is being stat'd live",
-                    s_count, name );
-            }
-            pthread_mutex_unlock ( &s_lock );
-            return access ( RanPlat_DiagPath ( name ), F_OK ) == 0 ? 1 : 0;
-        }
-        e = &s_cache[s_count++];
-        snprintf ( e->name, sizeof(e->name), "%s", name );
-        e->present = -1;
-        e->checkedMs = 0;
-    }
-
-    //  One second, not half: with thirty-odd names even the refresh is real
-    //  work at 120 us a stat, and no diagnostic needs to be noticed sooner.
-    if ( e->present < 0 || nowMs - e->checkedMs >= 1000 ) {
-        e->checkedMs = nowMs;
+    if ( nowMs - s_listedMs >= 1000 && !s_listing )
+    {
+        s_listing = 1;
         pthread_mutex_unlock ( &s_lock );
-        const int present = access ( RanPlat_DiagPath ( name ), F_OK ) == 0 ? 1 : 0;
+
+        //  The root itself: RanPlat_DiagPath("") is "<root>/".
+        static char s_fresh[kMaxPresent][kNameMax];
+        static unsigned s_freshHash[kMaxPresent];
+        int nFresh = 0;
+        DIR *d = opendir ( RanPlat_DiagPath ( "" ) );
+        if ( d )
+        {
+            struct dirent *de;
+            while ( ( de = readdir ( d ) ) != NULL && nFresh < kMaxPresent )
+            {
+                if ( de->d_name[0] == '.' && ( !de->d_name[1] || ( de->d_name[1] == '.' && !de->d_name[2] ) ) ) continue;
+                if ( strlen ( de->d_name ) >= kNameMax ) continue;
+                s_freshHash[nFresh] = diagNameHash ( de->d_name );
+                memcpy ( s_fresh[nFresh++], de->d_name, strlen ( de->d_name ) + 1 );
+            }
+            closedir ( d );
+        }
+
         pthread_mutex_lock ( &s_lock );
-        e->present = present;
+        memcpy ( s_present, s_fresh, sizeof(s_present[0]) * (size_t)nFresh );
+        memcpy ( s_hash, s_freshHash, sizeof(s_hash[0]) * (size_t)nFresh );
+        s_nPresent = nFresh;
+        s_listedMs = nowMs;
+        s_listing = 0;
     }
 
-    const int answer = e->present > 0 ? 1 : 0;
+    int answer = 0;
+    for ( int i = 0; i < s_nPresent; ++i )
+        if ( s_hash[i] == h && strcmp ( s_present[i], name ) == 0 ) { answer = 1; break; }
     pthread_mutex_unlock ( &s_lock );
     return answer;
 }

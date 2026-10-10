@@ -77,11 +77,48 @@ DWORD timeEndPeriod(UINT)   { return 0; }
 //  layer; it answers immediately unless it is called on the loop thread.
 void RanPlat_PumpEvents(void);
 
-void Sleep(DWORD ms) {
+//  The thread that draws holds the GL context (gl_render.cpp). Never slowed below.
+#include "../gl/gl_render.h"
+
+//  An idle poll backs off.
+//
+//  The client's background threads - the texture, mesh, colour-mesh and
+//  animation loaders - wait for work as `while (1) { Sleep(1); look; }`. The
+//  PC makes that 1 ms on purpose (DXUT calls timeBeginPeriod(1)), and on a
+//  desktop it costs nothing. On a phone it is a thousand wake-ups a second per
+//  thread while nothing is queued: measured 2026-10-09, six such threads at
+//  ~980 wake-ups/s each on LDPlayer, and the iPhone 15 showing ~6,000 context
+//  switches a second with more kernel time than game time while it ran hot.
+//
+//  So a thread that keeps asking for 1 ms without having done anything in
+//  between (under 200 us since its last wake) is idle: after 50 such polls in a
+//  row it sleeps 10 ms instead. The first poll after real work is back to 1 ms,
+//  so a busy loader runs exactly as before and a job queued on an idle one
+//  waits at most 10 ms. The render thread and the network wait (which calls
+//  RanSleepExact) are never backed off.
+static inline int64_t sleepNowUs() {
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+void RanSleepExact(DWORD ms) {
     RanPlat_PumpEvents();
     if (ms == 0) { sched_yield(); return; }
     struct timespec ts = { (time_t)(ms / 1000), (long)((ms % 1000) * 1000000L) };
     nanosleep(&ts, NULL);
+}
+
+void Sleep(DWORD ms) {
+    static __thread int     s_idle = 0;
+    static __thread int64_t s_woke = 0;
+    if (ms == 1 && !RanGLR_OnRenderThread()) {
+        const int64_t now = sleepNowUs();
+        s_idle = (s_woke && now - s_woke < 200) ? s_idle + 1 : 0;
+        RanSleepExact(s_idle >= 50 ? 10 : 1);
+        s_woke = sleepNowUs();
+        return;
+    }
+    RanSleepExact(ms);
 }
 BOOL QueryPerformanceCounter(LARGE_INTEGER *p) {
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);

@@ -28,6 +28,7 @@
 #include "gl_platform.h"
 #include <string.h>
 #include <map>
+#include <unordered_map>
 #include <set>
 #include <pthread.h>
 #include <unistd.h>
@@ -36,6 +37,8 @@
 
 #include "gl_context.h"
 #include "gl_render.h"
+//  Last: from here on gl* calls are recorded for the GL thread when it is on.
+#include "gl_thunks.h"
 
 #define LOGI(...) RanPlat_Log(RANLOG_INFO,  "RanGL", __VA_ARGS__)
 #define LOGE(...) RanPlat_Log(RANLOG_ERROR, "RanGL", __VA_ARGS__)
@@ -569,6 +572,31 @@ struct UniformSlot {
 };
 std::vector<UniformSlot> g_uniformCache;
 
+//  Everything applyProgramUniforms reads for the uniforms that rarely change
+//  (stage, material, fog, alpha test, camera), as the bound program last got
+//  it. One compare of this replaces some thirty per-uniform cache checks on a
+//  draw where none of them moved, which is most draws. Parked per program with
+//  the cache above, for the same reason.
+struct StableSnap {
+    int   n;
+    float v[96];
+    StableSnap() : n(0) {}
+};
+StableSnap g_stableSnap;
+//  "nostableskip": every uniform checked one by one again, to A/B it.
+bool g_noStableSkip = false;
+bool g_clearLog = false;         //  see RanGLR_Clear
+bool g_drawGroups = false;       //  see noteDrawGroup
+bool g_ringOrphan = false;       //  see RingBuffer (Apple)
+bool g_passLog = false;          //  see RanPass_Work
+bool g_noRtDepthFix = false;     //  see rtLeave
+unsigned long g_stableSends = 0, g_stableSkips = 0;
+//  "stablecheck": on every skipped block, compare each of its uniforms with
+//  the program's cache as the send path would, and count any that would have
+//  been sent. Must stay 0; measurement only.
+bool g_stableCheck = false;
+unsigned long g_stableMismatch = 0;
+
 bool uniformChanged(GLint loc, const float *values, int count) {
     if (loc < 0 || count > (int)(sizeof(((UniformSlot *)0)->values) / sizeof(float))) return loc >= 0;
     if ((int)g_uniformCache.size() <= loc) g_uniformCache.resize(loc + 1);
@@ -669,7 +697,7 @@ void setUniformMatrix(GLint loc, const float *m, int count) {
 }
 
 //  The program is recreated only on init; drop the cache with it.
-void resetUniformCache() { g_uniformCache.clear(); }
+void resetUniformCache() { g_uniformCache.clear(); g_stableSnap.n = 0; }
 
 GLuint g_prog = 0;
 GLint  uWorld = -1, uCameraPos = -1, uCameraPosF = -1,
@@ -826,6 +854,13 @@ struct RanRT { GLuint fbo = 0, depth = 0; int w = 0, h = 0; unsigned depthFrame 
 unsigned g_rtFrame = 1;
 std::map<GLuint, RanRT> g_rts;
 bool g_rtActive = false;
+//  The bound target, and whether its per-frame depth clear (see
+//  RanGLR_SetRenderTargetTexture) is still owed. Owed, not done at bind: most
+//  binds are the effect targets (DxImageMove), whose draws never touch depth,
+//  and clearing it at bind opened every one of their passes with a clear the
+//  engine's own colour clear then followed mid-pass (passlog: 52 a frame).
+RanRT *g_rtCur = NULL;
+bool g_rtDepthPending = false;
 int  g_rtW = 0, g_rtH = 0;
 //  Which framebuffer the renderer is drawing into, so a blit can put it back.
 GLuint g_rtFbo = 0;
@@ -958,6 +993,10 @@ extern "C" unsigned long RanGL_GLCalls(void) {
 //  Texture traffic: full chain uploads against partial rectangle updates,
 //  the difference between a glyph costing an atlas and costing a scanline.
 unsigned long g_texUpdates = 0, g_texUpdateBytes = 0, g_texFullUploads = 0;
+//  Never reset: texture uploads since start, for checks that compare two draws
+//  of the same thing a moment apart ("shadowcheck").
+unsigned long g_texUploadsEver = 0;
+extern "C" unsigned long RanGLR_TexUploadsEver(void) { return g_texUploadsEver; }
 //  Separate attribute format (ES 3.1). The format of a vertex - which
 //  attribute sits at which offset - changes only when the FVF changes, while
 //  the buffer and the offset within it change on nearly every draw. Describing
@@ -1150,6 +1189,16 @@ bool g_skipPaletteUni = false;
 bool g_streamSub   = false;
 //  "vaocache": a VAO per client vertex buffer and layout. See drawInternal.
 bool g_vaoCacheOn  = false;
+//  The default differs by driver: on Apple's ES 3.0 (no separate attribute
+//  format) a VAO bind replaces ~5 attribute calls a draw; on LDPlayer the bind
+//  cost more than it saved. "novaocache" turns it off where it is on.
+#if defined(__APPLE__)
+const bool kVaoCacheDefault = true;
+#else
+const bool kVaoCacheDefault = false;
+#endif
+bool g_noVaoCache = false;
+inline bool vaoCacheWanted() { return (kVaoCacheDefault || g_vaoCacheOn) && !g_noVaoCache; }
 //  On the ES 3.0 path, a layout that differs only in where it reads from
 //  re-issues just the enabled attributes' pointers (see drawInternal). On by
 //  default; "nobaseonly" turns it off to A/B it.
@@ -1249,6 +1298,14 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
         { "noattribformat", &g_noAttribFmt, "ES 3.1 separate attribute format" },
         { "nouisharp", &g_noUiSharp, "the sharper magnification filter on interface art" },
         { "vaocache",  &g_vaoCacheOn, "NOT using a VAO per client buffer layout (on while present)" },
+        { "novaocache", &g_noVaoCache, "the VAO per client buffer layout (Apple default)" },
+        { "nortdepthfix", &g_noRtDepthFix, "owing render-target depth clears (clear at bind instead)" },
+        { "passlog",   &g_passLog,   "NOT counting render passes (on while present)" },
+        { "ringorphan", &g_ringOrphan, "the fenced two-half stream ring on Apple (orphan on wrap instead)" },
+        { "drawgroups", &g_drawGroups, "NOT counting which character draws could be combined (on while present)" },
+        { "clearlog",  &g_clearLog,  "NOT logging clears by section (on while present)" },
+        { "nostableskip", &g_noStableSkip, "skipping the rarely-changing uniforms as one block" },
+        { "stablecheck", &g_stableCheck, "NOT checking skipped uniform blocks against the cache (on while present)" },
         { "nobaseonly", &g_noBaseOnly, "re-issuing only pointers when just the vertex source moved" },
         //  Present = ON, unlike its neighbours: this is a candidate waiting for
         //  a measurement on a phone, not something being switched off.
@@ -1391,6 +1448,7 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
             LOGI("diagnostic: %s %s", on ? "skipping" : "restored", diag[i].what);
         }
     }
+    g_ranPassOn = g_passLog ? 1 : 0;
 }
 
 //  Read every uniform location out of one program.
@@ -1499,11 +1557,15 @@ struct Variant {
     //  Its own uniform value cache: a location means nothing in another program,
     //  and without this every switch would re-upload everything.
     std::vector<UniformSlot> cache;
+    StableSnap stable;
     Variant() : prog(0) { for (size_t i = 0; i < kLocationCount; ++i) locs[i] = -1; }
 };
 
 std::map<unsigned, Variant> g_variants;
 unsigned g_variantKey = 0xFFFFFFFFu;
+//  The entry g_variantKey names (map nodes do not move), so a draw that keeps
+//  its variant needs no lookup. NULL whenever g_variantKey names none.
+Variant *g_curVariant = NULL;
 
 //  What the key says, and what it becomes in the preamble.
 unsigned variantKey(int preTransformed, int lighting, int specular, int fogMode,
@@ -1667,8 +1729,7 @@ void useVariant(unsigned key) {
     //  happened to be asked for. useProgram is itself cached, so this is free
     //  whenever nothing moved.
     if (key == g_variantKey) {
-        std::map<unsigned, Variant>::iterator cur = g_variants.find(key);
-        if (cur != g_variants.end()) useProgram(cur->second.prog);
+        if (g_curVariant) useProgram(g_curVariant->prog);
         return;
     }
 
@@ -1679,16 +1740,24 @@ void useVariant(unsigned key) {
         g_uniAfterSwitch = true;
     }
     //  Park the current program's cache before the locations change under it.
-    std::map<unsigned, Variant>::iterator prev = g_variants.find(g_variantKey);
-    if (prev != g_variants.end()) prev->second.cache.swap(g_uniformCache);
+    if (g_curVariant) {
+        g_curVariant->cache.swap(g_uniformCache);
+        g_curVariant->stable = g_stableSnap;
+    }
+    g_curVariant = NULL;
     g_uniformCache.clear();
+    g_stableSnap.n = 0;
 
     std::map<unsigned, Variant>::iterator it = g_variants.find(key);
     if (it == g_variants.end()) {
         Variant v;
-        if (!buildVariant(key, v)) {
+        bool built = false;
+        //  Compiling and linking answers (status, logs, locations): one trip.
+        RanGLT_RunSync([&]() { built = buildVariant(key, v); });
+        if (!built) {
             //  Fall back to whatever is bound rather than drawing nothing.
             g_variantKey = 0xFFFFFFFFu;
+            g_curVariant = NULL;
             return;
         }
         it = g_variants.insert(std::make_pair(key, Variant())).first;
@@ -1699,8 +1768,15 @@ void useVariant(unsigned key) {
 
     for (size_t i = 0; i < kLocationCount; ++i) *kLocationVars[i] = it->second.locs[i];
     it->second.cache.swap(g_uniformCache);
+    //  Taken, not copied, like the cache swap above: the parked copy is stale
+    //  from here on. RanGLR_InvalidateStateCache drops the current variant
+    //  without parking it, and a snapshot left here then claimed values that
+    //  the (empty) cache and the program did not have - "stablecheck" caught it.
+    g_stableSnap = it->second.stable;
+    it->second.stable.n = 0;
     useProgram(it->second.prog);
     g_variantKey = key;
+    g_curVariant = &it->second;
 }
 
 }
@@ -1928,8 +2004,34 @@ extern "C" int RanGLR_BlitTexture(unsigned srcTex, int sx0, int sy0, int sx1, in
     return 1;
 }
 
+//  The owed clear, now: before the first draw that tests or writes depth.
+static void rtClearDepthNow(void) {
+    if (!g_rtDepthPending || !g_rtCur) return;
+    g_rtDepthPending = false;
+    g_rtCur->depthFrame = g_rtFrame;
+    const GLboolean scis = glIsEnabled(GL_SCISSOR_TEST);
+    if (scis) glDisable(GL_SCISSOR_TEST);
+    const int maskWas = g_gl.depthMask;
+    if (!maskWas) glDepthMask(GL_TRUE);
+    glClearDepthf(1.0f);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    if (!maskWas) glDepthMask(GL_FALSE);
+    if (scis) glEnable(GL_SCISSOR_TEST);
+}
+
+//  Leaving a target whose depth was never used this frame: its contents are
+//  dead (it is cleared before any use), so tell the driver not to write it out
+//  to memory (Apple, OpenGL ES guide: invalidate unneeded attachments when
+//  switching framebuffers). "nortdepthfix" restores clear-at-bind.
+static void rtLeave(void) {
+    if (!g_rtActive || !g_rtDepthPending) return;
+    const GLenum att = GL_DEPTH_ATTACHMENT;
+    glInvalidateFramebuffer(GL_FRAMEBUFFER, 1, &att);
+}
+
 extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
     if (!g_inited) return;
+    rtLeave();
 
     if (!glTex || w <= 0 || h <= 0) {
         if (g_rtActive) {
@@ -1937,6 +2039,8 @@ extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
             g_rtActive = false;
             ++g_rtSwitches;
         }
+        g_rtCur = NULL;
+        g_rtDepthPending = false;
         viewportFull();
         return;
     }
@@ -1986,6 +2090,7 @@ extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
                 glClearDepthf(1.0f);
                 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 if (scis) glEnable(GL_SCISSOR_TEST);
+                rt.depthFrame = g_rtFrame;          //  depth is clear for this frame
             }
         }
 
@@ -2011,22 +2116,60 @@ extern "C" void RanGLR_SetRenderTargetTexture(unsigned glTex, int w, int h) {
     //  session. Start each frame from far, on the first bind of the frame, so
     //  the pieces drawn in one frame still sort against each other. The scene
     //  depth itself cannot be shared: it is the panel's size, not the target's.
-    if (rt.depthFrame != g_rtFrame) {
-        rt.depthFrame = g_rtFrame;
-        const GLboolean scis = glIsEnabled(GL_SCISSOR_TEST);
-        if (scis) glDisable(GL_SCISSOR_TEST);
-        const int maskWas = g_gl.depthMask;
-        if (!maskWas) glDepthMask(GL_TRUE);
-        glClearDepthf(1.0f);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        if (!maskWas) glDepthMask(GL_FALSE);
-        if (scis) glEnable(GL_SCISSOR_TEST);
-    }
+    //
+    //  Owed rather than done here (g_rtDepthPending): RanGLR_Clear folds it into
+    //  the engine's own clear, drawInternal does it before the first draw that
+    //  uses depth, and a target left without either never pays for it.
+    g_rtCur = &rt;
+    g_rtDepthPending = (rt.depthFrame != g_rtFrame);
+    if (g_rtDepthPending && g_noRtDepthFix) rtClearDepthNow();
 
     g_rtActive = true;
     g_rtFbo = rt.fbo;
     g_rtW = w; g_rtH = h;
     glViewport(0, 0, w, h);
+}
+
+//  Diagnostic: a 64-bit FNV-1a of a render target's pixels, 0 when it is not
+//  one ("shadowcheck"). Reads back from the GPU: measurement only.
+extern "C" unsigned long long RanGLR_TargetHash(unsigned tex) {
+    std::map<GLuint, RanRT>::iterator a = g_rts.find(tex);
+    if (a == g_rts.end() || !a->second.fbo || a->second.w <= 0 || a->second.h <= 0) return 0;
+    std::vector<unsigned char> px((size_t)a->second.w * a->second.h * 4);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, a->second.fbo);
+    glReadPixels(0, 0, a->second.w, a->second.h, GL_RGBA, GL_UNSIGNED_BYTE, &px[0]);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_rtActive ? g_rtFbo : baseFramebuffer());
+    unsigned long long h = 1469598103934665603ull;
+    for (size_t i = 0; i < px.size(); ++i) { h ^= px[i]; h *= 1099511628211ull; }
+    return h ? h : 1;
+}
+
+//  Diagnostic: compare two render targets pixel by pixel (both the same size).
+//  Returns the number of pixels that differ and the largest channel
+//  difference; -1 when either is not a render target. Reads back from the GPU:
+//  measurement only ("multitexcheck").
+extern "C" int RanGLR_DiffTargets(unsigned texA, unsigned texB, int *maxDiff) {
+    if (maxDiff) *maxDiff = 0;
+    std::map<GLuint, RanRT>::iterator a = g_rts.find(texA), b = g_rts.find(texB);
+    if (a == g_rts.end() || b == g_rts.end() || !a->second.fbo || !b->second.fbo) return -1;
+    const int w = a->second.w, h = a->second.h;
+    if (w != b->second.w || h != b->second.h || w <= 0 || h <= 0) return -1;
+    std::vector<unsigned char> pa((size_t)w * h * 4), pb((size_t)w * h * 4);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, a->second.fbo);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, &pa[0]);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, b->second.fbo);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, &pb[0]);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_rtActive ? g_rtFbo : baseFramebuffer());
+    int n = 0, mx = 0;
+    for (size_t i = 0; i < pa.size(); i += 4) {
+        int d = 0;
+        for (int k = 0; k < 4; ++k) { const int e = abs((int)pa[i + k] - (int)pb[i + k]); if (e > d) d = e; }
+        if (d) { ++n; if (d > mx) mx = d; }
+    }
+    if (maxDiff) *maxDiff = mx;
+    return n;
 }
 
 //  Diagnostic: write whatever is bound for drawing right now - a render target
@@ -2290,14 +2433,49 @@ extern "C" int RanGLR_FrameDrawCount(void) { return g_frameDraw; }
 static void drainDeadTextures(void);
 extern "C" void RanGLR_FrameEnd(void) { g_frameClearedColor = false; ++g_rtFrame; drainDeadTextures(); }
 
+//  "clearlog": every distinct clear (innermost frame section, flags, render
+//  target or not, target size) once with a backtrace, then counts per 300
+//  frames from RanGLR_LogStats. On the iPhone a glClear costs ~115 us of the
+//  GL thread and the frame made 98 of them.
+std::map<std::string, unsigned long> g_clearKinds;
+static void noteClear(DWORD flags) {
+    const char *sec = (g_sectionTop > 0) ? g_sectionStack[(g_sectionTop < 16 ? g_sectionTop : 16) - 1] : NULL;
+    char key[160];
+    snprintf(key, sizeof(key), "%s flags=%lu rt=%d %dx%d", sec ? sec : "-", (unsigned long)flags,
+             g_rtActive ? 1 : 0, curWidth(), curHeight());
+    unsigned long &n = g_clearKinds[key];
+    if (n++ == 0 && g_clearKinds.size() < 64) {
+        char bt[1500];
+        RanDiag_Backtrace(bt, sizeof(bt));
+        LOGI("clearlog new: %s | %s", key, bt);
+    }
+}
+
 extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil) {
     if (!g_inited) return;
+    if (g_clearLog) noteClear(flags);
     //  The client clears the frame once at the top of the scene, which is the
     //  only frame boundary visible from this layer.
     if (!g_rtActive && (flags & D3DCLEAR_TARGET)) {
         if (g_drawLog > 0) --g_drawLog;
         g_frameDraw = 0;
         g_frameClearedColor = true;
+    }
+    //  A render target that still owes its per-frame depth clear: one clear
+    //  for both, at the start of the pass. Not when the clear is scissored to
+    //  a rectangle - the owed one covers the whole target.
+    bool foldDepth = false;
+    if (g_rtActive && g_rtDepthPending) {
+        if (flags & D3DCLEAR_ZBUFFER) {
+            g_rtDepthPending = false;                   //  the client clears it itself
+            if (g_rtCur) g_rtCur->depthFrame = g_rtFrame;
+        } else if (glIsEnabled(GL_SCISSOR_TEST)) {
+            rtClearDepthNow();
+        } else {
+            foldDepth = true;
+            g_rtDepthPending = false;
+            if (g_rtCur) g_rtCur->depthFrame = g_rtFrame;
+        }
     }
     GLbitfield mask = 0;
     if (flags & D3DCLEAR_TARGET) {
@@ -2319,7 +2497,14 @@ extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil
         glClearStencil((GLint)stencil);
         mask |= GL_STENCIL_BUFFER_BIT;
     }
+    const int foldMaskWas = g_gl.depthMask;
+    if (foldDepth) {
+        glClearDepthf(1.0f);
+        if (!foldMaskWas) glDepthMask(GL_TRUE);
+        mask |= GL_DEPTH_BUFFER_BIT;
+    }
     if (mask) glClear(mask);
+    if (foldDepth && !foldMaskWas) glDepthMask(GL_FALSE);
 }
 
 extern "C" void RanGLR_SetViewport(int x, int y, int w, int h) {
@@ -2348,6 +2533,7 @@ extern "C" void RanGLR_InvalidateStateCache(void) {
     //  forget too: they are two halves of one piece of state, and leaving this
     //  one set is what let a draw skip its glUseProgram entirely.
     g_variantKey = 0xFFFFFFFFu;
+    g_curVariant = NULL;
     glActiveTexture(GL_TEXTURE0);
 }
 
@@ -2524,9 +2710,101 @@ extern "C" void RanGLR_LogStageCombos(void) {
     g_stageComboOverflow = 0;
 }
 
+//  Would this upload have gone out? The same test as uniformChanged, without
+//  recording anything.
+static bool wouldSend(GLint loc, const float *values, int count) {
+    if (loc < 0) return false;
+    if ((int)g_uniformCache.size() <= loc) return true;
+    const UniformSlot &slot = g_uniformCache[loc];
+    return !(slot.count == count && memcmp(slot.values, values, sizeof(float) * count) == 0);
+}
+static bool wouldSendI(GLint loc, GLint v) { const float f = (float)v; return wouldSend(loc, &f, 1); }
+static bool wouldSendF(GLint loc, float v) { return wouldSend(loc, &v, 1); }
+
+//  Every upload the stable block guards, asked of the cache. See g_stableCheck.
+static unsigned long g_stableMisBy[64];
+static inline int W(int id, bool b) { if (b) ++g_stableMisBy[id]; return b ? 1 : 0; }
+static int stableBlockWouldSend() {
+    int n = 0;
+    if (g_fsProbe & 1) {
+        n += W(1, wouldSendI(uColorOp, 4)) + W(2, wouldSendI(uColorArg1, 2)) + W(3, wouldSendI(uColorArg2, 0));
+        n += W(4, wouldSendI(uAlphaOp, 4)) + W(5, wouldSendI(uAlphaArg1, 2)) + W(6, wouldSendI(uAlphaArg2, 0));
+    } else if (g_stageId == 0) {
+        n += W(7, wouldSendI(uColorOp, (GLint)g_colorOp)) + W(8, wouldSendI(uColorArg1, (GLint)g_colorArg1)) +
+             W(9, wouldSendI(uColorArg2, (GLint)g_colorArg2));
+        n += W(10, wouldSendI(uAlphaOp, (GLint)g_alphaOp)) + W(11, wouldSendI(uAlphaArg1, (GLint)g_alphaArg1)) +
+             W(12, wouldSendI(uAlphaArg2, (GLint)g_alphaArg2));
+    }
+    n += W(13, wouldSend(uTexFactor, g_texFactor, 4));
+    n += W(14, wouldSendI(uStage1, (g_fsProbe & 2) ? 0 : g_stage1Mode));
+    if (g_stage1Mode || g_texGen0) n += W(15, wouldSend(uView, g_viewMatrix, 16));
+    n += W(16, wouldSendI(uTexGen0, g_texGen0));
+    if (g_texGen0) n += W(17, wouldSend(uTexMat0, g_texMat0, 16));
+    n += W(18, wouldSendI(uLightCount, g_lightCount));
+    n += W(19, wouldSend(uCameraPos, g_cameraPos, 3)) + W(20, wouldSend(uCameraPosF, g_cameraPos, 3));
+    n += W(21, wouldSendI(uSpecularOn, g_specularOn));
+    n += W(22, wouldSendI(uPlain, g_plainFS ? 1 : 0));
+    if (g_specularOn) n += W(23, wouldSend(uMatSpecular, g_matSpecular, 3)) + W(24, wouldSendF(uMatPower, g_matPower));
+    n += W(25, wouldSend(uGlobalAmbient, g_globalAmbient, 3)) + W(26, wouldSend(uMatDiffuse, g_matDiffuse, 3));
+    n += W(27, wouldSend(uMatAmbient, g_matAmbient, 3)) + W(28, wouldSend(uMatEmissive, g_matEmissive, 3));
+    n += W(29, wouldSendF(uMatAlpha, g_matAlpha));
+    n += W(30, wouldSendI(uFogMode, g_fogMode)) + W(31, wouldSend(uFogColor, g_fogColor, 3));
+    n += W(32, wouldSendF(uFogStart, g_fogStart)) + W(33, wouldSendF(uFogEnd, g_fogEnd)) + W(34, wouldSendF(uFogDensity, g_fogDensity));
+    n += W(36, wouldSendI(uAlphaTest, ((g_fsProbe & 8) == 0 && g_dsATest) ? 1 : 0));
+    n += W(35, wouldSendF(uAlphaRef, (float)g_dsARef / 255.0f));
+    return n;
+}
+
 //  The state is all in globals already, so it simply moved.
 void applyProgramUniforms() {
-    if (g_fsProbe & 1) {
+    //  The inputs of every uniform guarded by !stableSame below, in a fixed
+    //  order; conditional ones only when they are sent, so equal snapshots
+    //  mean every one of those uploads would have been skipped by its cache.
+    float snap[96];
+    int sn = 0;
+    {
+        snap[sn++] = (float)g_fsProbe;
+        snap[sn++] = (float)g_stageId;
+        snap[sn++] = (g_skipSmallUni ? 1.0f : 0.0f) + (g_skipMatrixUni ? 2.0f : 0.0f);
+        if (!(g_fsProbe & 1) && g_stageId == 0) {
+            snap[sn++] = (float)g_colorOp; snap[sn++] = (float)g_colorArg1; snap[sn++] = (float)g_colorArg2;
+            snap[sn++] = (float)g_alphaOp; snap[sn++] = (float)g_alphaArg1; snap[sn++] = (float)g_alphaArg2;
+        }
+        memcpy(snap + sn, g_texFactor, sizeof(float) * 4); sn += 4;
+        snap[sn++] = (float)g_stage1Mode;
+        snap[sn++] = (float)g_texGen0;
+        if (g_stage1Mode || g_texGen0) { memcpy(snap + sn, g_viewMatrix, sizeof(float) * 16); sn += 16; }
+        if (g_texGen0) { memcpy(snap + sn, g_texMat0, sizeof(float) * 16); sn += 16; }
+        snap[sn++] = (float)g_lightCount;
+        memcpy(snap + sn, g_cameraPos, sizeof(float) * 3); sn += 3;
+        snap[sn++] = (float)g_specularOn;
+        snap[sn++] = g_plainFS ? 1.0f : 0.0f;
+        if (g_specularOn) { memcpy(snap + sn, g_matSpecular, sizeof(float) * 3); sn += 3; snap[sn++] = g_matPower; }
+        memcpy(snap + sn, g_globalAmbient, sizeof(float) * 3); sn += 3;
+        memcpy(snap + sn, g_matDiffuse, sizeof(float) * 3); sn += 3;
+        memcpy(snap + sn, g_matAmbient, sizeof(float) * 3); sn += 3;
+        memcpy(snap + sn, g_matEmissive, sizeof(float) * 3); sn += 3;
+        snap[sn++] = g_matAlpha;
+        snap[sn++] = (float)g_fogMode;
+        memcpy(snap + sn, g_fogColor, sizeof(float) * 3); sn += 3;
+        snap[sn++] = g_fogStart; snap[sn++] = g_fogEnd; snap[sn++] = g_fogDensity;
+        snap[sn++] = ((g_fsProbe & 8) == 0 && g_dsATest) ? 1.0f : 0.0f;
+        snap[sn++] = (float)g_dsARef;
+    }
+    const bool stableSame = !g_noStableSkip && g_stableSnap.n == sn &&
+                            memcmp(g_stableSnap.v, snap, sizeof(float) * sn) == 0;
+    if (stableSame) {
+        ++g_stableSkips;
+        if (g_stableCheck) g_stableMismatch += (unsigned long)stableBlockWouldSend();
+    } else {
+        g_stableSnap.n = sn;
+        memcpy(g_stableSnap.v, snap, sizeof(float) * sn);
+        ++g_stableSends;
+    }
+
+    if (stableSame) {
+        //  nothing: the stage uniforms are what this program already holds
+    } else if (g_fsProbe & 1) {
         //  MODULATE(TEXTURE, DIFFUSE) for colour and alpha both: the cheapest
         //  path through argValue and the two op ladders.
         setUniform1i(uColorOp, 4); setUniform1i(uColorArg1, 2); setUniform1i(uColorArg2, 0);
@@ -2552,11 +2830,13 @@ void applyProgramUniforms() {
         RanGLR_NoteStageCombo((unsigned)g_colorOp, (unsigned)g_colorArg1, (unsigned)g_colorArg2,
                               (unsigned)g_alphaOp, (unsigned)g_alphaArg1, (unsigned)g_alphaArg2);
     }
-    setUniformVec4(uTexFactor, g_texFactor);
-    setUniform1i(uStage1, (g_fsProbe & 2) ? 0 : g_stage1Mode);
-    if (g_stage1Mode || g_texGen0) setUniformMatrix(uView, g_viewMatrix, 1);
-    setUniform1i(uTexGen0, g_texGen0);
-    if (g_texGen0) setUniformMatrix(uTexMat0, g_texMat0, 1);
+    if (!stableSame) {
+        setUniformVec4(uTexFactor, g_texFactor);
+        setUniform1i(uStage1, (g_fsProbe & 2) ? 0 : g_stage1Mode);
+        if (g_stage1Mode || g_texGen0) setUniformMatrix(uView, g_viewMatrix, 1);
+        setUniform1i(uTexGen0, g_texGen0);
+        if (g_texGen0) setUniformMatrix(uTexMat0, g_texMat0, 1);
+    }
 
     setUniform1i(uVertexBlend, g_vertexBlend);
     //  "palettetrim": send only the slots this draw can index. The engine fills
@@ -2580,11 +2860,13 @@ void applyProgramUniforms() {
     setUniformMatrix(uViewProj, g_viewProj, 1);
 
     setUniform1i(uLighting, g_lightingOn);
-    setUniform1i(uLightCount, g_lightCount);
     setUniformMatrix(uWorld, g_world, 1);
-    setUniform3fv(uCameraPos, g_cameraPos);
-    setUniform3fv(uCameraPosF, g_cameraPos);
-    setUniform1i(uSpecularOn, g_specularOn);
+    if (!stableSame) {
+        setUniform1i(uLightCount, g_lightCount);
+        setUniform3fv(uCameraPos, g_cameraPos);
+        setUniform3fv(uCameraPosF, g_cameraPos);
+        setUniform1i(uSpecularOn, g_specularOn);
+    }
 
     //  Unit 3: unit 0 is the stage-0 texture, 1 the stage-1 texture and 2 the
     //  cube, so the ramp goes above them and stays bound.
@@ -2602,7 +2884,7 @@ void applyProgramUniforms() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glActiveTexture(GL_TEXTURE0);
     }
-    setUniform1i(uPlain, g_plainFS ? 1 : 0);
+    if (!stableSame) setUniform1i(uPlain, g_plainFS ? 1 : 0);
     if (g_fsProbe & 4) setUniform1i(uGammaOn, 0);
     setUniform1i(uGammaOn, (g_gammaOn && g_gammaLut) ? 1 : 0);
     if (g_gammaOn && g_gammaLut) {
@@ -2612,15 +2894,19 @@ void applyProgramUniforms() {
         if (uGammaLut >= 0) { glUniform1i(uGammaLut, 3); countUni(kUniUncached, 4); }
     }
     if (g_specularOn) {
-        setUniform3fv(uMatSpecular, g_matSpecular);
-        setUniform1f(uMatPower, g_matPower);
+        if (!stableSame) {
+            setUniform3fv(uMatSpecular, g_matSpecular);
+            setUniform1f(uMatPower, g_matPower);
+        }
         if (uLightSpecular >= 0) { glUniform3fv(uLightSpecular, 8, g_lightSpecular); countUni(kUniUncached, 96); }
     }
-    setUniform3fv(uGlobalAmbient, g_globalAmbient);
-    setUniform3fv(uMatDiffuse, g_matDiffuse);
-    setUniform3fv(uMatAmbient, g_matAmbient);
-    setUniform3fv(uMatEmissive, g_matEmissive);
-    setUniform1f(uMatAlpha, g_matAlpha);
+    if (!stableSame) {
+        setUniform3fv(uGlobalAmbient, g_globalAmbient);
+        setUniform3fv(uMatDiffuse, g_matDiffuse);
+        setUniform3fv(uMatAmbient, g_matAmbient);
+        setUniform3fv(uMatEmissive, g_matEmissive);
+        setUniform1f(uMatAlpha, g_matAlpha);
+    }
     if (g_lightCount > 0 && !g_skipLightBlock) {
         //  Compared as one block: the light set changes far less often than it
         //  is sent, and six array uploads a draw is most of the uniform traffic.
@@ -2652,14 +2938,16 @@ void applyProgramUniforms() {
         }
     }
 
-    setUniform1i(uFogMode, g_fogMode);
-    setUniform3fv(uFogColor, g_fogColor);
-    setUniform1f(uFogStart, g_fogStart);
-    setUniform1f(uFogEnd, g_fogEnd);
-    setUniform1f(uFogDensity, g_fogDensity);
+    if (!stableSame) {
+        setUniform1i(uFogMode, g_fogMode);
+        setUniform3fv(uFogColor, g_fogColor);
+        setUniform1f(uFogStart, g_fogStart);
+        setUniform1f(uFogEnd, g_fogEnd);
+        setUniform1f(uFogDensity, g_fogDensity);
 
-    setUniform1i(uAlphaTest, ((g_fsProbe & 8) == 0 && g_dsATest) ? 1 : 0);
-    setUniform1f(uAlphaRef, (float)g_dsARef / 255.0f);
+        setUniform1i(uAlphaTest, ((g_fsProbe & 8) == 0 && g_dsATest) ? 1 : 0);
+        setUniform1f(uAlphaRef, (float)g_dsARef / 255.0f);
+    }
 }
 
 extern "C" void RanGLR_ApplyState(const DWORD *rs) {
@@ -2773,9 +3061,59 @@ struct RingBuffer {
     //  True for the "streamsub" ring: always the glBufferSubData path.
     bool noPersistent;
 
+#if defined(__APPLE__)
+    //  Apple: no persistent mapping, so the store used to be re-specified
+    //  (orphaned) every time the cursor wrapped - measured on the iPhone at
+    //  ~4-5 ms of the GL thread each, a new 8 MB allocation and the old one
+    //  freed behind the GPU (gldDestroyMemoryPlugin). Instead the store is
+    //  allocated once and used in two halves, each closed with a fence when the
+    //  cursor leaves it; entering a half waits on the fence it was left with,
+    //  half a lap ago, which has long since signalled. The writes themselves
+    //  are unsynchronised maps, so nothing waits and nothing is allocated.
+    //  "ringorphan" puts the old orphaning back, to compare.
+    GLsync halfFence[2];
+    int curHalfP, curHalfGL;            //  producer's and GL thread's view
+    void enterHalf(int h) {             //  on the thread that holds GL
+        if (halfFence[curHalfGL]) glDeleteSync(halfFence[curHalfGL]);
+        halfFence[curHalfGL] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (halfFence[h]) {
+            glClientWaitSync(halfFence[h], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
+            glDeleteSync(halfFence[h]);
+            halfFence[h] = 0;
+        }
+        curHalfGL = h;
+    }
+    void resetHalves() {                //  on the thread that holds GL
+        for (int i = 0; i < 2; ++i) if (halfFence[i]) { glDeleteSync(halfFence[i]); halfFence[i] = 0; }
+        curHalfGL = 0;
+    }
+    //  Where a write of `size` goes, advancing the cursor; *enter is the half
+    //  being entered, or -1. -1 back when it cannot fit in half the store.
+    GLintptr placeHalved(GLsizei size, int *enter) {
+        const GLsizei half = capacity / 2;
+        *enter = -1;
+        if (size > half) return -1;
+        GLsizei at = cursor;
+        int h = at < half ? 0 : 1;
+        if (at + size > (h == 0 ? half : capacity)) { h ^= 1; at = h ? half : 0; }
+        if (h != curHalfP) *enter = h;
+        curHalfP = h;
+        cursor = (at + size + 15) & ~15;
+        return at;
+    }
+#endif
+
     RingBuffer(GLenum t, bool noPersist = false)
         : buffer(0), target(t), capacity(0), cursor(0), mapped(NULL), lapFence(0),
-          noPersistent(noPersist) {}
+          noPersistent(noPersist)
+#if defined(__APPLE__)
+          , curHalfP(0), curHalfGL(0)
+#endif
+    {
+#if defined(__APPLE__)
+        halfFence[0] = halfFence[1] = 0;
+#endif
+    }
 
     //  Immutable storage, mapped once. Only ever called for a fresh name.
     bool createPersistent(GLsizei bytes) {
@@ -2805,8 +3143,105 @@ struct RingBuffer {
         lapFence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     }
 
+    //  The same write with the GL thread on (gl_thread.h). The cursor, the
+    //  capacity and every decision about wrapping stay here, so the offset is
+    //  known at once; the bytes travel in the queue and the copy into the
+    //  buffer - and the wait at a wrap - happen on the GL thread, in order with
+    //  the draws around them.
+    GLintptr writeQueued(const void *data, GLsizei size) {
+        if (!buffer) glGenBuffers(1, &buffer);
+        if (target == GL_ARRAY_BUFFER) bindArray(buffer); else bindElements(buffer);
+
+        if (g_havePersistentMap && !noPersistent) {
+            if (!mapped) {
+                //  Creating immutable storage answers with a pointer: do it
+                //  there, once, and wait.
+                RingBuffer *self = this;
+                const GLsizei want = size * 4 < (16 << 20) ? (16 << 20) : size * 4;
+                RanGLT_RunSync([&]() {
+                    if (!self->createPersistent(want)) {
+                        glDeleteBuffers(1, &self->buffer);
+                        glGenBuffers(1, &self->buffer);
+                        if (self->target == GL_ARRAY_BUFFER) { g_gl.arrayBuffer = 0; bindArray(self->buffer); }
+                        else                                 { g_gl.elementBuffer = 0; bindElements(self->buffer); }
+                        g_havePersistentMap = false;
+                        LOGE("persistent mapping failed; streaming through glBufferSubData");
+                    }
+                });
+            }
+            if (mapped) {
+                if (size > capacity) return 0;
+                const bool wrap = cursor + size > capacity;
+                if (wrap) cursor = 0;
+                const GLintptr offset = cursor;
+                RingBuffer *self = this;
+                RanGLT_PostData(data, (unsigned)size, [self, offset, size, wrap](const void *p) {
+                    if (wrap) { self->markLap(); self->waitForLap(); }
+                    memcpy(self->mapped + offset, p, (size_t)size);
+                });
+                cursor += size;
+                cursor = (cursor + 15) & ~15;
+                return offset;
+            }
+        }
+
+#if defined(__APPLE__)
+        if (!g_ringOrphan) {
+            if (capacity == 0 || size > capacity / 2) {
+                capacity = size * 4;
+                if (capacity < (16 << 20)) capacity = 16 << 20;
+                glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+                ++g_callsBuffer;
+                cursor = 0; curHalfP = 0;
+                RingBuffer *self = this;
+                RanGLT_Post([self]() { self->resetHalves(); });
+            }
+            int enter = -1;
+            const GLintptr offset = placeHalved(size, &enter);
+            if (enter >= 0) { RingBuffer *self = this; RanGLT_Post([self, enter]() { self->enterHalf(enter); }); }
+            const GLenum tgt = target;
+            RanGLT_PostData(data, (unsigned)size, [tgt, offset, size](const void *p) {
+                void *dst = ::glMapBufferRange(tgt, offset, size, GL_MAP_WRITE_BIT |
+                                               GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+                if (dst) { memcpy(dst, p, (size_t)size); ::glUnmapBuffer(tgt); }
+                else ::glBufferSubData(tgt, offset, size, p);
+            });
+            ++g_callsBuffer;
+            return offset;
+        }
+#endif
+        if (size > capacity || capacity == 0) {
+            capacity = size * 4;
+            if (capacity < (8 << 20)) capacity = 8 << 20;
+            glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+            ++g_callsBuffer;
+            cursor = 0;
+        } else if (cursor + size > capacity) {
+            glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+            ++g_callsBuffer;
+            cursor = 0;
+        }
+        const GLintptr offset = cursor;
+        const GLenum tgt = target;
+        RanGLT_PostData(data, (unsigned)size, [tgt, offset, size](const void *p) {
+            bool wrote = false;
+#if defined(__APPLE__)
+            //  Unsynchronised, for the reason given in write() below.
+            void *dst = ::glMapBufferRange(tgt, offset, size, GL_MAP_WRITE_BIT |
+                                           GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+            if (dst) { memcpy(dst, p, (size_t)size); ::glUnmapBuffer(tgt); wrote = true; }
+#endif
+            if (!wrote) ::glBufferSubData(tgt, offset, size, p);
+        });
+        ++g_callsBuffer;
+        cursor += size;
+        cursor = (cursor + 15) & ~15;
+        return offset;
+    }
+
     //  Returns the byte offset the data was written at.
     GLintptr write(const void *data, GLsizei size) {
+        if (g_ranGLTOn) return writeQueued(data, size);
         if (!buffer) glGenBuffers(1, &buffer);
         if (target == GL_ARRAY_BUFFER) bindArray(buffer); else bindElements(buffer);
 
@@ -2858,6 +3293,27 @@ struct RingBuffer {
         //  spare. Generous, because every wrap costs an orphan and a fresh
         //  allocation: a frame streams a few hundred kilobytes, so eight
         //  megabytes is many frames of headroom.
+#if defined(__APPLE__)
+        if (!g_ringOrphan) {
+            if (capacity == 0 || size > capacity / 2) {
+                capacity = size * 4;
+                if (capacity < (16 << 20)) capacity = 16 << 20;
+                glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+                ++g_callsBuffer;
+                cursor = 0; curHalfP = 0;
+                resetHalves();
+            }
+            int enter = -1;
+            const GLintptr offset = placeHalved(size, &enter);
+            if (enter >= 0) enterHalf(enter);
+            void *dst = glMapBufferRange(target, offset, size, GL_MAP_WRITE_BIT |
+                                         GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+            if (dst) { memcpy(dst, data, (size_t)size); glUnmapBuffer(target); }
+            else glBufferSubData(target, offset, size, data);
+            ++g_callsBuffer;
+            return offset;
+        }
+#endif
         if (size > capacity || capacity == 0) {
             capacity = size * 4;
             if (capacity < (8 << 20)) capacity = 8 << 20;
@@ -2926,21 +3382,28 @@ struct VaoKey {
     UINT     stride;
     GLsizei  base;
 
-    bool operator<(const VaoKey &o) const {
-        if (vb != o.vb) return vb < o.vb;
-        if (ib != o.ib) return ib < o.ib;
-        if (fvf != o.fvf) return fvf < o.fvf;
-        if (stride != o.stride) return stride < o.stride;
-        return base < o.base;
+    bool operator==(const VaoKey &o) const {
+        return vb == o.vb && ib == o.ib && fvf == o.fvf && stride == o.stride && base == o.base;
     }
 };
-std::map<VaoKey, GLuint> g_vaoCache;
+//  Hashed, not ordered: looked up on every cached draw, and walking a tree of
+//  a few hundred nodes was most of drawInternal's own time (LDPlayer crowd).
+struct VaoKeyHash {
+    size_t operator()(const VaoKey &k) const {
+        unsigned long long h = 1469598103934665603ull;
+        const unsigned v[5] = { k.vb, k.ib, (unsigned)k.fvf, (unsigned)k.stride, (unsigned)k.base };
+        for (int i = 0; i < 5; ++i) { h ^= v[i]; h *= 1099511628211ull; }
+        return (size_t)(h ^ (h >> 29));
+    }
+};
+typedef std::unordered_map<VaoKey, GLuint, VaoKeyHash> VaoCache;
+VaoCache g_vaoCache;
 unsigned long g_vaoCreated = 0, g_vaoHits = 0;
 
 //  A buffer that goes away takes every layout described against it with it -
 //  names are recycled, and a stale VAO would point at whatever took the name.
 void forgetVaosForBuffer(unsigned buffer) {
-    for (std::map<VaoKey, GLuint>::iterator it = g_vaoCache.begin(); it != g_vaoCache.end(); ) {
+    for (VaoCache::iterator it = g_vaoCache.begin(); it != g_vaoCache.end(); ) {
         if (it->first.vb == buffer || it->first.ib == buffer) {
             GLuint v = it->second;
             glDeleteVertexArrays(1, &v);
@@ -3030,6 +3493,8 @@ extern "C" void RanGLR_TakeProgramSwitches(unsigned long *useProgram, unsigned l
     g_progSwitches = g_variantChanges = 0;
 }
 
+extern "C" void RanGLR_ReportBufferKinds(unsigned frames);
+
 //  Logs which variant key bits flip per frame and the uniform uploads made on
 //  draws that switched program, then resets. Measurement only.
 extern "C" void RanGLR_ReportVariantFlips(unsigned frames) {
@@ -3048,6 +3513,7 @@ extern "C" void RanGLR_ReportVariantFlips(unsigned frames) {
     g_uniSwitchCalls = g_uniSwitchBytes = 0;
     RanGLR_LogStageCombos();
     RanGLR_LogSectionDraws(frames);
+    RanGLR_ReportBufferKinds(frames);
 }
 
 extern "C" void RanGLR_TakeUpStream(unsigned long *calls, unsigned long *bytes) {
@@ -3129,6 +3595,72 @@ inline void attrOff(GLuint a, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
     f.size = -1;
 }
 
+//  "drawgroups": could the character draws be drawn together? Per frame, the
+//  draws inside part:skinned and part:chareff are keyed by what a combined
+//  draw would have to share - buffers, index range, texture, shader variant,
+//  blend/alpha/cull state - and again with the material and the light block
+//  added. Logged per 300 frames: draws, distinct keys, and the runs of
+//  consecutive draws with the same key (what batching without reordering
+//  would get). Measurement only.
+struct DrawGroupStat { unsigned long draws, keys, keysMat, keysMatLight, runs; };
+DrawGroupStat g_dgStat[2];
+std::unordered_map<unsigned long long, unsigned> g_dgKeys[2], g_dgKeysMat[2], g_dgKeysML[2];
+unsigned long long g_dgLast[2] = { 0, 0 };
+unsigned g_dgFrame = 0xFFFFFFFFu;
+unsigned long g_dgFrames = 0;
+extern "C" unsigned RanGL_FrameIndex(void);
+
+static inline unsigned long long dgMix(unsigned long long h, unsigned long long v) {
+    h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2); return h;
+}
+static unsigned long long dgHashFloats(unsigned long long h, const float *f, int n) {
+    for (int i = 0; i < n; ++i) { unsigned u; memcpy(&u, &f[i], 4); h = dgMix(h, u); }
+    return h;
+}
+static void noteDrawGroup(unsigned vb, unsigned ib, unsigned ibOff, unsigned icount, unsigned vbOff, unsigned tex) {
+    const char *sec = (g_sectionTop > 0 && g_sectionTop <= 16) ? g_sectionStack[g_sectionTop - 1] : NULL;
+    if (!sec) return;
+    const int k = !strcmp(sec, "part:skinned") ? 0 : (!strcmp(sec, "part:chareff") ? 1 : -1);
+    if (k < 0) return;
+    const unsigned f = RanGL_FrameIndex();
+    if (f != g_dgFrame) {
+        g_dgFrame = f; ++g_dgFrames;
+        for (int j = 0; j < 2; ++j) {
+            g_dgStat[j].keys += g_dgKeys[j].size(); g_dgStat[j].keysMat += g_dgKeysMat[j].size();
+            g_dgStat[j].keysMatLight += g_dgKeysML[j].size();
+            g_dgKeys[j].clear(); g_dgKeysMat[j].clear(); g_dgKeysML[j].clear(); g_dgLast[j] = 0;
+        }
+    }
+    unsigned long long h = 1469598103934665603ull;
+    h = dgMix(h, vb); h = dgMix(h, ib); h = dgMix(h, ibOff); h = dgMix(h, icount); h = dgMix(h, vbOff);
+    h = dgMix(h, tex); h = dgMix(h, g_variantKey);
+    h = dgMix(h, g_dsBlend); h = dgMix(h, g_dsSrc); h = dgMix(h, g_dsDst); h = dgMix(h, g_dsATest);
+    h = dgMix(h, g_dsARef); h = dgMix(h, g_cullWanted ? 1 : 0); h = dgMix(h, g_dsZW);
+    unsigned long long hm = dgHashFloats(h, g_matDiffuse, 3);
+    hm = dgHashFloats(hm, g_matAmbient, 3); hm = dgHashFloats(hm, g_matEmissive, 3);
+    hm = dgHashFloats(hm, &g_matAlpha, 1); hm = dgHashFloats(hm, g_texFactor, 4);
+    hm = dgMix(hm, (unsigned)g_colorOp); hm = dgMix(hm, (unsigned)g_alphaOp);
+    unsigned long long hl = dgMix(hm, (unsigned)g_lightCount);
+    hl = dgHashFloats(hl, g_lightDiffuse, 3 * g_lightCount); hl = dgHashFloats(hl, g_lightPos, 4 * g_lightCount);
+    hl = dgHashFloats(hl, g_lightDir, 3 * g_lightCount); hl = dgHashFloats(hl, g_lightAmbient, 3 * g_lightCount);
+    ++g_dgStat[k].draws;
+    ++g_dgKeys[k][h]; ++g_dgKeysMat[k][hm]; ++g_dgKeysML[k][hl];
+    if (h != g_dgLast[k]) ++g_dgStat[k].runs;
+    g_dgLast[k] = h;
+}
+static void logDrawGroups() {
+    if (!g_drawGroups || !g_dgFrames) return;
+    const char *nm[2] = { "part:skinned", "part:chareff" };
+    for (int j = 0; j < 2; ++j) {
+        const double fr = (double)g_dgFrames;
+        LOGI("drawgroups %s: %.0f draws/frame, %.0f keys (state), %.0f with material, %.0f with lights, %.0f runs",
+             nm[j], g_dgStat[j].draws / fr, g_dgStat[j].keys / fr, g_dgStat[j].keysMat / fr,
+             g_dgStat[j].keysMatLight / fr, g_dgStat[j].runs / fr);
+        memset(&g_dgStat[j], 0, sizeof(g_dgStat[j]));
+    }
+    g_dgFrames = 0;
+}
+
 static void drawInternal(DWORD primType, UINT primCount, const void *verts,
                          UINT stride, DWORD fvf, unsigned glTexture,
                          const float *mvp, const void *indices, UINT indexBits,
@@ -3138,7 +3670,12 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     if (!g_inited) return;
     if (!glVB && !verts) return;
 #ifdef RAN_TIME_DRAWS
-    const double drawStart = nowSeconds();
+    //  One draw in 16 is timed and counted 16 times: two clock reads on every
+    //  draw were 1.5% of the game thread in the LDPlayer crowd, for a figure
+    //  that is an average anyway.
+    static unsigned s_timeTick = 0;
+    const bool timeThis = (++s_timeTick & 15) == 0;
+    const double drawStart = timeThis ? nowSeconds() : 0.0;
 #endif
 
     // How many elements the primitive type implies, used for both the
@@ -3183,7 +3720,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     //  the client-side cost of deciding to draw.
     if (g_nullDraw || g_sectionSkipDepth > 0) {
 #ifdef RAN_TIME_DRAWS
-        { const double dt = nowSeconds() - drawStart;
+        if (timeThis) { const double dt = (nowSeconds() - drawStart) * 16.0;
           g_drawSeconds += dt; g_drawSecondsTotal += dt; }
 #endif
         return;
@@ -3467,12 +4004,19 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     //  either, and in a crowd 11,000 of its 16,000 GL calls a frame were
     //  attribute setup - each costume part has its own buffer, so each draw
     //  re-specified all seven attributes. Switchable to measure it there.
-    const bool kUseVaoCache = g_vaoCacheOn;
+    //
+    //  Only for draws from the start of the buffer. Measured on the iPhone with
+    //  the key including the start offset: ~1,000 new VAOs a frame, a 77% hit
+    //  rate and the whole cache thrown away at 2,048 every couple of seconds -
+    //  the engine's dynamic buffers are appended to, so every draw from one has
+    //  a new offset. A mesh drawn from offset 0 (characters, the world) has
+    //  one layout for as long as its buffer lives, and that is what pays.
+    const bool kUseVaoCache = vaoCacheWanted() && vbByteOffset == 0;
     if (glVB && kUseVaoCache) {
         VaoKey key;
         key.vb = glVB; key.ib = glIB; key.fvf = fvf; key.stride = stride;
         key.base = (GLsizei)vbByteOffset;
-        std::map<VaoKey, GLuint>::iterator it = g_vaoCache.find(key);
+        VaoCache::iterator it = g_vaoCache.find(key);
         if (it != g_vaoCache.end()) {
             bindVAO(it->second);
             needLayout = false;
@@ -3480,8 +4024,8 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
         } else {
             //  A map this large means something is generating layouts rather
             //  than reusing them; start again rather than grow without bound.
-            if (g_vaoCache.size() > 2048) {
-                for (std::map<VaoKey, GLuint>::iterator d = g_vaoCache.begin(); d != g_vaoCache.end(); ++d) {
+            if (g_vaoCache.size() > 8192) {
+                for (VaoCache::iterator d = g_vaoCache.begin(); d != g_vaoCache.end(); ++d) {
                     GLuint v = d->second;
                     glDeleteVertexArrays(1, &v);
                 }
@@ -3601,7 +4145,11 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
                                        g_gl.vertexBase != vbBase || g_gl.vertexBuffer != layoutBuffer);
     if (g_skipAttr) {
         // nothing: the layout stays whatever the last draw left behind
-    } else if (g_haveAttribFormat && !g_noAttribFmt) {
+    } else if (g_haveAttribFormat && !g_noAttribFmt && !(glVB && kUseVaoCache)) {
+        //  (A draw through the layout cache takes the ES 3.0 path below even
+        //  where 3.1 exists: its VAO is described with plain attribute
+        //  pointers, the way it is on the iPhone. Through this branch the new
+        //  VAO never got a format and the characters drew nothing.)
         //  Format first, and only when the shape of a vertex actually changed -
         //  or, with a VAO per FVF, only when that VAO was just made.
         if (fv ? fvCreated : (g_gl.fvf != fvf)) {
@@ -3965,7 +4513,9 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     //  What a pass SUBMITS can be counted anywhere, and for the alpha-blended
     //  effect passes - where the cost is overdraw, not geometry - the triangle
     //  count is the closest proxy there is to how much fill they ask for.
+    if (g_rtDepthPending && g_rtActive && (g_dsZ || g_dsZW)) rtClearDepthNow();
     RanGLR_NoteSectionDraw(vcount, icount ? icount : vcount, g_dsBlend != 0);
+    if (g_drawGroups) noteDrawGroup(glVB, glIB, ibByteOffset, icount, vbByteOffset, glTexture);
 
     if (glIB && indexBits) {
         bindElements(glIB);   // part of the bound VAO's state, and cached with it
@@ -3984,7 +4534,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     }
 
 #ifdef RAN_TIME_DRAWS
-    { const double dt = nowSeconds() - drawStart;
+    if (timeThis) { const double dt = (nowSeconds() - drawStart) * 16.0;
       g_drawSeconds += dt; g_drawSecondsTotal += dt; }
 #endif
 }
@@ -4107,7 +4657,7 @@ void collectGpuSections() {
 
 //  One section at a time: the passes worth measuring do not nest.
 extern "C" void RanGLR_GpuSectionBegin(const char *name) {
-    if (!g_inited || !gpuTimerReady() || g_gpuActive >= 0) return;
+    if (!g_inited || g_ranGLTOn || !gpuTimerReady() || g_gpuActive >= 0) return;
     const int i = gpuSectionIndex(name);
     if (i < 0 || g_gpuSections[i].query) return;      // last one not collected yet
     GLuint q = 0;
@@ -4120,12 +4670,13 @@ extern "C" void RanGLR_GpuSectionBegin(const char *name) {
 
 extern "C" void RanGLR_GpuSectionEnd(void) {
     if (g_gpuActive < 0) return;
+    if (g_ranGLTOn) { g_gpuActive = -1; return; }     //  begun before the switch
     p_glEndQueryEXT(RAN_GL_TIME_ELAPSED_EXT);
     g_gpuActive = -1;
 }
 
 extern "C" void RanGLR_ReportGpuSections(unsigned frames) {
-    if (!g_gpuTimerOn || !frames || !g_gpuSectionCount) return;
+    if (!g_gpuTimerOn || !frames || !g_gpuSectionCount || g_ranGLTOn) return;
     collectGpuSections();
     char line[512] = "FRAME gpu:";
     for (unsigned i = 0; i < g_gpuSectionCount; ++i) {
@@ -4169,6 +4720,11 @@ extern "C" void RanGLR_TakeBufferStats(unsigned long *count, unsigned long *byte
 //
 //  Returns 0 if the ring cannot take it, in which case the caller writes the
 //  client's own buffer as before.
+//  For code that binds GL_ARRAY_BUFFER behind the renderer's back (the touch
+//  HUD) and then streams through the ring: the ring writes into whatever is
+//  bound, trusting the cache, so the cache must not claim a binding it lost.
+extern "C" void RanGLR_ForgetArrayBinding(void) { g_gl.arrayBuffer = 0xFFFFFFFFu; }
+
 extern "C" int RanGLR_StreamVertices(const void *data, unsigned size,
                                      unsigned *outBuffer, unsigned *outOffset) {
     if (!g_inited || !data || !size) return 0;
@@ -4213,6 +4769,22 @@ extern "C" void RanGLR_UpdateBufferRangeUnsync(unsigned buffer, int isIndex, uns
     const double t0 = nowSeconds();
     const GLenum target = isIndex ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     if (isIndex) bindElements(buffer); else bindArray(buffer);
+    if (g_ranGLTOn) {
+        //  The map answers with a pointer, so the whole write goes over.
+        RanGLT_PostData(data, size, [target, offset, size](const void *p) {
+            void *d = ::glMapBufferRange(target, (GLintptr)offset, (GLsizeiptr)size,
+                                         GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT |
+                                         GL_MAP_INVALIDATE_RANGE_BIT);
+            if (d) { memcpy(d, p, size); ::glUnmapBuffer(target); }
+            else ::glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, p);
+        });
+        ++g_callsBuffer;
+        ++g_bufUploads;
+        g_bufUploadBytes += size;
+        { const double dt = nowSeconds() - t0; g_bufUploadSeconds += dt; noteBufKind(2, dt); }
+        if (isIndex) g_gl.elementBuffer = 0xFFFFFFFFu;
+        return;
+    }
     void *dst = glMapBufferRange(target, (GLintptr)offset, (GLsizeiptr)size,
                                  GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT |
                                  GL_MAP_INVALIDATE_RANGE_BIT);
@@ -4508,7 +5080,7 @@ float maxAnisotropySupported() {
 
 //  Levels actually uploaded for a texture, so the sampler knows whether mip
 //  filtering is even possible.
-std::map<GLuint, int> g_texLevels;
+std::unordered_map<GLuint, int> g_texLevels;
 
 //  Which sampler generation each texture was last given. GL keeps these
 //  parameters in the texture object, so a texture that already has the current
@@ -4522,14 +5094,24 @@ struct TexSampler {
     float aniso;
     TexSampler() : minFilter(0), magFilter(0), wrapS(0), wrapT(0), aniso(0.0f) {}
 };
-std::map<GLuint, TexSampler> g_texSampler;
+std::unordered_map<GLuint, TexSampler> g_texSampler;
+//  Bumped whenever an entry above (or a texture's level count) is dropped, so
+//  the "same texture as the last draw" shortcut below never outlives one.
+unsigned g_texSamplerEpoch = 1;
 
-extern "C" void RanGLR_ForgetSamplerState(unsigned tex) { g_texSampler.erase((GLuint)tex); }
+extern "C" void RanGLR_ForgetSamplerState(unsigned tex) { g_texSampler.erase((GLuint)tex); ++g_texSamplerEpoch; }
 
 extern "C" void RanGLR_ApplySampler(unsigned tex) {
     if (!g_inited || !tex) return;
+    //  Consecutive draws very often share a texture (a mesh and its effect
+    //  passes), and then nothing below can differ: two map lookups a draw
+    //  were 2.6% of the game thread in the LDPlayer crowd.
+    static unsigned s_lastTex = 0, s_lastGen = 0, s_lastEpoch = 0;
+    if (tex == s_lastTex && g_samplerGeneration == s_lastGen && g_texSamplerEpoch == s_lastEpoch)
+        return;
+    s_lastTex = tex; s_lastGen = g_samplerGeneration; s_lastEpoch = g_texSamplerEpoch;
 
-    std::map<GLuint, int>::iterator it = g_texLevels.find(tex);
+    std::unordered_map<GLuint, int>::iterator it = g_texLevels.find(tex);
     const bool hasMips = it != g_texLevels.end() && it->second > 1;
 
     TexSampler want;
@@ -4714,6 +5296,26 @@ extern "C" unsigned RanGLR_UploadTextureLevel(unsigned existing, int level, int 
 
     // DXT first: it is what nearly every shipped texture is.
     if (isDXT(d3dFormat)) {
+        if (haveS3TC() && g_ranGLTOn) {
+            //  On the GL thread the upload and its check go together, and so
+            //  does the fallback: a refused upload is decoded there.
+            const GLenum internal = s3tcInternal(d3dFormat);
+            RanGLT_PostData(bits, dataSize, [=](const void *p) {
+                while (::glGetError() != GL_NO_ERROR) {}
+                ::glCompressedTexImage2D(GL_TEXTURE_2D, level, internal, width, height, 0,
+                                         (GLsizei)dataSize, p);
+                const GLenum err = ::glGetError();
+                if (err == GL_NO_ERROR) return;
+                LOGE("compressed upload rejected (0x%04X) for a %dx%d DXT texture — "
+                     "decoding DXT on the CPU from now on", err, width, height);
+                g_haveS3TC = false;
+                std::vector<GLubyte> rgba;
+                if (decodeDXT(d3dFormat, width, height, (const GLubyte *)p, dataSize, rgba))
+                    ::glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, width, height, 0, GL_RGBA,
+                                   GL_UNSIGNED_BYTE, &rgba[0]);
+            });
+            return tex;
+        }
         if (haveS3TC()) {
             //  Clear any older error so the check below is about this upload.
             while (glGetError() != GL_NO_ERROR) {}
@@ -4895,7 +5497,15 @@ extern "C" unsigned RanGLR_UploadTextureLevelHalf(unsigned existing, int level, 
 //  be colour-renderable in GLES 3.0, so the attachment is legal for the formats
 //  this is used for; if a driver disagrees, the caller is told and falls back
 //  to the full upload.
+static int allocClearTextureLevel(unsigned *pTex, int width, int height, int d3dFormat);
 extern "C" int RanGLR_AllocClearTextureLevel(unsigned *pTex, int width, int height, int d3dFormat) {
+    //  Asks GL several questions (errors, completeness, the bound framebuffer,
+    //  the colour mask); once per glyph atlas, so it simply runs there.
+    int r = 0;
+    RanGLT_RunSync([&]() { r = allocClearTextureLevel(pTex, width, height, d3dFormat); });
+    return r;
+}
+static int allocClearTextureLevel(unsigned *pTex, int width, int height, int d3dFormat) {
     if (!g_inited || !pTex || width <= 0 || height <= 0) return 0;
 
     GLenum internal = 0, fmt = 0;
@@ -5069,6 +5679,21 @@ extern "C" unsigned RanGLR_UploadCubeFaceLevel(unsigned existing, int face, int 
     const GLenum target = (GLenum)(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face);
 
     if (isDXT(d3dFormat)) {
+        if (haveS3TC() && g_ranGLTOn) {
+            const GLenum internal = s3tcInternal(d3dFormat);
+            RanGLT_PostData(bits, dataSize, [=](const void *p) {
+                while (::glGetError() != GL_NO_ERROR) {}
+                ::glCompressedTexImage2D(target, level, internal, width, height, 0,
+                                         (GLsizei)dataSize, p);
+                if (::glGetError() == GL_NO_ERROR) return;
+                g_haveS3TC = false;
+                std::vector<GLubyte> rgba;
+                if (decodeDXT(d3dFormat, width, height, (const GLubyte *)p, dataSize, rgba))
+                    ::glTexImage2D(target, level, GL_RGBA, width, height, 0, GL_RGBA,
+                                   GL_UNSIGNED_BYTE, &rgba[0]);
+            });
+            return tex;
+        }
         if (haveS3TC()) {
             while (glGetError() != GL_NO_ERROR) {}
             glCompressedTexImage2D(target, level, s3tcInternal(d3dFormat), width, height, 0,
@@ -5123,8 +5748,17 @@ extern "C" void RanGLR_FinishCubeTexture(unsigned tex, int levels) {
 extern "C" void RanGLR_FinishTexture(unsigned tex, int levels, int d3dFormat) {
     if (!g_inited || !tex) return;
     ++g_texFullUploads;
+    ++g_texUploadsEver;
     bindTex2D(tex);
-    if (levels <= 1 && !isDXT(d3dFormat)) {
+    if (levels <= 1 && !isDXT(d3dFormat) && g_ranGLTOn) {
+        RanGLT_Post([=]() {
+            while (::glGetError() != GL_NO_ERROR) {}
+            ::glGenerateMipmap(GL_TEXTURE_2D);
+            const GLenum e = ::glGetError();
+            if (e != GL_NO_ERROR) LOGE("glGenerateMipmap FAILED 0x%04X tex=%u d3dfmt=%d", e, tex, d3dFormat);
+        });
+        levels = 2;
+    } else if (levels <= 1 && !isDXT(d3dFormat)) {
         while (glGetError() != GL_NO_ERROR) {}
         glGenerateMipmap(GL_TEXTURE_2D);
         {
@@ -5142,6 +5776,95 @@ extern "C" void RanGLR_FinishTexture(unsigned tex, int levels, int d3dFormat) {
     //  Whether the texture has mips decides its min filter, so the sampler
     //  state it was given before this is no longer the right one.
     g_texSampler.erase(tex);
+    ++g_texSamplerEpoch;
+}
+
+//  ---- "passlog": the render passes a frame makes.
+//
+//  On a tile GPU every change of framebuffer ends a render pass: the tiles are
+//  written out to memory and, if the target is drawn into again later in the
+//  frame without having been cleared, read back in (Apple, OpenGL ES guide,
+//  "Performance": logical buffer store and load). A pass here is a run of
+//  draws, clears and blits into one framebuffer between two binds of a
+//  different one. Each kind is keyed by target (the panel or scene = MAIN, or
+//  a render target and its size), how it starts (a clear lets the driver skip
+//  the load; a draw into a target already drawn this frame means a load) and
+//  the frame section it starts in; the first of each kind logs a backtrace.
+//  Counts are per frame, logged with the stats. Measurement only.
+namespace {
+GLuint s_pcFbo = 0xFFFFFFFFu;
+bool s_pcWork = false;
+unsigned s_pcFrame = 0xFFFFFFFFu;
+std::unordered_map<GLuint, int> s_pcThisFrame;      //  passes per target this frame
+unsigned long s_pcFrames = 0, s_pcPasses = 0, s_pcMain = 0, s_pcMainResumed = 0,
+              s_pcResumedRT = 0, s_pcMidClears = 0, s_pcInval = 0, s_pcBinds = 0;
+std::map<std::string, unsigned long> s_pcKinds;
+char s_pcPrev[96] = "";             //  the pass before this one: what split the scene
+
+void pcTarget(GLuint fbo, bool *isMain, int *w, int *h) {
+    *isMain = (g_sceneFbo && fbo == g_sceneFbo) || fbo == RanGL_DefaultFramebuffer();
+    *w = *h = 0;
+    if (g_sceneFbo && fbo == g_sceneFbo) { *w = g_sceneW; *h = g_sceneH; return; }
+    if (fbo == RanGL_DefaultFramebuffer()) { *w = RanGL_Width(); *h = RanGL_Height(); return; }
+    for (std::map<GLuint, RanRT>::const_iterator it = g_rts.begin(); it != g_rts.end(); ++it)
+        if (it->second.fbo == fbo) { *w = it->second.w; *h = it->second.h; return; }
+}
+}  // namespace
+
+extern "C" void RanPass_Bind(GLenum target, GLuint fbo) {
+    if (target == GL_READ_FRAMEBUFFER) return;
+    ++s_pcBinds;
+    if (fbo == s_pcFbo) return;
+    s_pcFbo = fbo;
+    s_pcWork = false;
+}
+
+extern "C" void RanPass_Invalidate(GLenum, GLsizei, const GLenum *) { ++s_pcInval; }
+
+extern "C" void RanPass_Work(int kind, GLbitfield mask) {
+    const unsigned f = RanGL_FrameIndex();
+    if (f != s_pcFrame) { s_pcFrame = f; ++s_pcFrames; s_pcThisFrame.clear(); s_pcWork = false; }
+    if (s_pcWork) { if (kind == 1) ++s_pcMidClears; return; }
+    s_pcWork = true;
+    ++s_pcPasses;
+    bool isMain = false; int w = 0, h = 0;
+    pcTarget(s_pcFbo, &isMain, &w, &h);
+    const int nth = ++s_pcThisFrame[s_pcFbo];
+    const bool resumed = nth > 1;
+    if (isMain) { ++s_pcMain; if (resumed) ++s_pcMainResumed; }
+    else if (resumed) ++s_pcResumedRT;
+    const char *how = kind == 1 ? ((mask & GL_COLOR_BUFFER_BIT) ? "clear" : "depth-clear")
+                                : (kind == 2 ? "blit" : "draw");
+    const char *sec = (g_sectionTop > 0) ? g_sectionStack[(g_sectionTop < 16 ? g_sectionTop : 16) - 1] : NULL;
+    char key[300];
+    snprintf(key, sizeof(key), "%s %dx%d starts-with %s%s | %s%s%s", isMain ? "MAIN" : "RT", w, h, how,
+             resumed ? " (drawn before this frame: load)" : "", sec ? sec : "-",
+             (isMain && resumed) ? " | after " : "", (isMain && resumed) ? s_pcPrev : "");
+    snprintf(s_pcPrev, sizeof(s_pcPrev), "%s %dx%d in %s", isMain ? "MAIN" : "RT", w, h, sec ? sec : "-");
+    unsigned long &n = s_pcKinds[key];
+    if (n++ == 0 && s_pcKinds.size() < 80) {
+        char bt[1500];
+        RanDiag_Backtrace(bt, sizeof(bt));
+        LOGI("passlog new: %s | %s", key, bt);
+    }
+}
+
+static void logPasses() {
+    if (!g_ranPassOn || !s_pcFrames) return;
+    const double fr = (double)s_pcFrames;
+    LOGI("passlog per frame: %.1f passes (%.1f main, %.1f main resumed = splits), %.1f render-target "
+         "passes resumed, %.1f clears after draws, %.1f invalidates, %.1f binds",
+         s_pcPasses / fr, s_pcMain / fr, s_pcMainResumed / fr, s_pcResumedRT / fr,
+         s_pcMidClears / fr, s_pcInval / fr, s_pcBinds / fr);
+    std::vector<std::pair<unsigned long, std::string> > v;
+    for (std::map<std::string, unsigned long>::const_iterator it = s_pcKinds.begin(); it != s_pcKinds.end(); ++it)
+        v.push_back(std::make_pair(it->second, it->first));
+    std::sort(v.rbegin(), v.rend());
+    for (size_t i = 0; i < v.size() && i < 30; ++i)
+        LOGI("passlog %6.1f/frame  %s", v[i].first / fr, v[i].second.c_str());
+    for (std::map<std::string, unsigned long>::iterator it = s_pcKinds.begin(); it != s_pcKinds.end(); ++it)
+        it->second = 0;
+    s_pcFrames = s_pcPasses = s_pcMain = s_pcMainResumed = s_pcResumedRT = s_pcMidClears = s_pcInval = s_pcBinds = 0;
 }
 
 extern "C" void RanGLR_LogStats(void) {
@@ -5152,12 +5875,30 @@ extern "C" void RanGLR_LogStats(void) {
     LOGI("draws=%lu (ui=%lu textured=%lu) verts=%lu texfull=%lu texrect=%lu (%lu KB) vao=%lu new/%lu hit (%u live) glErr=0x%04X",
          g_drawCalls, g_uiDraws, g_texturedDraws, g_vertsDrawn,
          g_texFullUploads, g_texUpdates, g_texUpdateBytes / 1024,
-         g_vaoCreated, g_vaoHits, (unsigned)g_vaoCache.size(), glGetError());
+         g_vaoCreated, g_vaoHits, (unsigned)g_vaoCache.size(),
+         g_ranGLTOn ? 0u : (unsigned)glGetError());
     LOGI("ES3.0 layout respecs per 300 frames: stream %lu (fvf %lu stride %lu base %lu buf %lu) | vb %lu (fvf %lu stride %lu base %lu buf %lu)",
          g_respecCount[0], g_respecWhy[0][0], g_respecWhy[0][1], g_respecWhy[0][2], g_respecWhy[0][3],
          g_respecCount[1], g_respecWhy[1][0], g_respecWhy[1][1], g_respecWhy[1][2], g_respecWhy[1][3]);
     LOGI("ES3.0 base-only layouts per 300 frames: %lu", g_baseOnlyHits);
+    logPasses();
+    logDrawGroups();
+    if (g_clearLog) {
+        for (std::map<std::string, unsigned long>::iterator it = g_clearKinds.begin(); it != g_clearKinds.end(); ++it)
+            if (it->second) { LOGI("clearlog per 300 frames: %6lu  %s", it->second, it->first.c_str()); it->second = 0; }
+    }
     g_baseOnlyHits = 0;
+    LOGI("stable uniforms per 300 frames: %lu sent, %lu skipped%s",
+         g_stableSends, g_stableSkips, g_noStableSkip ? " (nostableskip)" : "");
+    if (g_stableCheck) LOGI("stablecheck: %lu uploads a skipped block would have made (must be 0)", g_stableMismatch);
+    if (g_stableCheck && g_stableMismatch) {
+        char by[400]; int at = 0;
+        for (int q = 0; q < 64 && at < 380; ++q)
+            if (g_stableMisBy[q]) at += snprintf(by + at, sizeof(by) - at, " #%d=%lu", q, g_stableMisBy[q]);
+        LOGI("stablecheck by item:%s", by);
+        memset(g_stableMisBy, 0, sizeof(g_stableMisBy));
+    }
+    g_stableSends = g_stableSkips = g_stableMismatch = 0;
     memset(g_respecWhy, 0, sizeof(g_respecWhy)); g_respecCount[0] = g_respecCount[1] = 0;
     LOGI("into render targets: %lu draws, %lu switches, largest %dx%d (frame is %dx%d)",
          g_rtDraws, g_rtSwitches, g_rtBiggestW, g_rtBiggestH, RanGL_Width(), RanGL_Height());
@@ -5200,6 +5941,7 @@ static void deleteTextureNow(GLuint tex) {
     }
     g_texSampler.erase((GLuint)tex);
     g_texLevels.erase((GLuint)tex);
+    ++g_texSamplerEpoch;
     g_texDims.erase((GLuint)tex);
     forgetTex2D((GLuint)tex);
     if (tex) { GLuint t = tex; glDeleteTextures(1, &t); }

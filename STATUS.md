@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-09
+- **Last updated:** 2026-10-11
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -31,6 +31,207 @@ the patch ships a needless APK bump).
 2026-10-08). Full list in the dated sections below.
 
 ---
+
+## 2026-10-10 — Item-on-item use from the bag; menu first-open flick (not released; shared SOURCE, so Android and iOS)
+
+- **Enhancement unchanged** (user: "only the enhancement stay as it is"). The enhance window, its Upgrade / Put-in rows and its materials (stone, option / non-drop / wrapper / reform card, costume) are as they were. Verified on LDPlayer: the stone and the disjunction powder still show อัพเกรด.
+- **Bag's ทับชุด button removed** (user: "no new panel menu ทับชุด"). Costumes go on through the enhance window, as before. The button slot is now a ยกเลิก that shows only while picking. Sort and Separate share the row.
+- **Items that had no way to be used now have a ใช้งาน row** that turns the bag into the picker and lights only valid targets. The rules come from the PC requests (`CMobileBagPanel::CanApply`):
+  - pet food (a pet card with a pet), pet revive, pet skin pack, dual-pet card (the summoned pet's card);
+  - vehicle battery and boosters (a vehicle);
+  - mystery key (its own box);
+  - dye (taps a worn slot; `InvenUseToPutOn`).
+  - Cleanser and disjunction keep the Use row they had.
+  - The old separate dual-pet row was folded into this flow.
+- **Menu first-open flick fixed.** `MobileArrangeMenu` now runs right after `ShowGroupFocus(MOBILE_MENU_WINDOW)` (DxGameStage.cpp). Recorded on LDPlayer at the first open after launch: one changed frame, menu already in place.
+- PC Client, Emulator, ServerAgent and ServerField build clean.
+- **Quest tracker text bigger** (user: too small). `CQuestHelper` uses 12 pt on mobile instead of 9. The box grows 100 to the left and the text stops 62 short of the right edge, clear of the round button column. Two fixes found while testing:
+  - The title read "ภารกิจ:" with no name, because queststrtable.xml has only Chinese. It now uses `GetTITLE()`, like the quest panel.
+  - The trailing space left an empty line. Trimmed.
+  - Verified on LDPlayer at 1:1: one-line name, then "สถานะ:Vulgarian 0/10".
+- **เส้นทาง, phase 1 (same map) on LDPlayer.** The user asked for no auto-walk. `MobileQuestRoute` (Lib_ClientUI, mobile only) does the following:
+  - **Target:** the current step's first open objective, in this order: kill, collect, area, guard, defend, then the NPC. It uses the live crow if one is in view, else the nearest spawn in the map's mob schedule, else quest cells × 50 for area steps.
+  - **Path:** navmesh `BuildNavigationPath`, cut to line of sight. Measured 0.25-0.35 ms on the emulator. It rebuilds after 15 units of movement or every 0.5 s.
+  - **Trail:** up to 6 stacks of `sundo_directionarrow02`, 45 units apart, in a private copy recoloured green at alpha 0.75.
+  - **Destination:** `target_arrow_green` over the target.
+  - **UI:** a เส้นทาง / ปิดเส้นทาง button in the quest panel, which closes the panel when turned on. The tracker shows a green เส้นทาง line. Chat says "เส้นทาง: เป้าหมายอยู่แผนที่อื่น" when the target is on another map. Gameword 86-88 added.
+  - **Diags:** `effpreview` (effects in a row in front of the character) and `routeto` ("x z" overrides the target).
+  - **Verified on LDPlayer:** the Vulgarian kill quest's trail followed the walkway and updated while walking. Quest 0 (NPC indoors) reported another map.
+- **เส้นทาง, phase 2 (other maps) on LDPlayer.**
+  - **Index:** on first need, every map in the map list is loaded with `GLLevelFile::LoadFile(.., FALSE, NULL)`, a few a frame with a 6 ms budget. That load fills the full schedule in every format; the client load skips it in 0x107 files. The index holds gates (box centre, arrival point, OUT flag, up to 8 destinations) and spawn points.
+    - First build: 69 maps listed, 66 loaded, 274 gates, 27447 spawns, 98 ms of frames on the emulator.
+    - Saved to `cache/questroute.bin`, keyed on the map list and `cVer.bin`. Later logins load it from the cache.
+  - **Route:** Dijkstra over (map, gate arrived by). Walking inside a map costs its straight distance, each gate +150. The trail leads to the first gate's box on the current map.
+  - **Messages:** the tracker and chat say "เส้นทาง: ไปที่ <map>", or กำลังค้นหาเส้นทาง while the index builds. Gameword 89-90 added.
+  - **Verified:** route chains were logged with names.
+    - Registration quest: สถาบัน SG -> ศูนย์การศึกษา SG. Test-walked to the gate, the game's own enter prompt appeared, and after crossing the trail led on to the NPC.
+    - History-room quest: ศูนย์การศึกษา SG -> สถาบัน SG -> 104/0.
+  - **Test-only diag:** `routewalk` walks the character along the route (LargeMapMoveTo). It is not a feature.
+- **Quest list tags** (user: had to open each quest to find which were shown). Rows on the in-progress tab show บนจอ (in the tracker) and/or เส้นทาง at the right, in green-yellow. Long titles are cut before the tag with "..", with the Thai marks kept on their letter in both UTF-8 and CP874. Gameword 91 added. Verified at 1:1.
+- **Quest list rows would not select when tapped on their right side** (user, LDPlayer). The cause was the new tag label: it covers each row's right 140, empty or not, and took the tap; `OnTap` had no case for it. It now counts as the row. Verified at the user's own tap point (427,305 logical).
+- **Quest rewards always in view** (user: "why I dont see the reward"). Before, they were the last lines of the scrolling body, below the fold, with no scroll bar. The live PC window is the classic one (bFeatureModernQuestWindow is unset, so 0), where they sit behind a รางวัล button. The user chose an always-visible box: `m_pReward` sits above the item row, as tall as its wrapped lines (at most 40% of the text space, after which it scrolls), and the body scrolls above it (`PlaceDetailText`). The trade-off: less body in view, so steps can start below the fold. Verified on 4 quests. PC build clean.
+- **Chat box: page picker replaces the tab row and the filter** (user, 2026-10-10).
+  - The 7 page tabs and ตัวกรอง are gone, so the messages take the tab row's 50 units.
+  - The ก/A language button is gone too. It was dead on a phone: the shim's `ImmGetConversionStatus` is always FALSE.
+  - In its place, at the input row's end, is a second `CMobileChatChannelBar` in view mode (`MOBILE_CHAT_VIEW_BAR`), styled like the ทั่วไป send picker. Its drop-up is titled "แสดงข้อความจากช่อง" (MOBILE_CHAT 5) and has the 7 pages with their channel colours; choosing one sets `m_wDISPLAYTYPE` as the tab did.
+  - The filter state stays CHAT_ALL, as every session starts; it isn't saved.
+  - Verified on LDPlayer: the picker opens and closes on an outside tap; คลับ shows an empty page, back to ทั้งหมด restores it; typing is kept while the picker opens. PC build clean.
+- **Item detail is a window, with a dim behind it** (patch 759, APK 260, iOS 1.0.260; built 2026-10-11, awaiting upload; the whole 2026-10-10 section ships in it) (user, 2026-10-10: the bag's detail ran off the screen; asked for a window that scrolls, then for it to be a proper panel with a modal backdrop; 2026-10-11 also the stall).
+  - `CMobileItemInfoBox` (MobileItemInfoBox.cpp) is a kit panel: the item name is the title, and the game's own tooltip lines are on the left with every colour piece kept. The body scrolls with a scroll bar. The PC's mouse hints (CTRL+click etc.) are dropped.
+  - The item sheet's actions are kit buttons in a right-hand column, the first one primary. The sheet's own ปิด row is dropped (X and the dim do it). `CMobileItemSheet` still builds the rows and runs them (`FireRow`); while the window is up, its old PC-skin frame and rows aren't drawn.
+  - `CMobileItemInfoVeil` dims the whole screen, takes every press that misses the window, and closes on it. It also puts a solid black card behind the window: the kit body is see-through, and the bag slots showed through the text.
+  - A press on the dim doesn't reach what is under it. The sheet's own outside-press close is off while the window is up (it ran above the dim, so the bag got the press and opened that item), and the press-to-release match is broken (`MobileCloseItemDetail`).
+  - No hover tooltip where the window closed: a phone's pointer stays where the finger lifted (`m_bMobileHoverMuted`). After Back, the PC tooltip was popping up over the bag.
+  - **Stall** (`CTX_PMARKET`): a tap on a stall slot opens the same window. Its first button runs the slot's own tap, buy / นำออก (owner, before opening, MOBILE_ITEM_SHEET 22) / ขาย (into a buy order), through `CPrivateMarketWindow::ActOnItem`. That code was moved unchanged out of TranslateUIMessage, so the PC path is the same. The detail shows the stall price (bInPrivateMarket).
+  - **Verified on LDPlayer:**
+    - The bag: X, Back and a dim tap above the window or over another bag item each close the window, with no new sheet and no tooltip. ลิงก์ในแชท puts the link in the chat field and closes.
+    - A worn +7 weapon fills the screen height, and a swipe scrolls it to the end with the bar moving.
+    - A visitor at admin#1's stall sees the price. ซื้อ opens the stall's quantity dialog (cancelled). A dim tap over the world closes the window without walking.
+  - **Not tested:** your own stall (นำออก) and buy-order stalls; the other three themes (only Original was seen); the Tab S9; iPhone. All the code is shared SOURCE, so iOS gets the same code. PC client, Emulator and servers build clean. Gui.rcc repacked for the label.
+- **NPC talk translated to Thai: imported by the user and checked by them on LDPlayer (2026-10-10).** Re-export of the live npctalk folder is identical to the Thai file. NpcTalk.rcc matches all loose .ntk; the only odd entry is a stray copy, 'NPC_D_Police1 - สำเนา.ntk', stored under its cp874 name. Output: `CLIENT/data/glogic/npctalkText_TH.txt`.
+  - **Editor:** Editor_NpcAction has new Text Export / Text Import buttons (`EditorNpcAction/NtkTextIO.cpp`) and a `/ntkexport` / `/ntkimport <folder> <file>` command line. The build is copied to CLIENT; the old one is `Editor_NpcAction.exe.bak_pre_textio`.
+  - **Scope:** 664 .ntk files, 20947 strings. Korean, English and Chinese (Big5, 938 unique lines the first classifier took for Thai) were translated; other-server branding was rewritten for RAN Legacy M. Names follow the existing Thai: Tiger Command, สายเวทย์, กลุ่มการเงิน Sacred.
+  - **Verified:** import into a scratch copy changed 9986 strings in 473 files with 0 unmatched keys and 0 failures; re-export from the saved files is byte-identical to the input file; all 664 reload.
+  - **Still open:** in-game check after the import; repack NpcTalk.rcc and ship it.
+  - **For the user to review:** Taiwan charity notices; one garbled source line (z0164); the School Wars mention; Korean-grammar quiz lines; skill names translated by meaning.
+- **Quest text translated to Thai: imported by the user and checked by them on LDPlayer.** All 688 .qst were re-saved, and Quest.rcc matches all 890 loose files. Output: `CLIENT/data/glogic/quest/questText_TH.txt` (CP874, CRLF); the original is untouched.
+  - **Scope:** 192 quests, 1470 fields (832 Korean, 638 English), from 586 unique strings translated once each.
+  - **Detecting Korean:** clean-Hangul decode and no Hanja gave 181 candidates; each was read by hand, 5 were Thai and 176 Korean. Earlier statistical tests were wrong.
+  - **Names:** taken from the game data (a `questdump` diag, now removed). Quest 693's data names a return card as the "Research Document"; the text says เอกสารวิจัย.
+  - **Checks:** no Korean or English left (only the 22 letter-event codes); untouched blocks are byte-identical; a replay of `ImportText` gives the same 688 IDs and step counts.
+  - **Still open:**
+    - 334 Korean objective lines (`m_strOBJ_*`, "เป้าหมายตอนนี้") are not in the text export, so they need another route.
+    - After import: repack Quest.rcc and ship it in the patch.
+- **Scrolling text shows a scroll bar** (user: users will not know it scrolls). `CMobileTextArea` now owns the lists' thumb (KIND_BAR, `MobilePlaceThumb`), 4 wide, just past the text's right edge in the box margin, shown only while the text is longer than the box. It applies to all 21 `MobileMakeTextArea` users. Verified on the quest detail (moves on drag, clear of the text at 1:1). The other windows are not yet checked one by one.
+- **innerzone_01 black on LDPlayer: closed, user says it renders OK.** Measured before the user stopped it:
+  - The map's geometry is in `DxStaticMesh`; its `DxOctree` is empty.
+  - The vertex colours are correct.
+  - Fog and lighting were ruled out.
+  - All the diagnostics (nofog, nolight, octreelog, colorlog, fog change log) were reverted.
+- Not yet checked on the tablet or the iPhone.
+- **Still open:** the new item flows are not tested on device. test01 has none of those items, and admin was refused (`result=4`, already connected). Needs one of each item, then a real use per type. Gameword 81-85 are added in Gui.rcc.
+
+## 2026-10-10 — Render-pass splits 25.7 -> 3.5 a frame, every change proven pixel-exact (patch 757, APK 259, iOS 1.0.259; awaiting upload)
+
+- Shadow casters (user: "do them all"): recorded between ClearShadow and the end of the crowd with their bones (skeleton + attachments), full device state (RanD3D_StateSave) and texture scope, replayed in order in one block, then bones and state put back (DxShadowMap::MobileShadowBatchBegin/End). `noshadowbatch` = in place.
+  - `shadowcheck` draws both ways in the same frame and compares per caster: **0 differing frames** on the 512 target. The way there: early frames differed only on the second shadow surface; ruled out texture uploads, loader-thread completions, piece changes, device state and the quad batch one by one with counters; then logged that LastImageBlur's first pass runs with blending off over the whole surface, so its previous contents never reach the screen.
+- `MobilePrepass` (before RanGLR_SceneBegin): the player's MultiTex textures and ClearShadow (only DxShadowMap uses those targets).
+- passlog now names the pass that split the scene. Left, ~1 each: crowd MultiTex pre-pass (needs Render_MobItem's visible list), shadow replay + blur (needs this frame's poses, before the ground reads it), glow -> final blit, water wave, scene/panel start.
+- `multitexcheck` rerun after the move: 14,000 compared, 0 differ. PC GameClient2, Emulator, ServerAgent, ServerField build.
+- Not on the phone yet.
+
+## 2026-10-10 — Analysis first: pass census; main-pass splits 25.7 -> 7.1 (superseded by the section above)
+
+- User, 2026-10-10: stop going back and forth; do the real analysis (research if needed) before implementing.
+- Research (Apple docs, WWDC19-606, WWDC20-10632/10602, ANGLE Metal source): on a tile GPU every framebuffer switch stores the tiles and a return reloads them ("attachment ping-ponging"); load/store traffic is the majority of system bandwidth and costs power and heat; invalidate unneeded attachments when leaving; glClear at pass start becomes a free clear load action; blending/discard disable HSR; GL-on-Metal is closed, Xcode GPU capture (needs a Mac) is the only way to see its load/store actions.
+- 1.0.258 on the iPhone: 59 fps at heat fair (both threads ~15 ms); serious within ~1 min, then GPU 90-94% and both threads slowed. Native resolution 2556x1179 (world scale 100% default) - a decision for the user, not changed.
+- `passlog` census (LDPlayer, iPhone option.ini, crowd), per frame, before -> after: passes 144 -> 90, **main splits 25.7 -> 7.1**, clears after draws 55 -> 0, render targets re-opened 61 -> 4.
+  - Fixed: MultiTex on attachment pieces (DxAttBone, ~19 splits) and on the player's own character (~5) now in the pre-pass; each pooled target drawn in one bind; target depth clears owed/folded/invalidated.
+  - Proof: `multitexcheck` 20,000 prepared textures compared with the original path in the same frame: 0 pixels differ.
+- Remaining splits: shadow casters ~3.8 (each player's shadow is drawn right after its body because both read the shared skeleton's pose; attachments pose their own shared skeletons inside their render, and re-posing steps their animation clock - a pre-pass needs stored per-character poses for attachments too), tree shadow 1, world 1, scene blit 1.
+- Not yet measured on the phone. Next: shadow design, then foliage (eff:alphapiece ~25% GPU) measurement at capped fps.
+
+## 2026-10-10 — iPhone on 1.0.257: GL thread 29 -> 17 ms; stream ring and HUD without waits (patch 755, APK 258, iOS 1.0.258; awaiting upload)
+
+- **iPhone 15, 1.0.257, crowd 250, heat serious:** GL thread **16-17 ms/frame** (1.0.256 at heat fair: 29). glClear 152 a frame x 8 us = 1.3 ms (was 98 x 115 us = 11.4). Game thread 12-16 ms. Paced at 30 by the heat clamp.
+- Kept hot and charging for 15+ more minutes: 15-25 fps, GPU 65-90%, every GL call 2-3x slower than before (same counts: CPU clocks cut). GPU ms/frame by `sectionskip` (utilisation / fps, noisy): **world-eff ~10 of ~37 ms**, names, glow, land 1-3 ms each; `w:mobitem` changed nothing (name not matched - check).
+- `drawgroups` (LDPlayer, iPhone settings): 1,640 skinned part draws a frame use 365 distinct buffer+texture+state keys, 383 with material, 629 with lights; never two in a row. Instancing could take ~1,640 to ~400-630 (17-21% of all draws) but needs per-instance palettes and lights and out-of-order character drawing. Parked behind cheaper items.
+- Fixed: Apple stream ring no longer re-specifies its store on wrap (16 MB, two fenced halves; `ringorphan` = old path; glprof had ~4-5 ms per wrap). Touch HUD batches and icon quads stream through the ring instead of rewriting one buffer at offset 0 (47 a frame, 40-80 us each on Apple). HUD checked 1:1 on LDPlayer, 0 GL errors. The two-half ring runs on Apple only - **first real test is the iPhone.**
+- Next: world-eff GPU breakdown on the phone (its sub-passes), then the remaining per-piece clears and draw-count reduction.
+
+## 2026-10-10 — glClear was 39% of the iPhone's GL thread: MultiTex drawn ahead (patch 753, APK 257, iOS 1.0.257; awaiting upload)
+
+- `glprof` on the iPhone (1.0.256, crowd 250, heat fair), GL thread 29 ms/frame: **glClear 98 a frame x ~115 us = 11.4 ms (39%)**; glDrawElements/Arrays 4,800 a frame ~2 us each = 9 ms; glBufferSubData 37 x 78 us = 2.9 ms; glBufferData (stream ring wrap) 0.3 x 5 ms = 1.8 ms; the rest ~3 ms. The clear itself is cheap; it is where Apple's driver ends the scene's render pass when the target changed (store + reload of the whole frame), which is also GPU memory traffic, i.e. heat.
+- `clearlog` (new diag: clears by frame section, flags, target, with a backtrace) on LDPlayer with **the iPhone's option.ini copied over** (the emulator's own settings hid it): `part:chareff` 128x128 ~55 a frame, from `DxEffCharMultiTex::Render` -> `DxImageMove`. That effect (SKD_BEST only) draws its scrolling texture into the shared 128x128 target and then the piece, per piece, mid-scene.
+- Fix (SOURCE, RAN_MOBILE): every player about to be drawn has it drawn first, right after the pose batch (`DxSkinChar::MobilePrepareEffects`), each into a pooled 128x128 target of its own (up to 384, 64 KB each); Render uses it when made this frame from the same scroll offsets, else the original path. Same draws into a different surface, so the same pixels. LDPlayer: ~43 of the ~55 now happen together in one break; ~8 a frame still take the old path (pieces outside the player batch). Visual A/B with `nomultitexprep` at 1:1: same. PC GameClient2, Emulator, ServerAgent, ServerField build.
+- Still to do from the same profile: the remaining per-piece clears (own character, mobs, attachments, `DxEffCharMark`, `DxEffectNeon` use the same target), the glBufferSubData (37 a frame, 78 us each) and the stream-ring orphan (5 ms each).
+- LDPlayer now runs with the iPhone's option.ini, so emulator profiles match the phone's effect detail. Its own file was pulled first (session scratchpad `opt_ld.ini`).
+
+## 2026-10-10 — GL thread on the iPhone: half its busy time is driver waits; glprof (patch 751, APK 256, iOS 1.0.256; awaiting upload)
+
+- `samplergl` on 1.0.255, SG crowd (249 drawn), heat fair, 10 s: the GL thread is idle 39% (waiting for our queue). Of all samples: `gldFinishObject` -> kernel 12.5% (the driver waiting for the GPU before changing an object), `gldDestroyMemoryPlugin` -> kernel 9.2% (GPU memory freed every frame), `gldClearFramebufferData` -> waits 8.2%, plain driver work ~17%, memmove 4%, `gldUpdateDispatch` 3%. So about half the busy time is synchronisation and memory churn, not drawing.
+- Which of our calls cause them could not be read from stacks (closures tail-call into the driver, GLEngine names are hidden). `glprof` times every command on the GL thread and logs the top 25 by ms/frame every 2 s, named on the device; also `FRAME buffer calls` by kind. Checked on LDPlayer. Next: run it hot on the iPhone, fix what it names.
+
+## 2026-10-10 — iPhone measured on 1.0.254; GL-thread sampler (patch 749, APK 255, iOS 1.0.255; awaiting upload)
+
+- **iPhone 15, 1.0.254, SG crowd (251 drawn), glthread on:**
+  - heat nominal: **37-42 fps**; GL thread busy 24-27 ms, game thread 13-16 ms (waits 6-7 ms for the GL thread).
+  - heat serious (reached in about a minute, and the phone stays there when the app is reopened): ~30 fps paced; with `noheatpace` 24-31 fps, GL thread 32-42 ms, game 20-35 ms.
+  - A/B at serious, interleaved: `novaocache` GL calls 30k -> 43k but GL busy unchanged (the attribute calls it removes are cheap on Apple's driver). `nostableskip` game thread +2-3 ms (noisy, phone heating during the run).
+  - **Conclusion (agreed with the user):** the target is sustained crowd play without heat, so the metric is total work per frame at steady heat, not cool-phone fps. The GL thread is the largest item.
+- `samplergl` (iOS sampler): samples the GL thread instead of the game thread. System addresses are named on the phone (dladdr) and stored in samples.bin v2; `tools/ios-sampler.py` prints time by leaf library and by the innermost app function, i.e. which GL call. Next: run it hot in the crowd, cut what it names.
+- 255 is an iOS-only change; the Android APK was repackaged with the same libs to move the shared build number.
+
+## 2026-10-10 — Game-thread CPU per draw: uniform block skip, hashed lookups, pool free list (patch 747, APK 254, iOS 1.0.254; awaiting upload)
+
+- Profiled the LDPlayer 250-player crowd with `glthread` on (game thread only; the scripts now pick the thread with `android_main`, not the busiest one, which is now the GL thread).
+- **Uniforms:** ~30 rarely-changing uniforms (texture stage, material, fog, alpha test, camera) are compared as one snapshot per program. 80% of crowd draws skip them. A new diag, `stablecheck`, compares every skipped block with the cache. Its first run found mismatches at the login page: `RanGLR_InvalidateStateCache` (called by the touch HUD every frame) drops the bound variant without parking it, and the variant's parked snapshot survived its reload while the cache did not. Fixed: the snapshot is taken, not copied, like the cache. After the fix: **0 mismatches over ~2.6 M skipped blocks** (login page and crowd). `nostableskip` turns the skip off.
+- **Lookups:** the VAO cache and the per-texture sampler tables use hash maps instead of `std::map` (tree walks were most of drawInternal's own time). The current shader variant is kept as a pointer. ApplySampler skips a repeat of the last texture. `RAN_TIME_DRAWS` now times 1 draw in 16 (two clock reads per draw cost 1.5%).
+- **drawInternal, share of the game thread: 17.5% -> 13.1%** (applyProgramUniforms 6.1 -> 4.6, ApplySampler 2.65 -> 1.77, clock 1.5 -> 0).
+- **CMemPool** (SOURCE, `RAN_MOBILE`): its free list was a `std::list`, so every Release allocated a node and every New freed one. Now a vector stack. Weapon-blur trails were the main user. **Heap calls on the game thread 3.5% -> 0.9%**; CreateBlur 2.18 -> 0.25%. Effects checked at 1:1 (trails, weapon glow, sparks). PC GameClient2, Emulator, ServerAgent and ServerField build (MSVC, exit 0).
+- The emulator's frame rate does not show any of this: there the GL thread is the limit (~32 ms) and the game thread waits ~16 ms a frame. **iPhone: to measure** (game thread 16-20 ms at heat fair with 1.0.252).
+
+## 2026-10-10 — VAO per mesh buffer on Apple (built as patch 745 / APK 253 / iOS 1.0.253, superseded by 747 before upload)
+
+- **iPhone 15, 1.0.252 + glthread, SG crowd, what the 44k GL calls a frame are:** attribute setup 22.6k, uniforms 10.9k, draws 5.2k; 2,034 program switches. Cost switches there: `nolightblock` (light uploads) no change, `nopaletteuni` (bone palettes) ~2 ms. `vaocache` (one VAO per vertex buffer + layout, the old key): calls 43k -> 37k, GL thread 35 -> 29 ms, 3 rounds, but it thrashed: ~1,000 new VAOs a frame, 77% hits, the whole cache dropped at 2,048 every couple of seconds.
+- Cause: the key included the draw's start offset, and the engine's dynamic buffers are appended to, so each draw from one is a new key. Now only draws from offset 0 use the cache (characters, the world: one layout for the buffer's life); cap 8,192.
+- Fixed on the way: on an ES 3.1 driver the cached VAO took the separate-attribute-format branch and was never given a format, so character bodies drew nothing (LDPlayer). Cached draws now always describe the VAO with plain attribute pointers, the iPhone's path.
+- **Default on for Apple only** (`novaocache` turns it off); `vaocache` still turns it on elsewhere. LDPlayer, same crowd, with `vaocache`: 0 new / 5.4 M hits, 477 VAOs live; GL calls 24k -> 20k; characters correct at 1:1. Interleaved 4 rounds there: cache on 51-59 ms, off 52-55 ms (no gain on the emulator's GL transport, which is why Android stays off). **iPhone with the new key: to measure** after the next release.
+- `tools/ios-sampler.py` names functions with llvm-nm (the binary has symbols, no DWARF, so llvm-symbolizer gave "??"); `--under NAME` prints callers, children and leaves of one function.
+
+## 2026-10-10 — GL on its own thread, opt-in; crowd CPU fixes (patch 743, APK 252, iOS 1.0.252; awaiting upload)
+
+- `shim/gl/gl_thread.{h,cpp}` + `gl_thunks.{h,cpp}`. While the game loop runs, the GL context lives on a thread of its own ("RanGL"). gl_render.cpp, touch_ui.cpp and splash.cpp include gl_thunks.h last, so every gl* call there is recorded into a command queue (1 MB blocks), with any data it reads copied, and replayed in order on that thread. One frame in flight. Calls that answer (glGet*, glCreate*, status) run there while the caller waits ("syncs"). Per-frame answers come from shadow state instead: caps for glIsEnabled, live textures for glIsTexture, unpack alignment. glGen* names come from batches generated ahead. Streaming ring writes keep their cursor on the game thread and copy on the GL thread. DXT upload + error check + decode fallback run together there. Shader variants and glyph-atlas clears run there in one trip. GPU timer sections are off while it is on.
+- It stops first (drain, glFinish, context back to the main thread) for the loading screen's thread (RanGL_ReleaseContext), Android surface lost/restore, iOS resize, iOS resign-active/background, and shutdown. It restarts from the next main-thread Present. So those paths run exactly as before.
+- **Opt-in:** diag `glthread` turns it on within a second; `noglthread` wins. Off, every gl* call is one extra branch.
+- **LDPlayer, 250-player SG crowd, interleaved 3 rounds:** on 36 ms/frame (28 fps), off 55 ms (18 fps). 0 syncs per frame; ~5 MB/frame queued. The GL thread is now the limit there (busy ~35 ms: the emulator's GL transport). Checked with it on: login page (typing), entering the world through the loading screen, crowd 1:1 (characters, weapons, effects, names, HUD), inventory, HOME + return (it stopped, surface released/restored, restarted), runtime on/off six times.
+- **iPhone 15, 1.0.252, SG crowd (251 drawn), measured 2026-10-10 03:20:**
+  - Turned on remotely with `glthread`. 0 syncs a frame, ~7 MB a frame queued, the game thread never waits for it, no crash.
+  - At heat fair: game thread 16-20 ms, GL thread 18-20 ms. That reads 30.0 fps: each frame is just over one 16.7 ms vsync, so it lands on every second one. Before (off), the game thread alone was 29-34 ms.
+  - Within a minute the phone reached heat **serious**. iOS halves the clocks and both threads double (game 30-33 ms, GL 27-31 ms).
+  - Interleaved A/B there (3 rounds, `noheatpace` so pacing does not cap it): on 26-29 fps, off 25-26. A small gain, because the hot phone is short of total CPU, not of threads.
+  - Conclusion: the GL thread moves work, it does not remove it. In this crowd the iPhone is limited by heat, so 60 fps needs less total work a frame (CPU and GPU). Left on for a soak on the test phone; not the default yet.
+
+## 2026-10-10 — Crowd CPU tail + render-thread ceiling (built on LDPlayer, not released)
+
+- Profiled the 250-player SG crowd on LDPlayer with `nulldraw` on, so the emulator's GL encoder is out of the picture and only game CPU is left (~22 ms a frame). No single hot spot; fixed every measurable one (simpleperf before/after, % of game thread):
+  - GLCharClient::Render took the half-alpha effect off every visible player every frame (string compare over every effect of every piece): **1.71% -> 0.09%**. Now only when the state changes (`m_nMobileHalfAlpha`).
+  - RanPlat_DiagExists strcmp'd the query against every file in the diag folder: hashed (FNV) + DrawSubset asks for `nomeshvbo` every 512 draws: **0.98% -> 0.09%**.
+  - Texture last-use stamp read steady_clock on every bind; now the clock at the last Present: **1.05% -> 0.72%**.
+  - D3DXMatrixMultiply four-wide rows: **3.42% -> 2.91%**. UpdateBones scratch matrix local, not thread_local (1% TLS init).
+  - Frame time change is ~1 ms, inside the crowd's own noise; checked visually 1:1 (characters normal) and `posecheck` (largest diff 1.9e-6).
+- **Ceiling of a render thread, LDPlayer, interleaved 3 rounds:** `nulldraw` 61 -> 27 ms a frame (16 -> 37 fps). A perfect GL thread would still leave ~22 ms of game CPU on this emulator.
+- **iPhone 15, 1.0.251, SG crowd (~247 drawn), heat nominal, interleaved 3 rounds:** baseline 25-31 fps (render 28-34 ms: submit 10-15, engine 18-20; swap 0.2 ms). **`nulldraw` -> 59.5-60.1 fps** (render 10-14 ms). `sectionskip world-eff` (the biggest GPU fill item, ~39 GPU points in September, little CPU) -> only +1.5 fps. dvt graphics: GPU 76% at ~24 fps.
+  - So the iPhone frame is CPU-bound on GL calls (submit plus the state/uniform/upload calls counted under "engine"), not GPU-bound. A GL thread that takes those calls off the game thread is the lever; its ceiling on this phone is ~60 fps. Decision: build it (next section of work).
+
+## 2026-10-10 — Parallel character posing (patch 741, APK 251, iOS 1.0.251; awaiting upload)
+
+- Players and monsters drawn this frame are posed on a worker pool (`ran_jobs`, game thread + up to 4 helpers; iPhone 15 -> 4, LDPlayer -> 2) before drawing. Each worker poses into a private copy of the shared skeleton through a thread-local redirect by bone index (`RanPoseBone`/`RanPoseSkeleton`, DxBoneCollector). DxSkinChar::Render copies the pose times the world matrix into the shared skeleton. UpdateBones applies the world matrix at the root only, so every reader (parts, effects, attachments, shadow) sees what it saw before. Unsafe cases (animation not yet loaded, the shared lazy `m_pQuatOrigRot`, a missing copy) fall back to the old path for that character.
+- **Correctness**, "posecheck" diag (poses both ways and compares every bone): about 1,730 poses/s, largest difference rotation 2.9e-6, position 4e-7 relative. That is float rounding.
+- **Speed**, LDPlayer, 250-player SG crowd, 3 interleaved rounds ("noposejobs" = old path): frame 78-82 -> **72-75 ms**, render 74 -> 66-69 ms. 99.6% of poses on workers; pose no longer in the main thread's top sections. **iPhone: to measure** (pose was ~10 ms there).
+- Remaining main-thread cost in that crowd: ch:parts 17-19 ms, part:skinned ~13, ch:eff 8-10, glow and ghost. That is mostly GL submission, so next: render thread, then instancing.
+- Also fixed: the old "skeleton is per character" pose cache (wrong); a release/acquire pair on SAnimContainer::m_bVALID; a DxAniScale null bone. iOS CI has a `source_ref` input for building a SOURCE branch.
+
+## 2026-10-09 — Crowd performance: diagnostic stat in the draw (patch 739, APK 250, iOS 1.0.250; awaiting upload)
+
+- iPhone 15 in the SG load-test crowd (252 players drawn): 5.8 fps, ~150 ms game CPU a frame. Cost switches on the phone, interleaved: palette uploads and light block = noise; all draws (nulldraw) = only ~20 ms. So the cost is game-side CPU before any GL. LDPlayer does the same crowd in ~37 ms on a slower CPU.
+- simpleperf (LDPlayer, debuggable): 9.5% of the process in RanPlat_DiagExists -> __faccessat. The cache had 64 slots for 72 names; past that every name was stat'd live, some per draw (nomeshvbo in RanMesh::DrawSubset). The iPhone log has the same "diagnostic cache full at 64 names". Fix: list the diag folder once a second and compare in memory. LDPlayer: 9.5% -> 0.4%, game CPU ~46 -> ~37 ms. **iPhone after the fix: to measure.**
+- Ruled out with measurements: the 43-51% memcpy on LDPlayer is the emulator's GL encoder (our own memcpy 0.1%, via WRAPMEMCPY=1); skinning already runs on the GPU; palette and light uploads cost the iPhone nothing measurable.
+- iPhone after 1.0.250, same crowd, all 252 drawn: **5.8 -> ~25 fps**, game CPU 150 -> 21-27 ms, frame 34-40 ms (heat "serious" caps at 30). Sections: ch:pose ~10 ms, ch:parts 10-14, part:chareff ~6.5, part:skinned ~6, GL submit ~12.
+- [ ] **Goal (user, 2026-10-10): full settings (all players) at 60 fps, no graphics loss.** Blocker found by reading the engine: one DxSkeleton per skeleton FILE is shared by every character (DxBoneCollector::Load), and animation tracks are bound to its bones at load (SAnimation::pBoneToAnimate), so characters are posed and drawn strictly one at a time on one core. Plan: (1) per-character poses computed in parallel on worker threads, drawing reads each character's own pose; (2) GL submission on its own thread; (3) re-measure, then whatever the profile names. Research first (three code maps: pose writes, bone reads during draw, shared state), on a branch, ship only after animation checks on both platforms.
+
+## 2026-10-09 — Skill-slot removal, HUD hide, smooth lists, AUTO in duels, idle-thread power fix (patch 737, APK 249, iOS 1.0.249; awaiting upload)
+
+- [x] Skill window: "แก้ไขช่องสกิล" opens the ring picker in remove mode (ReqSkillQuickReSet, server-confirmed); stays open, "เสร็จ" closes. LDPlayer: slot 2 cleared, shown "ว่าง", and the HUD ring empties too. MOBILE_PANEL 78-80.
+- [x] HUD editor: a hide/show (eye) tool. Hidden controls are not drawn and take no touch in play; in the editor they show crossed out and can be shown again. Reset brings everything back. Never the stick, the attack button, the menu (the way back in) or a game window. The client parks hidden skill, potion and corner slots off screen (`RanTouch_Is*Hidden`). Saved: layout grows 174 to 219 floats, and older files still load. LDPlayer: camera button and one skill slot hidden; still hidden after an app restart; reset restored both.
+- Smooth lists: CMobileSmoothScroll (quest, ranking, boss drops) and CMobileList ease onto a whole row at rest. LDPlayer ranking: rows mid-slide on two captures 0.35 s apart, at rest aligned.
+- AUTO in duels: MobileFindDuelOpponent (nearest live ISCONFRONT_TAR); plain-attack fallback; no loot or walk home while fighting; GetCONFT_TAR pairRange bug fixed. Builds; **not tested** (needs a second player to duel).
+- iPhone heat (iPhone 15, iOS 27, hunting): the 31 fps is our own pacing at heat "serious" (gap exactly 33.3 ms). GPU ~25% at 30 fps. The process had more kernel time than user time (275 s against 151 s) and ~6,000 switches a second. Cause: six idle Sleep(1) polling threads at ~980 wake-ups/s each. Fix: idle Sleep(1) backs off to 10 ms (net wait exempt). LDPlayer: loaders ~110/s each, process 6,900 to 3,355/s. Not yet measured on the iPhone.
+- [ ] iPhone heat: profile `part:skinned` (5 ms CPU per frame while hunting) with a real profiler before changing anything; GPU skinning exists in the shim but no draw uses it (palette counters 0).
+
+## 2026-10-09 — Original message boxes: PC text panel back (patch 733, APK 246, iOS 1.0.246; awaiting upload)
+
+- Found while testing the store build. Original's window body is the PC's see-through light grey, and the mobile skin had hidden the PC's dark inner panel behind a message box's text (BASIC_LINE_BOX_BODY_MINIPARTY, black at 132). So login messages sat directly on the login window. `CModalWindow` now shows that panel in the Original style only. Checked on LDPlayer (store build, "กรุณากรอกชื่อและรหัสผ่าน"). Not checked: Tab S9, iPhone.
 
 ## 2026-10-09 — Drag released over a button clicked it (patch 731, APK 245, iOS 1.0.245; awaiting upload)
 
@@ -227,7 +428,12 @@ the patch ships a needless APK bump).
 - 2026-10-09: Play identity check passed. **`tools/play-mcp`**: MCP server `google-play` (registered in `DEV EP9/.mcp.json`) with 14 tools: status, upload bundle to a track, promote/rollout/halt, listing, images, details, testers, reviews, internal sharing, data safety. It needs a service-account key at `native/.play/service-account.json` (gitignored; setup in its README). Selftest passes: the tools list and a clean "no key" answer. The API cannot create the app, and a new app's first .aab must be uploaded by hand in Play Console.
 - Still open:
   - [x] User: app created in Play Console (com.legacym.online, default th); service account play-publisher@legacy-m-play.iam.gserviceaccount.com invited. play_status answers 2026-10-09: 4 empty tracks, no bundles. The API could see the app before any upload; whether the first .aab still has to go by hand is unknown until we try.
-  - [ ] **NEXT (paused 2026-10-09 for game bugs):** Claude: merge main into `store` (48 commits behind), build STORE=1 .aab (1.1.60), test on LDPlayer, upload to the internal track with play_upload_bundle. Before any public track: hide เติมเงิน in the store build (Play payments policy), and the user answers whether shop boxes are random (rating questionnaire).
+  - [x] 2026-10-09: main merged into `store`; STORE=1 .aab 1.1.61 / versionCode 245 (19 MB, 4 libs 16 KB aligned, target 36). LDPlayer, fresh install: downloaded 4.86 GB in about 5 min, logged in, in-world, and the item shop has no เติมเงิน (`RanPlat_IsStore`, main: package on Android, bundle id on iOS; the direct build still shows it). **Uploaded by API** with play_upload_bundle to the internal track, status completed. No hand upload was needed.
+  - [ ] User: give the service account **Manage store presence** (play_update_listing answered 403), then Claude sets the th listing (text ready, store/listing.md).
+  - [ ] User: internal testers list, content rating, target audience 13+, app access (reviewer account), privacy policy upload, ads = no. Then closed testing: 12+ testers for 14 days (new personal account rule) before production.
+  - [ ] User decision: the launcher splash still shows the "RAN LEGACY M" logo while the store name avoids "Ran".
+  - [ ] User decision: random boxes in the item shop (rating questionnaire + odds).
+  - Building the store version: `git checkout store`, `git merge main`, `./build.sh && ABI=x86_64 ./build.sh && STORE=1 ./build-apk.sh`, then **`git checkout main` and rebuild both ABIs** before any MAKE-PATCH (the store branch links 16 KB pages and the patch ships whatever libs are in out/).
   - [ ] User: Apple enrollment approval, then App Store Connect app record + API key (Admin) into native/.appstore/.
   - [ ] User: fill privacy.html placeholders (name, contact email) and upload it; reviewer account; gacha odds question.
   - [ ] Claude: run ios-signing-setup.py, then ios-testflight.yml with upload; test store Android build on the Tab S9 / Android 15+.

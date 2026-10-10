@@ -14,6 +14,7 @@
 // without touching the D3D translation.
 
 #include "gl_context.h"
+#include "gl_thread.h"
 #include "../platform/ran_plat.h"
 #include "../platform/touch_ui.h"
 
@@ -366,6 +367,7 @@ extern "C" int RanGL_Init(void *nativeWindow) {
 //  Unbound first: EGL keeps a destroyed surface alive for as long as it is
 //  current, and the next eglMakeCurrent would fail with BAD_SURFACE.
 extern "C" void RanGL_SurfaceLost(void) {
+    RanGLT_Stop();                  //  the context comes back here first
     g_geomWindow = NULL;            //  the window is going; the size check must not touch it
     if (g_display == EGL_NO_DISPLAY) return;
 
@@ -390,6 +392,7 @@ extern "C" void RanGL_SurfaceLost(void) {
 //  when it has already run, so nothing ever pointed at the new window, and
 //  every frame swapped into the surface of the old one.
 extern "C" int RanGL_SurfaceRestore(void *nativeWindow) {
+    RanGLT_Stop();
     if (g_display == EGL_NO_DISPLAY || g_context == EGL_NO_CONTEXT) return 0;
 
     ANativeWindow *win = (ANativeWindow *)nativeWindow;
@@ -431,6 +434,7 @@ extern "C" int RanGL_SurfaceRestore(void *nativeWindow) {
 }
 
 extern "C" void RanGL_Shutdown(void) {
+    RanGLT_Stop();
     if (g_display != EGL_NO_DISPLAY) {
         eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (g_context != EGL_NO_CONTEXT) eglDestroyContext(g_display, g_context);
@@ -456,10 +460,28 @@ extern "C" int RanGL_HasContext(void) {
 //  Hand the context to whichever thread is about to draw. Releasing from the
 //  holder and binding on the taker is the only order EGL allows.
 extern "C" void RanGL_ReleaseContext(void) {
+    //  The loading screen's thread is about to draw: it gets the real context,
+    //  so the GL thread gives it back first.
+    RanGLT_Stop();
     if (g_display == EGL_NO_DISPLAY || !g_ctxHeld) return;
     if (!pthread_equal(pthread_self(), g_ctxThread)) return;
     eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     g_ctxHeld = false;
+}
+
+//  For gl_thread.cpp: the context with the current surface, on this thread or
+//  off it. g_ctxThread/g_ctxHeld are not touched - while the GL thread holds
+//  the real context, the main thread still "has" it as far as the renderer is
+//  concerned, because it is the one recording.
+extern "C" int RanGL_PlatMakeCurrent(int on) {
+    if (g_display == EGL_NO_DISPLAY) return 0;
+    if (!on) return eglMakeCurrent(g_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) ? 1 : 0;
+    if (!eglMakeCurrent(g_display, g_surface, g_surface, g_context)) {
+        LOGE("eglMakeCurrent (GL thread %s) failed: %s", on ? "take" : "give",
+             eglErrStr(eglGetError()));
+        return 0;
+    }
+    return 1;
 }
 
 extern "C" int RanGL_AcquireContext(void) {
@@ -556,6 +578,23 @@ extern "C" void RanGL_Present(void) {
         }
     }
     RanGLR_FrameEnd();
+
+    if (g_ranGLTOn) {
+        //  The swap goes over with the frame; this thread only waits if the GL
+        //  thread is more than a frame behind, and that wait is what "swap"
+        //  means in the frame report while the GL thread is on.
+        RanGLT_Post([]() {
+            const GLenum unwanted[] = { GL_DEPTH, GL_STENCIL };
+            glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, unwanted);
+            if (g_surface == EGL_NO_SURFACE) return;
+            if (!eglSwapBuffers(g_display, g_surface))
+                LOGE("eglSwapBuffers failed: %s", eglErrStr(eglGetError()));
+        });
+        double waited = 0.0;
+        RanGLT_FrameEnd(&waited);
+        g_swapSeconds += waited;
+        return;
+    }
     //  The touch controls go on last, over the finished frame.
     //  The touch controls used to be drawn here, at the end of the frame, which
     //  put them on top of everything including the game's own windows - so an
@@ -583,6 +622,12 @@ extern "C" void RanGL_Present(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts1);
     g_swapSeconds += (double)(ts1.tv_sec - ts0.tv_sec) +
                      (double)(ts1.tv_nsec - ts0.tv_nsec) * 1e-9;
+
+    //  Only from the game's own loop: the main thread, holding the context,
+    //  with a surface to draw on.
+    if (g_ctxHeld && pthread_equal(pthread_self(), g_mainThread) &&
+        pthread_equal(g_ctxThread, g_mainThread))
+        RanGLT_MaybeStart();
 }
 
 #endif  //  __ANDROID__

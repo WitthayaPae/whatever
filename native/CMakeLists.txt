@@ -18,6 +18,8 @@ option(RAN_BOUNDS "Build with trapping array-bounds checks" OFF)
 #  its own bundle id and name, no Files.app sharing, an asset-catalog icon
 #  (compiled by actool in ios-testflight.yml). Off = the SideStore build.
 option(RAN_IOS_STORE "iOS store (TestFlight) build" OFF)
+#  Profiling only: route our memcpy calls through an unwindable wrapper.
+option(RAN_WRAPMEMCPY "Wrap memcpy for the profiler" OFF)
 if(RAN_BOUNDS)
     add_compile_options(-fsanitize=array-bounds -fsanitize-trap=array-bounds -g)
     message(STATUS "array-bounds trapping: on")
@@ -388,6 +390,11 @@ elseif(APP_SRC)
     # it. 16 KB alignment loads fine on 4 KB devices too. libc++_shared from
     # NDK r27 is already 0x4000.
     -Wl,-z,max-page-size=16384)
+endif()
+if(RAN_WRAPMEMCPY AND NOT RAN_IOS)
+  target_sources(ran PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shim/platform/memcpy_wrap.c)
+  target_link_options(ran PRIVATE -Wl,--wrap=memcpy)
+  message(STATUS "memcpy wrapped for profiling")
 endif()
 
 # third-party C libraries must not see the Win32 emulation defines

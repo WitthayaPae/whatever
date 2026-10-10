@@ -173,6 +173,10 @@ extern "C" float RanTouch_GetSkillScale(void);
 
 //  Per-slot size, on top of the group's: every button sizes on its own.
 extern "C" float RanTouch_GetSkillSlotScale(int i);
+//  Taken off the HUD in the editor (and not while it is open): park it.
+extern "C" int RanTouch_IsSkillSlotHidden(int i);
+extern "C" int RanTouch_IsPotionSlotHidden(int i);
+extern "C" int RanTouch_IsCornerHidden(int i);
 extern "C" float RanTouch_GetPotionSlotScale(int i);
 
 //  Where potion slot i has been dragged, in pixels, on top of the row.

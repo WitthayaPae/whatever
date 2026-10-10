@@ -53,6 +53,7 @@ extern "C" int RanPath_HealCaseTwins(const char *root);
 extern "C" void RanShim_SetClientSize(int w, int h);
 extern "C" void RanD3D_LogStats(void);
 extern "C" void RanD3D_ReportBuffers(unsigned frames);
+#include "../../shim/gl/gl_thread.h"
 extern "C" void RanPath_ProbeVersionFile(void);
 
 namespace {
@@ -384,7 +385,18 @@ namespace { double g_collSeconds = 0.0; unsigned long g_collCalls = 0; }
 //  A total is not useful on its own here: the question is what one more player
 //  or one more mob costs, because the scene this has to survive is a hundred of
 //  each, not the dozen that happens to be standing around.
-extern "C" double RanProf_Now(void) { return DXUtil_Timer(TIMER_GETABSOLUTETIME); }
+//  The profiler's clock: nanosecond monotonic time as a double.
+//
+//  It was DXUtil_Timer(TIMER_GETABSOLUTETIME), which returns a FLOAT of seconds
+//  since boot. On a phone up for days a float has ~4-60 ms steps, so every
+//  section and span quantised to a few fixed values (an iPhone 15 showed 4.5,
+//  4.8, 10.0 ms over and over, 2026-10-10) and small costs read as noise. The
+//  game's clock is untouched; only measurement uses this.
+extern "C" double RanProf_Now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
 
 namespace {
 struct ProfCount { const char *name; unsigned long total; unsigned long frames; };
@@ -574,6 +586,18 @@ extern "C" void RanProf_Frame(double fUpdate, double fRender, double fPresent) {
     LOGI("FRAME buffers: %lu uploads/frame, %lu KB/frame, %.1f ms/frame",
          bufCount / s_frames, bufBytes / 1024 / s_frames, bufSeconds * 1000.0 / s_frames);
     RanD3D_ReportBuffers(s_frames);
+    {
+        //  The GL thread (shim/gl/gl_thread.h): how long it was busy replaying,
+        //  how long this thread waited for it, and how often a call had to wait
+        //  for an answer (each one drains the queue).
+        unsigned long syncs = 0, bytes = 0, frames = 0; double busy = 0.0, waited = 0.0;
+        RanGLT_TakeStats(&syncs, &bytes, &busy, &waited, &frames);
+        if (frames)
+            LOGI("FRAME glthread: on | gl busy %.1f ms/frame, game waited %.1f ms/frame, "
+                 "%.1f syncs/frame, %lu KB/frame queued",
+                 busy * 1000.0 / frames, waited * 1000.0 / frames,
+                 (double)syncs / frames, bytes / 1024 / frames);
+    }
     RanGLR_ReportBufferKinds(s_frames);
     RanGLR_ReportGpuSections(s_frames);
 

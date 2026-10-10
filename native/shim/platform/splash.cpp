@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../gl/gl_thunks.h"
 
 #define LOGI(...) RanPlat_Log(RANLOG_INFO,  "RanSplash", __VA_ARGS__)
 #define LOGE(...) RanPlat_Log(RANLOG_ERROR, "RanSplash", __VA_ARGS__)

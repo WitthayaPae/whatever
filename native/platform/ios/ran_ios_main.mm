@@ -48,6 +48,7 @@ void RanInput_PointerMove ( int x, int y );
 //  pinch cancelling a drag, and a press outside an edit box closing the
 //  keyboard. It lived inside android_main.cpp, so iOS had none of it.
 void RanGesture_Down ( int x, int y );
+void RanSampler_Tick ( void );
 void RanGesture_Move ( int x, int y );
 void RanGesture_Up   ( int x, int y );
 void RanGesture_Tick ( void );
@@ -66,6 +67,7 @@ void RanIME_Backspace ( void );
 //  the mixer runs on the audio callback thread and would otherwise play on
 //  over whatever the player switched to.
 void RanAudioSink_Pause ( int paused );
+void RanGLT_Stop ( void );          //  shim/gl/gl_thread.cpp
 void RanAudioSink_KeepAlive ( int on );
 
 const char *RanIOS_DataRoot ( void );
@@ -263,6 +265,7 @@ static int  g_imeInsetPerMille = 0;
         return;
     }
 
+    RanSampler_Tick ();     //  ran_ios_sampler.mm; idle unless the "sampler" diag is set
     const CFTimeInterval now = link.timestamp;
     const float dt = self.lastTick > 0 ? (float)(now - self.lastTick) : 0.0f;
     self.lastTick = now;
@@ -1347,8 +1350,17 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
 static const double kBackgroundGraceSec = 600.0;
 static NSInteger    s_bgGeneration = 0;
 
+//  Before anything else leaves the foreground: the GL thread (gl_thread.h) may
+//  still be replaying the last frame, and iOS kills a process that touches the
+//  GPU from the background. Drained here, it starts again with the next frame
+//  drawn in front.
+- (void)applicationWillResignActive:(UIApplication *)app
+{
+    RanGLT_Stop ();
+}
 - (void)applicationDidEnterBackground:(UIApplication *)app
 {
+    RanGLT_Stop ();
     RanAudioSink_KeepAlive ( 1 );
     RanCrash_SetForeground ( 0 );
     const NSInteger gen = ++s_bgGeneration;

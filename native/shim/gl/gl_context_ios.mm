@@ -19,6 +19,7 @@
 #import <OpenGLES/ES3/gl.h>
 
 #include "gl_context.h"
+#include "gl_thread.h"
 #include "../platform/ran_plat.h"
 
 #include <pthread.h>
@@ -185,6 +186,7 @@ extern "C" int RanGL_Init ( void *nativeWindow )
 
 extern "C" void RanGL_Shutdown ( void )
 {
+    RanGLT_Stop ();
     if (!g_ready) return;
     if (g_fbo) {
         glDeleteFramebuffers ( 1, &g_fbo );
@@ -205,6 +207,14 @@ extern "C" void RanGL_Shutdown ( void )
 extern "C" int RanGL_SurfaceChanged ( void )
 {
     if (!g_ready) return 0;
+    {
+        //  Only stop the GL thread when the buffers really have to be rebuilt.
+        const CGFloat sc = g_layer.contentsScale > 0 ? g_layer.contentsScale : 1;
+        const int nw = (int)( g_layer.bounds.size.width  * sc + 0.5 );
+        const int nh = (int)( g_layer.bounds.size.height * sc + 0.5 );
+        if (nw == g_width && nh == g_height) return 1;
+    }
+    RanGLT_Stop ();
     const CGFloat scale = g_layer.contentsScale > 0 ? g_layer.contentsScale : 1;
     const int w = (int)( g_layer.bounds.size.width  * scale + 0.5 );
     const int h = (int)( g_layer.bounds.size.height * scale + 0.5 );
@@ -230,9 +240,25 @@ extern "C" unsigned RanGL_DefaultFramebuffer ( void ) { return g_fbo; }
 
 extern "C" void RanGL_ReleaseContext ( void )
 {
+    //  The loading screen's thread gets the real context; the GL thread gives
+    //  it back first.
+    RanGLT_Stop ();
     if (!g_ctxHeld) return;
     [EAGLContext setCurrentContext:nil];
     g_ctxHeld = false;
+}
+
+//  For gl_thread.cpp: bind or unbind the context on the calling thread without
+//  touching g_ctxThread/g_ctxHeld - the main thread still "has" it while the GL
+//  thread replays what it records.
+extern "C" int RanGL_PlatMakeCurrent ( int on )
+{
+    if (!g_context) return 0;
+    if (![EAGLContext setCurrentContext:( on ? g_context : nil )]) {
+        LOGE ( "setCurrentContext (GL thread %s) failed", on ? "take" : "give" );
+        return 0;
+    }
+    return 1;
 }
 
 extern "C" int RanGL_AcquireContext ( void )
@@ -284,6 +310,23 @@ extern "C" void RanGL_Present ( void )
 
     RanGLR_FrameEnd ();
 
+    if (g_ranGLTOn) {
+        //  The present goes over with the frame; this thread waits only if the
+        //  GL thread is more than a frame behind (reported as "swap").
+        RanGLT_Post ( [] () {
+            const GLenum unwanted[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+            glInvalidateFramebuffer ( GL_FRAMEBUFFER, 2, unwanted );
+            glBindRenderbuffer ( GL_RENDERBUFFER, g_colorRB );
+            if (![g_context presentRenderbuffer:GL_RENDERBUFFER])
+                LOGE ( "presentRenderbuffer failed" );
+            glBindFramebuffer ( GL_FRAMEBUFFER, g_fbo );
+        } );
+        double waited = 0.0;
+        RanGLT_FrameEnd ( &waited );
+        g_swapSeconds += waited;
+        return;
+    }
+
     //  Nothing needs depth or stencil once the frame is finished, and saying so
     //  keeps a tiler from writing both back to memory - 16 MB a frame at this
     //  resolution. The colour buffer must NOT be invalidated: it is what is
@@ -301,6 +344,11 @@ extern "C" void RanGL_Present ( void )
     //  leaves the renderbuffer bound, and every draw path assumes the FBO is.
     glBindFramebuffer ( GL_FRAMEBUFFER, g_fbo );
     g_swapSeconds += nowSeconds () - t0;
+
+    //  Only from the game's own loop: the main thread, holding the context.
+    if (g_ctxHeld && pthread_equal ( pthread_self (), g_mainThread ) &&
+        pthread_equal ( g_ctxThread, g_mainThread ))
+        RanGLT_MaybeStart ();
 }
 
 #endif  //  __APPLE__
