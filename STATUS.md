@@ -32,6 +32,14 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-10 — iPhone on 1.0.257: GL thread 29 -> 17 ms; stream ring and HUD without waits (patch 755, APK 258, iOS 1.0.258; awaiting upload)
+
+- **iPhone 15, 1.0.257, crowd 250, heat serious:** GL thread **16-17 ms/frame** (1.0.256 at heat fair: 29). glClear 152 a frame x 8 us = 1.3 ms (was 98 x 115 us = 11.4). Game thread 12-16 ms. Paced at 30 by the heat clamp.
+- Kept hot and charging for 15+ more minutes: 15-25 fps, GPU 65-90%, every GL call 2-3x slower than before (same counts: CPU clocks cut). GPU ms/frame by `sectionskip` (utilisation / fps, noisy): **world-eff ~10 of ~37 ms**, names, glow, land 1-3 ms each; `w:mobitem` changed nothing (name not matched - check).
+- `drawgroups` (LDPlayer, iPhone settings): 1,640 skinned part draws a frame use 365 distinct buffer+texture+state keys, 383 with material, 629 with lights; never two in a row. Instancing could take ~1,640 to ~400-630 (17-21% of all draws) but needs per-instance palettes and lights and out-of-order character drawing. Parked behind cheaper items.
+- Fixed: Apple stream ring no longer re-specifies its store on wrap (16 MB, two fenced halves; `ringorphan` = old path; glprof had ~4-5 ms per wrap). Touch HUD batches and icon quads stream through the ring instead of rewriting one buffer at offset 0 (47 a frame, 40-80 us each on Apple). HUD checked 1:1 on LDPlayer, 0 GL errors. The two-half ring runs on Apple only - **first real test is the iPhone.**
+- Next: world-eff GPU breakdown on the phone (its sub-passes), then the remaining per-piece clears and draw-count reduction.
+
 ## 2026-10-10 — glClear was 39% of the iPhone's GL thread: MultiTex drawn ahead (patch 753, APK 257, iOS 1.0.257; awaiting upload)
 
 - `glprof` on the iPhone (1.0.256, crowd 250, heat fair), GL thread 29 ms/frame: **glClear 98 a frame x ~115 us = 11.4 ms (39%)**; glDrawElements/Arrays 4,800 a frame ~2 us each = 9 ms; glBufferSubData 37 x 78 us = 2.9 ms; glBufferData (stream ring wrap) 0.3 x 5 ms = 1.8 ms; the rest ~3 ms. The clear itself is cheap; it is where Apple's driver ends the scene's render pass when the target changed (store + reload of the whole frame), which is also GPU memory traffic, i.e. heat.
