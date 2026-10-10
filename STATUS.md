@@ -32,6 +32,16 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-10 — iPhone measured on 1.0.254; GL-thread sampler (patch 749, APK 255, iOS 1.0.255; awaiting upload)
+
+- **iPhone 15, 1.0.254, SG crowd (251 drawn), glthread on:**
+  - heat nominal: **37-42 fps**; GL thread busy 24-27 ms, game thread 13-16 ms (waits 6-7 ms for the GL thread).
+  - heat serious (reached in about a minute, and the phone stays there when the app is reopened): ~30 fps paced; with `noheatpace` 24-31 fps, GL thread 32-42 ms, game 20-35 ms.
+  - A/B at serious, interleaved: `novaocache` GL calls 30k -> 43k but GL busy unchanged (the attribute calls it removes are cheap on Apple's driver). `nostableskip` game thread +2-3 ms (noisy, phone heating during the run).
+  - **Conclusion (agreed with the user):** the target is sustained crowd play without heat, so the metric is total work per frame at steady heat, not cool-phone fps. The GL thread is the largest item.
+- `samplergl` (iOS sampler): samples the GL thread instead of the game thread. System addresses are named on the phone (dladdr) and stored in samples.bin v2; `tools/ios-sampler.py` prints time by leaf library and by the innermost app function, i.e. which GL call. Next: run it hot in the crowd, cut what it names.
+- 255 is an iOS-only change; the Android APK was repackaged with the same libs to move the shared build number.
+
 ## 2026-10-10 — Game-thread CPU per draw: uniform block skip, hashed lookups, pool free list (patch 747, APK 254, iOS 1.0.254; awaiting upload)
 
 - Profiled the LDPlayer 250-player crowd with `glthread` on (game thread only; the scripts now pick the thread with `android_main`, not the busiest one, which is now the GL thread).
