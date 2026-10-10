@@ -32,6 +32,11 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-10 — GL thread on the iPhone: half its busy time is driver waits; glprof (patch 751, APK 256, iOS 1.0.256; awaiting upload)
+
+- `samplergl` on 1.0.255, SG crowd (249 drawn), heat fair, 10 s: the GL thread is idle 39% (waiting for our queue). Of all samples: `gldFinishObject` -> kernel 12.5% (the driver waiting for the GPU before changing an object), `gldDestroyMemoryPlugin` -> kernel 9.2% (GPU memory freed every frame), `gldClearFramebufferData` -> waits 8.2%, plain driver work ~17%, memmove 4%, `gldUpdateDispatch` 3%. So about half the busy time is synchronisation and memory churn, not drawing.
+- Which of our calls cause them could not be read from stacks (closures tail-call into the driver, GLEngine names are hidden). `glprof` times every command on the GL thread and logs the top 25 by ms/frame every 2 s, named on the device; also `FRAME buffer calls` by kind. Checked on LDPlayer. Next: run it hot on the iPhone, fix what it names.
+
 ## 2026-10-10 — iPhone measured on 1.0.254; GL-thread sampler (patch 749, APK 255, iOS 1.0.255; awaiting upload)
 
 - **iPhone 15, 1.0.254, SG crowd (251 drawn), glthread on:**
