@@ -28,6 +28,7 @@
 #include "gl_platform.h"
 #include <string.h>
 #include <map>
+#include <unordered_map>
 #include <set>
 #include <pthread.h>
 #include <unistd.h>
@@ -571,6 +572,26 @@ struct UniformSlot {
 };
 std::vector<UniformSlot> g_uniformCache;
 
+//  Everything applyProgramUniforms reads for the uniforms that rarely change
+//  (stage, material, fog, alpha test, camera), as the bound program last got
+//  it. One compare of this replaces some thirty per-uniform cache checks on a
+//  draw where none of them moved, which is most draws. Parked per program with
+//  the cache above, for the same reason.
+struct StableSnap {
+    int   n;
+    float v[96];
+    StableSnap() : n(0) {}
+};
+StableSnap g_stableSnap;
+//  "nostableskip": every uniform checked one by one again, to A/B it.
+bool g_noStableSkip = false;
+unsigned long g_stableSends = 0, g_stableSkips = 0;
+//  "stablecheck": on every skipped block, compare each of its uniforms with
+//  the program's cache as the send path would, and count any that would have
+//  been sent. Must stay 0; measurement only.
+bool g_stableCheck = false;
+unsigned long g_stableMismatch = 0;
+
 bool uniformChanged(GLint loc, const float *values, int count) {
     if (loc < 0 || count > (int)(sizeof(((UniformSlot *)0)->values) / sizeof(float))) return loc >= 0;
     if ((int)g_uniformCache.size() <= loc) g_uniformCache.resize(loc + 1);
@@ -671,7 +692,7 @@ void setUniformMatrix(GLint loc, const float *m, int count) {
 }
 
 //  The program is recreated only on init; drop the cache with it.
-void resetUniformCache() { g_uniformCache.clear(); }
+void resetUniformCache() { g_uniformCache.clear(); g_stableSnap.n = 0; }
 
 GLuint g_prog = 0;
 GLint  uWorld = -1, uCameraPos = -1, uCameraPosF = -1,
@@ -1262,6 +1283,8 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
         { "nouisharp", &g_noUiSharp, "the sharper magnification filter on interface art" },
         { "vaocache",  &g_vaoCacheOn, "NOT using a VAO per client buffer layout (on while present)" },
         { "novaocache", &g_noVaoCache, "the VAO per client buffer layout (Apple default)" },
+        { "nostableskip", &g_noStableSkip, "skipping the rarely-changing uniforms as one block" },
+        { "stablecheck", &g_stableCheck, "NOT checking skipped uniform blocks against the cache (on while present)" },
         { "nobaseonly", &g_noBaseOnly, "re-issuing only pointers when just the vertex source moved" },
         //  Present = ON, unlike its neighbours: this is a candidate waiting for
         //  a measurement on a phone, not something being switched off.
@@ -1512,11 +1535,15 @@ struct Variant {
     //  Its own uniform value cache: a location means nothing in another program,
     //  and without this every switch would re-upload everything.
     std::vector<UniformSlot> cache;
+    StableSnap stable;
     Variant() : prog(0) { for (size_t i = 0; i < kLocationCount; ++i) locs[i] = -1; }
 };
 
 std::map<unsigned, Variant> g_variants;
 unsigned g_variantKey = 0xFFFFFFFFu;
+//  The entry g_variantKey names (map nodes do not move), so a draw that keeps
+//  its variant needs no lookup. NULL whenever g_variantKey names none.
+Variant *g_curVariant = NULL;
 
 //  What the key says, and what it becomes in the preamble.
 unsigned variantKey(int preTransformed, int lighting, int specular, int fogMode,
@@ -1680,8 +1707,7 @@ void useVariant(unsigned key) {
     //  happened to be asked for. useProgram is itself cached, so this is free
     //  whenever nothing moved.
     if (key == g_variantKey) {
-        std::map<unsigned, Variant>::iterator cur = g_variants.find(key);
-        if (cur != g_variants.end()) useProgram(cur->second.prog);
+        if (g_curVariant) useProgram(g_curVariant->prog);
         return;
     }
 
@@ -1692,9 +1718,13 @@ void useVariant(unsigned key) {
         g_uniAfterSwitch = true;
     }
     //  Park the current program's cache before the locations change under it.
-    std::map<unsigned, Variant>::iterator prev = g_variants.find(g_variantKey);
-    if (prev != g_variants.end()) prev->second.cache.swap(g_uniformCache);
+    if (g_curVariant) {
+        g_curVariant->cache.swap(g_uniformCache);
+        g_curVariant->stable = g_stableSnap;
+    }
+    g_curVariant = NULL;
     g_uniformCache.clear();
+    g_stableSnap.n = 0;
 
     std::map<unsigned, Variant>::iterator it = g_variants.find(key);
     if (it == g_variants.end()) {
@@ -1705,6 +1735,7 @@ void useVariant(unsigned key) {
         if (!built) {
             //  Fall back to whatever is bound rather than drawing nothing.
             g_variantKey = 0xFFFFFFFFu;
+            g_curVariant = NULL;
             return;
         }
         it = g_variants.insert(std::make_pair(key, Variant())).first;
@@ -1715,8 +1746,15 @@ void useVariant(unsigned key) {
 
     for (size_t i = 0; i < kLocationCount; ++i) *kLocationVars[i] = it->second.locs[i];
     it->second.cache.swap(g_uniformCache);
+    //  Taken, not copied, like the cache swap above: the parked copy is stale
+    //  from here on. RanGLR_InvalidateStateCache drops the current variant
+    //  without parking it, and a snapshot left here then claimed values that
+    //  the (empty) cache and the program did not have - "stablecheck" caught it.
+    g_stableSnap = it->second.stable;
+    it->second.stable.n = 0;
     useProgram(it->second.prog);
     g_variantKey = key;
+    g_curVariant = &it->second;
 }
 
 }
@@ -2364,6 +2402,7 @@ extern "C" void RanGLR_InvalidateStateCache(void) {
     //  forget too: they are two halves of one piece of state, and leaving this
     //  one set is what let a draw skip its glUseProgram entirely.
     g_variantKey = 0xFFFFFFFFu;
+    g_curVariant = NULL;
     glActiveTexture(GL_TEXTURE0);
 }
 
@@ -2540,9 +2579,101 @@ extern "C" void RanGLR_LogStageCombos(void) {
     g_stageComboOverflow = 0;
 }
 
+//  Would this upload have gone out? The same test as uniformChanged, without
+//  recording anything.
+static bool wouldSend(GLint loc, const float *values, int count) {
+    if (loc < 0) return false;
+    if ((int)g_uniformCache.size() <= loc) return true;
+    const UniformSlot &slot = g_uniformCache[loc];
+    return !(slot.count == count && memcmp(slot.values, values, sizeof(float) * count) == 0);
+}
+static bool wouldSendI(GLint loc, GLint v) { const float f = (float)v; return wouldSend(loc, &f, 1); }
+static bool wouldSendF(GLint loc, float v) { return wouldSend(loc, &v, 1); }
+
+//  Every upload the stable block guards, asked of the cache. See g_stableCheck.
+static unsigned long g_stableMisBy[64];
+static inline int W(int id, bool b) { if (b) ++g_stableMisBy[id]; return b ? 1 : 0; }
+static int stableBlockWouldSend() {
+    int n = 0;
+    if (g_fsProbe & 1) {
+        n += W(1, wouldSendI(uColorOp, 4)) + W(2, wouldSendI(uColorArg1, 2)) + W(3, wouldSendI(uColorArg2, 0));
+        n += W(4, wouldSendI(uAlphaOp, 4)) + W(5, wouldSendI(uAlphaArg1, 2)) + W(6, wouldSendI(uAlphaArg2, 0));
+    } else if (g_stageId == 0) {
+        n += W(7, wouldSendI(uColorOp, (GLint)g_colorOp)) + W(8, wouldSendI(uColorArg1, (GLint)g_colorArg1)) +
+             W(9, wouldSendI(uColorArg2, (GLint)g_colorArg2));
+        n += W(10, wouldSendI(uAlphaOp, (GLint)g_alphaOp)) + W(11, wouldSendI(uAlphaArg1, (GLint)g_alphaArg1)) +
+             W(12, wouldSendI(uAlphaArg2, (GLint)g_alphaArg2));
+    }
+    n += W(13, wouldSend(uTexFactor, g_texFactor, 4));
+    n += W(14, wouldSendI(uStage1, (g_fsProbe & 2) ? 0 : g_stage1Mode));
+    if (g_stage1Mode || g_texGen0) n += W(15, wouldSend(uView, g_viewMatrix, 16));
+    n += W(16, wouldSendI(uTexGen0, g_texGen0));
+    if (g_texGen0) n += W(17, wouldSend(uTexMat0, g_texMat0, 16));
+    n += W(18, wouldSendI(uLightCount, g_lightCount));
+    n += W(19, wouldSend(uCameraPos, g_cameraPos, 3)) + W(20, wouldSend(uCameraPosF, g_cameraPos, 3));
+    n += W(21, wouldSendI(uSpecularOn, g_specularOn));
+    n += W(22, wouldSendI(uPlain, g_plainFS ? 1 : 0));
+    if (g_specularOn) n += W(23, wouldSend(uMatSpecular, g_matSpecular, 3)) + W(24, wouldSendF(uMatPower, g_matPower));
+    n += W(25, wouldSend(uGlobalAmbient, g_globalAmbient, 3)) + W(26, wouldSend(uMatDiffuse, g_matDiffuse, 3));
+    n += W(27, wouldSend(uMatAmbient, g_matAmbient, 3)) + W(28, wouldSend(uMatEmissive, g_matEmissive, 3));
+    n += W(29, wouldSendF(uMatAlpha, g_matAlpha));
+    n += W(30, wouldSendI(uFogMode, g_fogMode)) + W(31, wouldSend(uFogColor, g_fogColor, 3));
+    n += W(32, wouldSendF(uFogStart, g_fogStart)) + W(33, wouldSendF(uFogEnd, g_fogEnd)) + W(34, wouldSendF(uFogDensity, g_fogDensity));
+    n += W(36, wouldSendI(uAlphaTest, ((g_fsProbe & 8) == 0 && g_dsATest) ? 1 : 0));
+    n += W(35, wouldSendF(uAlphaRef, (float)g_dsARef / 255.0f));
+    return n;
+}
+
 //  The state is all in globals already, so it simply moved.
 void applyProgramUniforms() {
-    if (g_fsProbe & 1) {
+    //  The inputs of every uniform guarded by !stableSame below, in a fixed
+    //  order; conditional ones only when they are sent, so equal snapshots
+    //  mean every one of those uploads would have been skipped by its cache.
+    float snap[96];
+    int sn = 0;
+    {
+        snap[sn++] = (float)g_fsProbe;
+        snap[sn++] = (float)g_stageId;
+        snap[sn++] = (g_skipSmallUni ? 1.0f : 0.0f) + (g_skipMatrixUni ? 2.0f : 0.0f);
+        if (!(g_fsProbe & 1) && g_stageId == 0) {
+            snap[sn++] = (float)g_colorOp; snap[sn++] = (float)g_colorArg1; snap[sn++] = (float)g_colorArg2;
+            snap[sn++] = (float)g_alphaOp; snap[sn++] = (float)g_alphaArg1; snap[sn++] = (float)g_alphaArg2;
+        }
+        memcpy(snap + sn, g_texFactor, sizeof(float) * 4); sn += 4;
+        snap[sn++] = (float)g_stage1Mode;
+        snap[sn++] = (float)g_texGen0;
+        if (g_stage1Mode || g_texGen0) { memcpy(snap + sn, g_viewMatrix, sizeof(float) * 16); sn += 16; }
+        if (g_texGen0) { memcpy(snap + sn, g_texMat0, sizeof(float) * 16); sn += 16; }
+        snap[sn++] = (float)g_lightCount;
+        memcpy(snap + sn, g_cameraPos, sizeof(float) * 3); sn += 3;
+        snap[sn++] = (float)g_specularOn;
+        snap[sn++] = g_plainFS ? 1.0f : 0.0f;
+        if (g_specularOn) { memcpy(snap + sn, g_matSpecular, sizeof(float) * 3); sn += 3; snap[sn++] = g_matPower; }
+        memcpy(snap + sn, g_globalAmbient, sizeof(float) * 3); sn += 3;
+        memcpy(snap + sn, g_matDiffuse, sizeof(float) * 3); sn += 3;
+        memcpy(snap + sn, g_matAmbient, sizeof(float) * 3); sn += 3;
+        memcpy(snap + sn, g_matEmissive, sizeof(float) * 3); sn += 3;
+        snap[sn++] = g_matAlpha;
+        snap[sn++] = (float)g_fogMode;
+        memcpy(snap + sn, g_fogColor, sizeof(float) * 3); sn += 3;
+        snap[sn++] = g_fogStart; snap[sn++] = g_fogEnd; snap[sn++] = g_fogDensity;
+        snap[sn++] = ((g_fsProbe & 8) == 0 && g_dsATest) ? 1.0f : 0.0f;
+        snap[sn++] = (float)g_dsARef;
+    }
+    const bool stableSame = !g_noStableSkip && g_stableSnap.n == sn &&
+                            memcmp(g_stableSnap.v, snap, sizeof(float) * sn) == 0;
+    if (stableSame) {
+        ++g_stableSkips;
+        if (g_stableCheck) g_stableMismatch += (unsigned long)stableBlockWouldSend();
+    } else {
+        g_stableSnap.n = sn;
+        memcpy(g_stableSnap.v, snap, sizeof(float) * sn);
+        ++g_stableSends;
+    }
+
+    if (stableSame) {
+        //  nothing: the stage uniforms are what this program already holds
+    } else if (g_fsProbe & 1) {
         //  MODULATE(TEXTURE, DIFFUSE) for colour and alpha both: the cheapest
         //  path through argValue and the two op ladders.
         setUniform1i(uColorOp, 4); setUniform1i(uColorArg1, 2); setUniform1i(uColorArg2, 0);
@@ -2568,11 +2699,13 @@ void applyProgramUniforms() {
         RanGLR_NoteStageCombo((unsigned)g_colorOp, (unsigned)g_colorArg1, (unsigned)g_colorArg2,
                               (unsigned)g_alphaOp, (unsigned)g_alphaArg1, (unsigned)g_alphaArg2);
     }
-    setUniformVec4(uTexFactor, g_texFactor);
-    setUniform1i(uStage1, (g_fsProbe & 2) ? 0 : g_stage1Mode);
-    if (g_stage1Mode || g_texGen0) setUniformMatrix(uView, g_viewMatrix, 1);
-    setUniform1i(uTexGen0, g_texGen0);
-    if (g_texGen0) setUniformMatrix(uTexMat0, g_texMat0, 1);
+    if (!stableSame) {
+        setUniformVec4(uTexFactor, g_texFactor);
+        setUniform1i(uStage1, (g_fsProbe & 2) ? 0 : g_stage1Mode);
+        if (g_stage1Mode || g_texGen0) setUniformMatrix(uView, g_viewMatrix, 1);
+        setUniform1i(uTexGen0, g_texGen0);
+        if (g_texGen0) setUniformMatrix(uTexMat0, g_texMat0, 1);
+    }
 
     setUniform1i(uVertexBlend, g_vertexBlend);
     //  "palettetrim": send only the slots this draw can index. The engine fills
@@ -2596,11 +2729,13 @@ void applyProgramUniforms() {
     setUniformMatrix(uViewProj, g_viewProj, 1);
 
     setUniform1i(uLighting, g_lightingOn);
-    setUniform1i(uLightCount, g_lightCount);
     setUniformMatrix(uWorld, g_world, 1);
-    setUniform3fv(uCameraPos, g_cameraPos);
-    setUniform3fv(uCameraPosF, g_cameraPos);
-    setUniform1i(uSpecularOn, g_specularOn);
+    if (!stableSame) {
+        setUniform1i(uLightCount, g_lightCount);
+        setUniform3fv(uCameraPos, g_cameraPos);
+        setUniform3fv(uCameraPosF, g_cameraPos);
+        setUniform1i(uSpecularOn, g_specularOn);
+    }
 
     //  Unit 3: unit 0 is the stage-0 texture, 1 the stage-1 texture and 2 the
     //  cube, so the ramp goes above them and stays bound.
@@ -2618,7 +2753,7 @@ void applyProgramUniforms() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glActiveTexture(GL_TEXTURE0);
     }
-    setUniform1i(uPlain, g_plainFS ? 1 : 0);
+    if (!stableSame) setUniform1i(uPlain, g_plainFS ? 1 : 0);
     if (g_fsProbe & 4) setUniform1i(uGammaOn, 0);
     setUniform1i(uGammaOn, (g_gammaOn && g_gammaLut) ? 1 : 0);
     if (g_gammaOn && g_gammaLut) {
@@ -2628,15 +2763,19 @@ void applyProgramUniforms() {
         if (uGammaLut >= 0) { glUniform1i(uGammaLut, 3); countUni(kUniUncached, 4); }
     }
     if (g_specularOn) {
-        setUniform3fv(uMatSpecular, g_matSpecular);
-        setUniform1f(uMatPower, g_matPower);
+        if (!stableSame) {
+            setUniform3fv(uMatSpecular, g_matSpecular);
+            setUniform1f(uMatPower, g_matPower);
+        }
         if (uLightSpecular >= 0) { glUniform3fv(uLightSpecular, 8, g_lightSpecular); countUni(kUniUncached, 96); }
     }
-    setUniform3fv(uGlobalAmbient, g_globalAmbient);
-    setUniform3fv(uMatDiffuse, g_matDiffuse);
-    setUniform3fv(uMatAmbient, g_matAmbient);
-    setUniform3fv(uMatEmissive, g_matEmissive);
-    setUniform1f(uMatAlpha, g_matAlpha);
+    if (!stableSame) {
+        setUniform3fv(uGlobalAmbient, g_globalAmbient);
+        setUniform3fv(uMatDiffuse, g_matDiffuse);
+        setUniform3fv(uMatAmbient, g_matAmbient);
+        setUniform3fv(uMatEmissive, g_matEmissive);
+        setUniform1f(uMatAlpha, g_matAlpha);
+    }
     if (g_lightCount > 0 && !g_skipLightBlock) {
         //  Compared as one block: the light set changes far less often than it
         //  is sent, and six array uploads a draw is most of the uniform traffic.
@@ -2668,14 +2807,16 @@ void applyProgramUniforms() {
         }
     }
 
-    setUniform1i(uFogMode, g_fogMode);
-    setUniform3fv(uFogColor, g_fogColor);
-    setUniform1f(uFogStart, g_fogStart);
-    setUniform1f(uFogEnd, g_fogEnd);
-    setUniform1f(uFogDensity, g_fogDensity);
+    if (!stableSame) {
+        setUniform1i(uFogMode, g_fogMode);
+        setUniform3fv(uFogColor, g_fogColor);
+        setUniform1f(uFogStart, g_fogStart);
+        setUniform1f(uFogEnd, g_fogEnd);
+        setUniform1f(uFogDensity, g_fogDensity);
 
-    setUniform1i(uAlphaTest, ((g_fsProbe & 8) == 0 && g_dsATest) ? 1 : 0);
-    setUniform1f(uAlphaRef, (float)g_dsARef / 255.0f);
+        setUniform1i(uAlphaTest, ((g_fsProbe & 8) == 0 && g_dsATest) ? 1 : 0);
+        setUniform1f(uAlphaRef, (float)g_dsARef / 255.0f);
+    }
 }
 
 extern "C" void RanGLR_ApplyState(const DWORD *rs) {
@@ -3014,21 +3155,28 @@ struct VaoKey {
     UINT     stride;
     GLsizei  base;
 
-    bool operator<(const VaoKey &o) const {
-        if (vb != o.vb) return vb < o.vb;
-        if (ib != o.ib) return ib < o.ib;
-        if (fvf != o.fvf) return fvf < o.fvf;
-        if (stride != o.stride) return stride < o.stride;
-        return base < o.base;
+    bool operator==(const VaoKey &o) const {
+        return vb == o.vb && ib == o.ib && fvf == o.fvf && stride == o.stride && base == o.base;
     }
 };
-std::map<VaoKey, GLuint> g_vaoCache;
+//  Hashed, not ordered: looked up on every cached draw, and walking a tree of
+//  a few hundred nodes was most of drawInternal's own time (LDPlayer crowd).
+struct VaoKeyHash {
+    size_t operator()(const VaoKey &k) const {
+        unsigned long long h = 1469598103934665603ull;
+        const unsigned v[5] = { k.vb, k.ib, (unsigned)k.fvf, (unsigned)k.stride, (unsigned)k.base };
+        for (int i = 0; i < 5; ++i) { h ^= v[i]; h *= 1099511628211ull; }
+        return (size_t)(h ^ (h >> 29));
+    }
+};
+typedef std::unordered_map<VaoKey, GLuint, VaoKeyHash> VaoCache;
+VaoCache g_vaoCache;
 unsigned long g_vaoCreated = 0, g_vaoHits = 0;
 
 //  A buffer that goes away takes every layout described against it with it -
 //  names are recycled, and a stale VAO would point at whatever took the name.
 void forgetVaosForBuffer(unsigned buffer) {
-    for (std::map<VaoKey, GLuint>::iterator it = g_vaoCache.begin(); it != g_vaoCache.end(); ) {
+    for (VaoCache::iterator it = g_vaoCache.begin(); it != g_vaoCache.end(); ) {
         if (it->first.vb == buffer || it->first.ib == buffer) {
             GLuint v = it->second;
             glDeleteVertexArrays(1, &v);
@@ -3226,7 +3374,12 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     if (!g_inited) return;
     if (!glVB && !verts) return;
 #ifdef RAN_TIME_DRAWS
-    const double drawStart = nowSeconds();
+    //  One draw in 16 is timed and counted 16 times: two clock reads on every
+    //  draw were 1.5% of the game thread in the LDPlayer crowd, for a figure
+    //  that is an average anyway.
+    static unsigned s_timeTick = 0;
+    const bool timeThis = (++s_timeTick & 15) == 0;
+    const double drawStart = timeThis ? nowSeconds() : 0.0;
 #endif
 
     // How many elements the primitive type implies, used for both the
@@ -3271,7 +3424,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     //  the client-side cost of deciding to draw.
     if (g_nullDraw || g_sectionSkipDepth > 0) {
 #ifdef RAN_TIME_DRAWS
-        { const double dt = nowSeconds() - drawStart;
+        if (timeThis) { const double dt = (nowSeconds() - drawStart) * 16.0;
           g_drawSeconds += dt; g_drawSecondsTotal += dt; }
 #endif
         return;
@@ -3567,7 +3720,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
         VaoKey key;
         key.vb = glVB; key.ib = glIB; key.fvf = fvf; key.stride = stride;
         key.base = (GLsizei)vbByteOffset;
-        std::map<VaoKey, GLuint>::iterator it = g_vaoCache.find(key);
+        VaoCache::iterator it = g_vaoCache.find(key);
         if (it != g_vaoCache.end()) {
             bindVAO(it->second);
             needLayout = false;
@@ -3576,7 +3729,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
             //  A map this large means something is generating layouts rather
             //  than reusing them; start again rather than grow without bound.
             if (g_vaoCache.size() > 8192) {
-                for (std::map<VaoKey, GLuint>::iterator d = g_vaoCache.begin(); d != g_vaoCache.end(); ++d) {
+                for (VaoCache::iterator d = g_vaoCache.begin(); d != g_vaoCache.end(); ++d) {
                     GLuint v = d->second;
                     glDeleteVertexArrays(1, &v);
                 }
@@ -4083,7 +4236,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     }
 
 #ifdef RAN_TIME_DRAWS
-    { const double dt = nowSeconds() - drawStart;
+    if (timeThis) { const double dt = (nowSeconds() - drawStart) * 16.0;
       g_drawSeconds += dt; g_drawSecondsTotal += dt; }
 #endif
 }
@@ -4624,7 +4777,7 @@ float maxAnisotropySupported() {
 
 //  Levels actually uploaded for a texture, so the sampler knows whether mip
 //  filtering is even possible.
-std::map<GLuint, int> g_texLevels;
+std::unordered_map<GLuint, int> g_texLevels;
 
 //  Which sampler generation each texture was last given. GL keeps these
 //  parameters in the texture object, so a texture that already has the current
@@ -4638,14 +4791,24 @@ struct TexSampler {
     float aniso;
     TexSampler() : minFilter(0), magFilter(0), wrapS(0), wrapT(0), aniso(0.0f) {}
 };
-std::map<GLuint, TexSampler> g_texSampler;
+std::unordered_map<GLuint, TexSampler> g_texSampler;
+//  Bumped whenever an entry above (or a texture's level count) is dropped, so
+//  the "same texture as the last draw" shortcut below never outlives one.
+unsigned g_texSamplerEpoch = 1;
 
-extern "C" void RanGLR_ForgetSamplerState(unsigned tex) { g_texSampler.erase((GLuint)tex); }
+extern "C" void RanGLR_ForgetSamplerState(unsigned tex) { g_texSampler.erase((GLuint)tex); ++g_texSamplerEpoch; }
 
 extern "C" void RanGLR_ApplySampler(unsigned tex) {
     if (!g_inited || !tex) return;
+    //  Consecutive draws very often share a texture (a mesh and its effect
+    //  passes), and then nothing below can differ: two map lookups a draw
+    //  were 2.6% of the game thread in the LDPlayer crowd.
+    static unsigned s_lastTex = 0, s_lastGen = 0, s_lastEpoch = 0;
+    if (tex == s_lastTex && g_samplerGeneration == s_lastGen && g_texSamplerEpoch == s_lastEpoch)
+        return;
+    s_lastTex = tex; s_lastGen = g_samplerGeneration; s_lastEpoch = g_texSamplerEpoch;
 
-    std::map<GLuint, int>::iterator it = g_texLevels.find(tex);
+    std::unordered_map<GLuint, int>::iterator it = g_texLevels.find(tex);
     const bool hasMips = it != g_texLevels.end() && it->second > 1;
 
     TexSampler want;
@@ -5309,6 +5472,7 @@ extern "C" void RanGLR_FinishTexture(unsigned tex, int levels, int d3dFormat) {
     //  Whether the texture has mips decides its min filter, so the sampler
     //  state it was given before this is no longer the right one.
     g_texSampler.erase(tex);
+    ++g_texSamplerEpoch;
 }
 
 extern "C" void RanGLR_LogStats(void) {
@@ -5326,6 +5490,17 @@ extern "C" void RanGLR_LogStats(void) {
          g_respecCount[1], g_respecWhy[1][0], g_respecWhy[1][1], g_respecWhy[1][2], g_respecWhy[1][3]);
     LOGI("ES3.0 base-only layouts per 300 frames: %lu", g_baseOnlyHits);
     g_baseOnlyHits = 0;
+    LOGI("stable uniforms per 300 frames: %lu sent, %lu skipped%s",
+         g_stableSends, g_stableSkips, g_noStableSkip ? " (nostableskip)" : "");
+    if (g_stableCheck) LOGI("stablecheck: %lu uploads a skipped block would have made (must be 0)", g_stableMismatch);
+    if (g_stableCheck && g_stableMismatch) {
+        char by[400]; int at = 0;
+        for (int q = 0; q < 64 && at < 380; ++q)
+            if (g_stableMisBy[q]) at += snprintf(by + at, sizeof(by) - at, " #%d=%lu", q, g_stableMisBy[q]);
+        LOGI("stablecheck by item:%s", by);
+        memset(g_stableMisBy, 0, sizeof(g_stableMisBy));
+    }
+    g_stableSends = g_stableSkips = g_stableMismatch = 0;
     memset(g_respecWhy, 0, sizeof(g_respecWhy)); g_respecCount[0] = g_respecCount[1] = 0;
     LOGI("into render targets: %lu draws, %lu switches, largest %dx%d (frame is %dx%d)",
          g_rtDraws, g_rtSwitches, g_rtBiggestW, g_rtBiggestH, RanGL_Width(), RanGL_Height());
@@ -5368,6 +5543,7 @@ static void deleteTextureNow(GLuint tex) {
     }
     g_texSampler.erase((GLuint)tex);
     g_texLevels.erase((GLuint)tex);
+    ++g_texSamplerEpoch;
     g_texDims.erase((GLuint)tex);
     forgetTex2D((GLuint)tex);
     if (tex) { GLuint t = tex; glDeleteTextures(1, &t); }
