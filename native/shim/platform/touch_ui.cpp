@@ -22,6 +22,8 @@
 #include "../gl/gl_thunks.h"
 
 extern "C" void RanGLR_InvalidateStateCache(void);
+extern "C" int RanGLR_StreamVertices(const void *data, unsigned size, unsigned *outBuffer, unsigned *outOffset);
+extern "C" void RanGLR_ForgetArrayBinding(void);
 extern "C" void RanInput_PointerWheel(int dz);
 
 //  Whether one of the game's own controls covers a point.
@@ -619,6 +621,28 @@ bool buildProgram() {
 
 int g_n = 0;                                   //  floats written this shape
 
+//  Vertices through the renderer's stream ring, the bound VAO pointed at them.
+//
+//  Every batch used to be a glBufferSubData into the one buffer at offset 0,
+//  which the previous batch's draw was still reading - on Apple's driver that
+//  waits for the GPU each time (gldFinishObject; ~40-80 us of the GL thread, 47
+//  a frame). The ring writes somewhere nothing is reading. `vbo` and offset 0
+//  are the old way, kept for when the ring cannot take it.
+static void streamOrSub(GLuint vbo, const void *data, unsigned bytes, GLsizei stride, GLint comps1) {
+    unsigned buf = 0, off = 0;
+    RanGLR_ForgetArrayBinding();
+    if (RanGLR_StreamVertices(data, bytes, &buf, &off)) {
+        glBindBuffer(GL_ARRAY_BUFFER, buf);
+    } else {
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)bytes, data);
+        off = 0;
+    }
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, (const void *)(uintptr_t)off);
+    glVertexAttribPointer(1, comps1, GL_FLOAT, GL_FALSE, stride,
+                          (const void *)(uintptr_t)(off + 2 * sizeof(float)));
+}
+
 inline void vtx(float x, float y, Col c) {
     if (g_n + kFloatsPerVert > (int)(sizeof(g_verts) / sizeof(g_verts[0]))) return;
     g_verts[g_n++] = x; g_verts[g_n++] = y;
@@ -648,7 +672,8 @@ void emit() {
         return;
     }
 
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(g_bn * sizeof(float)), g_batch);
+    glBindVertexArray(g_vao);
+    streamOrSub(g_vbo, g_batch, (unsigned)(g_bn * sizeof(float)), kFloatsPerVert * sizeof(float), 4);
     glDrawArrays(GL_TRIANGLES, 0, g_bn / kFloatsPerVert);
     g_vertsThisFrame += (unsigned)(g_bn / kFloatsPerVert);
     g_bn = 0;
@@ -2233,8 +2258,10 @@ GLuint g_texVbo[kTexRing] = { 0 }, g_texVao[kTexRing] = { 0 };
 int    g_texAt = 0;
 
 //  The next free slot, bound and ready to be written.
+int g_texSlotNow = 0;
 int texSlot() {
     const int i = g_texAt;
+    g_texSlotNow = i;
     g_texAt = (g_texAt + 1) % kTexRing;
     glBindVertexArray(g_texVao[i]);
     glBindBuffer(GL_ARRAY_BUFFER, g_texVbo[i]);
@@ -2365,7 +2392,7 @@ void drawIconDisc(const SkillIcon &ic) {
         v[n++] = uc + c * uh;     v[n++] = vc + si * vh;
     }
     texSlot();
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(n * sizeof(float)), v);
+    streamOrSub(g_texVbo[g_texSlotNow], v, (unsigned)(n * sizeof(float)), 4 * sizeof(float), 2);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, ic.tex);
     //  Say what we need sampled, every time.
@@ -2484,7 +2511,7 @@ void drawHudCell(int cell, float cx, float cy, float half, float alpha) {
         cx - half, cy + half, u0,      v0 + ch,
     };
     texSlot();
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)sizeof(v), v);
+    streamOrSub(g_texVbo[g_texSlotNow], v, (unsigned)sizeof(v), 4 * sizeof(float), 2);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_hudTex);
     //  The sheet ships with one level and no mipmaps, and a texture whose min
@@ -2602,7 +2629,7 @@ void drawIconQuad(const SkillIcon &ic, float hw, float hh) {
         x0, y1, uc - uh, vc + vh,
     };
     texSlot();
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)sizeof(v), v);
+    streamOrSub(g_texVbo[g_texSlotNow], v, (unsigned)sizeof(v), 4 * sizeof(float), 2);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, ic.tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

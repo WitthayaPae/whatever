@@ -586,6 +586,8 @@ StableSnap g_stableSnap;
 //  "nostableskip": every uniform checked one by one again, to A/B it.
 bool g_noStableSkip = false;
 bool g_clearLog = false;         //  see RanGLR_Clear
+bool g_drawGroups = false;       //  see noteDrawGroup
+bool g_ringOrphan = false;       //  see RingBuffer (Apple)
 unsigned long g_stableSends = 0, g_stableSkips = 0;
 //  "stablecheck": on every skipped block, compare each of its uniforms with
 //  the program's cache as the send path would, and count any that would have
@@ -1284,6 +1286,8 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
         { "nouisharp", &g_noUiSharp, "the sharper magnification filter on interface art" },
         { "vaocache",  &g_vaoCacheOn, "NOT using a VAO per client buffer layout (on while present)" },
         { "novaocache", &g_noVaoCache, "the VAO per client buffer layout (Apple default)" },
+        { "ringorphan", &g_ringOrphan, "the fenced two-half stream ring on Apple (orphan on wrap instead)" },
+        { "drawgroups", &g_drawGroups, "NOT counting which character draws could be combined (on while present)" },
         { "clearlog",  &g_clearLog,  "NOT logging clears by section (on while present)" },
         { "nostableskip", &g_noStableSkip, "skipping the rarely-changing uniforms as one block" },
         { "stablecheck", &g_stableCheck, "NOT checking skipped uniform blocks against the cache (on while present)" },
@@ -2951,9 +2955,59 @@ struct RingBuffer {
     //  True for the "streamsub" ring: always the glBufferSubData path.
     bool noPersistent;
 
+#if defined(__APPLE__)
+    //  Apple: no persistent mapping, so the store used to be re-specified
+    //  (orphaned) every time the cursor wrapped - measured on the iPhone at
+    //  ~4-5 ms of the GL thread each, a new 8 MB allocation and the old one
+    //  freed behind the GPU (gldDestroyMemoryPlugin). Instead the store is
+    //  allocated once and used in two halves, each closed with a fence when the
+    //  cursor leaves it; entering a half waits on the fence it was left with,
+    //  half a lap ago, which has long since signalled. The writes themselves
+    //  are unsynchronised maps, so nothing waits and nothing is allocated.
+    //  "ringorphan" puts the old orphaning back, to compare.
+    GLsync halfFence[2];
+    int curHalfP, curHalfGL;            //  producer's and GL thread's view
+    void enterHalf(int h) {             //  on the thread that holds GL
+        if (halfFence[curHalfGL]) glDeleteSync(halfFence[curHalfGL]);
+        halfFence[curHalfGL] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        if (halfFence[h]) {
+            glClientWaitSync(halfFence[h], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
+            glDeleteSync(halfFence[h]);
+            halfFence[h] = 0;
+        }
+        curHalfGL = h;
+    }
+    void resetHalves() {                //  on the thread that holds GL
+        for (int i = 0; i < 2; ++i) if (halfFence[i]) { glDeleteSync(halfFence[i]); halfFence[i] = 0; }
+        curHalfGL = 0;
+    }
+    //  Where a write of `size` goes, advancing the cursor; *enter is the half
+    //  being entered, or -1. -1 back when it cannot fit in half the store.
+    GLintptr placeHalved(GLsizei size, int *enter) {
+        const GLsizei half = capacity / 2;
+        *enter = -1;
+        if (size > half) return -1;
+        GLsizei at = cursor;
+        int h = at < half ? 0 : 1;
+        if (at + size > (h == 0 ? half : capacity)) { h ^= 1; at = h ? half : 0; }
+        if (h != curHalfP) *enter = h;
+        curHalfP = h;
+        cursor = (at + size + 15) & ~15;
+        return at;
+    }
+#endif
+
     RingBuffer(GLenum t, bool noPersist = false)
         : buffer(0), target(t), capacity(0), cursor(0), mapped(NULL), lapFence(0),
-          noPersistent(noPersist) {}
+          noPersistent(noPersist)
+#if defined(__APPLE__)
+          , curHalfP(0), curHalfGL(0)
+#endif
+    {
+#if defined(__APPLE__)
+        halfFence[0] = halfFence[1] = 0;
+#endif
+    }
 
     //  Immutable storage, mapped once. Only ever called for a fresh name.
     bool createPersistent(GLsizei bytes) {
@@ -3025,6 +3079,31 @@ struct RingBuffer {
             }
         }
 
+#if defined(__APPLE__)
+        if (!g_ringOrphan) {
+            if (capacity == 0 || size > capacity / 2) {
+                capacity = size * 4;
+                if (capacity < (16 << 20)) capacity = 16 << 20;
+                glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+                ++g_callsBuffer;
+                cursor = 0; curHalfP = 0;
+                RingBuffer *self = this;
+                RanGLT_Post([self]() { self->resetHalves(); });
+            }
+            int enter = -1;
+            const GLintptr offset = placeHalved(size, &enter);
+            if (enter >= 0) { RingBuffer *self = this; RanGLT_Post([self, enter]() { self->enterHalf(enter); }); }
+            const GLenum tgt = target;
+            RanGLT_PostData(data, (unsigned)size, [tgt, offset, size](const void *p) {
+                void *dst = ::glMapBufferRange(tgt, offset, size, GL_MAP_WRITE_BIT |
+                                               GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+                if (dst) { memcpy(dst, p, (size_t)size); ::glUnmapBuffer(tgt); }
+                else ::glBufferSubData(tgt, offset, size, p);
+            });
+            ++g_callsBuffer;
+            return offset;
+        }
+#endif
         if (size > capacity || capacity == 0) {
             capacity = size * 4;
             if (capacity < (8 << 20)) capacity = 8 << 20;
@@ -3108,6 +3187,27 @@ struct RingBuffer {
         //  spare. Generous, because every wrap costs an orphan and a fresh
         //  allocation: a frame streams a few hundred kilobytes, so eight
         //  megabytes is many frames of headroom.
+#if defined(__APPLE__)
+        if (!g_ringOrphan) {
+            if (capacity == 0 || size > capacity / 2) {
+                capacity = size * 4;
+                if (capacity < (16 << 20)) capacity = 16 << 20;
+                glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+                ++g_callsBuffer;
+                cursor = 0; curHalfP = 0;
+                resetHalves();
+            }
+            int enter = -1;
+            const GLintptr offset = placeHalved(size, &enter);
+            if (enter >= 0) enterHalf(enter);
+            void *dst = glMapBufferRange(target, offset, size, GL_MAP_WRITE_BIT |
+                                         GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_INVALIDATE_RANGE_BIT);
+            if (dst) { memcpy(dst, data, (size_t)size); glUnmapBuffer(target); }
+            else glBufferSubData(target, offset, size, data);
+            ++g_callsBuffer;
+            return offset;
+        }
+#endif
         if (size > capacity || capacity == 0) {
             capacity = size * 4;
             if (capacity < (8 << 20)) capacity = 8 << 20;
@@ -3387,6 +3487,72 @@ inline void attrOff(GLuint a, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
     //  The format is not VAO state once disabled in a way we track; describe
     //  it again when the attribute comes back.
     f.size = -1;
+}
+
+//  "drawgroups": could the character draws be drawn together? Per frame, the
+//  draws inside part:skinned and part:chareff are keyed by what a combined
+//  draw would have to share - buffers, index range, texture, shader variant,
+//  blend/alpha/cull state - and again with the material and the light block
+//  added. Logged per 300 frames: draws, distinct keys, and the runs of
+//  consecutive draws with the same key (what batching without reordering
+//  would get). Measurement only.
+struct DrawGroupStat { unsigned long draws, keys, keysMat, keysMatLight, runs; };
+DrawGroupStat g_dgStat[2];
+std::unordered_map<unsigned long long, unsigned> g_dgKeys[2], g_dgKeysMat[2], g_dgKeysML[2];
+unsigned long long g_dgLast[2] = { 0, 0 };
+unsigned g_dgFrame = 0xFFFFFFFFu;
+unsigned long g_dgFrames = 0;
+extern "C" unsigned RanGL_FrameIndex(void);
+
+static inline unsigned long long dgMix(unsigned long long h, unsigned long long v) {
+    h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2); return h;
+}
+static unsigned long long dgHashFloats(unsigned long long h, const float *f, int n) {
+    for (int i = 0; i < n; ++i) { unsigned u; memcpy(&u, &f[i], 4); h = dgMix(h, u); }
+    return h;
+}
+static void noteDrawGroup(unsigned vb, unsigned ib, unsigned ibOff, unsigned icount, unsigned vbOff, unsigned tex) {
+    const char *sec = (g_sectionTop > 0 && g_sectionTop <= 16) ? g_sectionStack[g_sectionTop - 1] : NULL;
+    if (!sec) return;
+    const int k = !strcmp(sec, "part:skinned") ? 0 : (!strcmp(sec, "part:chareff") ? 1 : -1);
+    if (k < 0) return;
+    const unsigned f = RanGL_FrameIndex();
+    if (f != g_dgFrame) {
+        g_dgFrame = f; ++g_dgFrames;
+        for (int j = 0; j < 2; ++j) {
+            g_dgStat[j].keys += g_dgKeys[j].size(); g_dgStat[j].keysMat += g_dgKeysMat[j].size();
+            g_dgStat[j].keysMatLight += g_dgKeysML[j].size();
+            g_dgKeys[j].clear(); g_dgKeysMat[j].clear(); g_dgKeysML[j].clear(); g_dgLast[j] = 0;
+        }
+    }
+    unsigned long long h = 1469598103934665603ull;
+    h = dgMix(h, vb); h = dgMix(h, ib); h = dgMix(h, ibOff); h = dgMix(h, icount); h = dgMix(h, vbOff);
+    h = dgMix(h, tex); h = dgMix(h, g_variantKey);
+    h = dgMix(h, g_dsBlend); h = dgMix(h, g_dsSrc); h = dgMix(h, g_dsDst); h = dgMix(h, g_dsATest);
+    h = dgMix(h, g_dsARef); h = dgMix(h, g_cullWanted ? 1 : 0); h = dgMix(h, g_dsZW);
+    unsigned long long hm = dgHashFloats(h, g_matDiffuse, 3);
+    hm = dgHashFloats(hm, g_matAmbient, 3); hm = dgHashFloats(hm, g_matEmissive, 3);
+    hm = dgHashFloats(hm, &g_matAlpha, 1); hm = dgHashFloats(hm, g_texFactor, 4);
+    hm = dgMix(hm, (unsigned)g_colorOp); hm = dgMix(hm, (unsigned)g_alphaOp);
+    unsigned long long hl = dgMix(hm, (unsigned)g_lightCount);
+    hl = dgHashFloats(hl, g_lightDiffuse, 3 * g_lightCount); hl = dgHashFloats(hl, g_lightPos, 4 * g_lightCount);
+    hl = dgHashFloats(hl, g_lightDir, 3 * g_lightCount); hl = dgHashFloats(hl, g_lightAmbient, 3 * g_lightCount);
+    ++g_dgStat[k].draws;
+    ++g_dgKeys[k][h]; ++g_dgKeysMat[k][hm]; ++g_dgKeysML[k][hl];
+    if (h != g_dgLast[k]) ++g_dgStat[k].runs;
+    g_dgLast[k] = h;
+}
+static void logDrawGroups() {
+    if (!g_drawGroups || !g_dgFrames) return;
+    const char *nm[2] = { "part:skinned", "part:chareff" };
+    for (int j = 0; j < 2; ++j) {
+        const double fr = (double)g_dgFrames;
+        LOGI("drawgroups %s: %.0f draws/frame, %.0f keys (state), %.0f with material, %.0f with lights, %.0f runs",
+             nm[j], g_dgStat[j].draws / fr, g_dgStat[j].keys / fr, g_dgStat[j].keysMat / fr,
+             g_dgStat[j].keysMatLight / fr, g_dgStat[j].runs / fr);
+        memset(&g_dgStat[j], 0, sizeof(g_dgStat[j]));
+    }
+    g_dgFrames = 0;
 }
 
 static void drawInternal(DWORD primType, UINT primCount, const void *verts,
@@ -4242,6 +4408,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     //  effect passes - where the cost is overdraw, not geometry - the triangle
     //  count is the closest proxy there is to how much fill they ask for.
     RanGLR_NoteSectionDraw(vcount, icount ? icount : vcount, g_dsBlend != 0);
+    if (g_drawGroups) noteDrawGroup(glVB, glIB, ibByteOffset, icount, vbByteOffset, glTexture);
 
     if (glIB && indexBits) {
         bindElements(glIB);   // part of the bound VAO's state, and cached with it
@@ -4446,6 +4613,11 @@ extern "C" void RanGLR_TakeBufferStats(unsigned long *count, unsigned long *byte
 //
 //  Returns 0 if the ring cannot take it, in which case the caller writes the
 //  client's own buffer as before.
+//  For code that binds GL_ARRAY_BUFFER behind the renderer's back (the touch
+//  HUD) and then streams through the ring: the ring writes into whatever is
+//  bound, trusting the cache, so the cache must not claim a binding it lost.
+extern "C" void RanGLR_ForgetArrayBinding(void) { g_gl.arrayBuffer = 0xFFFFFFFFu; }
+
 extern "C" int RanGLR_StreamVertices(const void *data, unsigned size,
                                      unsigned *outBuffer, unsigned *outOffset) {
     if (!g_inited || !data || !size) return 0;
@@ -5513,6 +5685,7 @@ extern "C" void RanGLR_LogStats(void) {
          g_respecCount[0], g_respecWhy[0][0], g_respecWhy[0][1], g_respecWhy[0][2], g_respecWhy[0][3],
          g_respecCount[1], g_respecWhy[1][0], g_respecWhy[1][1], g_respecWhy[1][2], g_respecWhy[1][3]);
     LOGI("ES3.0 base-only layouts per 300 frames: %lu", g_baseOnlyHits);
+    logDrawGroups();
     if (g_clearLog) {
         for (std::map<std::string, unsigned long>::iterator it = g_clearKinds.begin(); it != g_clearKinds.end(); ++it)
             if (it->second) { LOGI("clearlog per 300 frames: %6lu  %s", it->second, it->first.c_str()); it->second = 0; }
