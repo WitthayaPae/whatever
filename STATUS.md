@@ -32,6 +32,14 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-10 — glClear was 39% of the iPhone's GL thread: MultiTex drawn ahead (patch 753, APK 257, iOS 1.0.257; awaiting upload)
+
+- `glprof` on the iPhone (1.0.256, crowd 250, heat fair), GL thread 29 ms/frame: **glClear 98 a frame x ~115 us = 11.4 ms (39%)**; glDrawElements/Arrays 4,800 a frame ~2 us each = 9 ms; glBufferSubData 37 x 78 us = 2.9 ms; glBufferData (stream ring wrap) 0.3 x 5 ms = 1.8 ms; the rest ~3 ms. The clear itself is cheap; it is where Apple's driver ends the scene's render pass when the target changed (store + reload of the whole frame), which is also GPU memory traffic, i.e. heat.
+- `clearlog` (new diag: clears by frame section, flags, target, with a backtrace) on LDPlayer with **the iPhone's option.ini copied over** (the emulator's own settings hid it): `part:chareff` 128x128 ~55 a frame, from `DxEffCharMultiTex::Render` -> `DxImageMove`. That effect (SKD_BEST only) draws its scrolling texture into the shared 128x128 target and then the piece, per piece, mid-scene.
+- Fix (SOURCE, RAN_MOBILE): every player about to be drawn has it drawn first, right after the pose batch (`DxSkinChar::MobilePrepareEffects`), each into a pooled 128x128 target of its own (up to 384, 64 KB each); Render uses it when made this frame from the same scroll offsets, else the original path. Same draws into a different surface, so the same pixels. LDPlayer: ~43 of the ~55 now happen together in one break; ~8 a frame still take the old path (pieces outside the player batch). Visual A/B with `nomultitexprep` at 1:1: same. PC GameClient2, Emulator, ServerAgent, ServerField build.
+- Still to do from the same profile: the remaining per-piece clears (own character, mobs, attachments, `DxEffCharMark`, `DxEffectNeon` use the same target), the glBufferSubData (37 a frame, 78 us each) and the stream-ring orphan (5 ms each).
+- LDPlayer now runs with the iPhone's option.ini, so emulator profiles match the phone's effect detail. Its own file was pulled first (session scratchpad `opt_ld.ini`).
+
 ## 2026-10-10 — GL thread on the iPhone: half its busy time is driver waits; glprof (patch 751, APK 256, iOS 1.0.256; awaiting upload)
 
 - `samplergl` on 1.0.255, SG crowd (249 drawn), heat fair, 10 s: the GL thread is idle 39% (waiting for our queue). Of all samples: `gldFinishObject` -> kernel 12.5% (the driver waiting for the GPU before changing an object), `gldDestroyMemoryPlugin` -> kernel 9.2% (GPU memory freed every frame), `gldClearFramebufferData` -> waits 8.2%, plain driver work ~17%, memmove 4%, `gldUpdateDispatch` 3%. So about half the busy time is synchronisation and memory churn, not drawing.
