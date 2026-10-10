@@ -201,6 +201,8 @@ set(Lib_ClientUI_SOURCES
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileEnhanceWindow.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileMenuWindow.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileItemSheet.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileItemInfoBox.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileQuestRoute.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileUiKit.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileCharPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileSettingsPanel.cpp

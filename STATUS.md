@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-10
+- **Last updated:** 2026-10-11
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -31,6 +31,85 @@ the patch ships a needless APK bump).
 2026-10-08). Full list in the dated sections below.
 
 ---
+
+## 2026-10-10 — Item-on-item use from the bag; menu first-open flick (not released; shared SOURCE, so Android and iOS)
+
+- **Enhancement unchanged** (user: "only the enhancement stay as it is"). The enhance window, its Upgrade / Put-in rows and its materials (stone, option / non-drop / wrapper / reform card, costume) are as they were. Verified on LDPlayer: the stone and the disjunction powder still show อัพเกรด.
+- **Bag's ทับชุด button removed** (user: "no new panel menu ทับชุด"). Costumes go on through the enhance window, as before. The button slot is now a ยกเลิก that shows only while picking. Sort and Separate share the row.
+- **Items that had no way to be used now have a ใช้งาน row** that turns the bag into the picker and lights only valid targets. The rules come from the PC requests (`CMobileBagPanel::CanApply`):
+  - pet food (a pet card with a pet), pet revive, pet skin pack, dual-pet card (the summoned pet's card);
+  - vehicle battery and boosters (a vehicle);
+  - mystery key (its own box);
+  - dye (taps a worn slot; `InvenUseToPutOn`).
+  - Cleanser and disjunction keep the Use row they had.
+  - The old separate dual-pet row was folded into this flow.
+- **Menu first-open flick fixed.** `MobileArrangeMenu` now runs right after `ShowGroupFocus(MOBILE_MENU_WINDOW)` (DxGameStage.cpp). Recorded on LDPlayer at the first open after launch: one changed frame, menu already in place.
+- PC Client, Emulator, ServerAgent and ServerField build clean.
+- **Quest tracker text bigger** (user: too small). `CQuestHelper` uses 12 pt on mobile instead of 9. The box grows 100 to the left and the text stops 62 short of the right edge, clear of the round button column. Two fixes found while testing:
+  - The title read "ภารกิจ:" with no name, because queststrtable.xml has only Chinese. It now uses `GetTITLE()`, like the quest panel.
+  - The trailing space left an empty line. Trimmed.
+  - Verified on LDPlayer at 1:1: one-line name, then "สถานะ:Vulgarian 0/10".
+- **เส้นทาง, phase 1 (same map) on LDPlayer.** The user asked for no auto-walk. `MobileQuestRoute` (Lib_ClientUI, mobile only) does the following:
+  - **Target:** the current step's first open objective, in this order: kill, collect, area, guard, defend, then the NPC. It uses the live crow if one is in view, else the nearest spawn in the map's mob schedule, else quest cells × 50 for area steps.
+  - **Path:** navmesh `BuildNavigationPath`, cut to line of sight. Measured 0.25-0.35 ms on the emulator. It rebuilds after 15 units of movement or every 0.5 s.
+  - **Trail:** up to 6 stacks of `sundo_directionarrow02`, 45 units apart, in a private copy recoloured green at alpha 0.75.
+  - **Destination:** `target_arrow_green` over the target.
+  - **UI:** a เส้นทาง / ปิดเส้นทาง button in the quest panel, which closes the panel when turned on. The tracker shows a green เส้นทาง line. Chat says "เส้นทาง: เป้าหมายอยู่แผนที่อื่น" when the target is on another map. Gameword 86-88 added.
+  - **Diags:** `effpreview` (effects in a row in front of the character) and `routeto` ("x z" overrides the target).
+  - **Verified on LDPlayer:** the Vulgarian kill quest's trail followed the walkway and updated while walking. Quest 0 (NPC indoors) reported another map.
+- **เส้นทาง, phase 2 (other maps) on LDPlayer.**
+  - **Index:** on first need, every map in the map list is loaded with `GLLevelFile::LoadFile(.., FALSE, NULL)`, a few a frame with a 6 ms budget. That load fills the full schedule in every format; the client load skips it in 0x107 files. The index holds gates (box centre, arrival point, OUT flag, up to 8 destinations) and spawn points.
+    - First build: 69 maps listed, 66 loaded, 274 gates, 27447 spawns, 98 ms of frames on the emulator.
+    - Saved to `cache/questroute.bin`, keyed on the map list and `cVer.bin`. Later logins load it from the cache.
+  - **Route:** Dijkstra over (map, gate arrived by). Walking inside a map costs its straight distance, each gate +150. The trail leads to the first gate's box on the current map.
+  - **Messages:** the tracker and chat say "เส้นทาง: ไปที่ <map>", or กำลังค้นหาเส้นทาง while the index builds. Gameword 89-90 added.
+  - **Verified:** route chains were logged with names.
+    - Registration quest: สถาบัน SG -> ศูนย์การศึกษา SG. Test-walked to the gate, the game's own enter prompt appeared, and after crossing the trail led on to the NPC.
+    - History-room quest: ศูนย์การศึกษา SG -> สถาบัน SG -> 104/0.
+  - **Test-only diag:** `routewalk` walks the character along the route (LargeMapMoveTo). It is not a feature.
+- **Quest list tags** (user: had to open each quest to find which were shown). Rows on the in-progress tab show บนจอ (in the tracker) and/or เส้นทาง at the right, in green-yellow. Long titles are cut before the tag with "..", with the Thai marks kept on their letter in both UTF-8 and CP874. Gameword 91 added. Verified at 1:1.
+- **Quest list rows would not select when tapped on their right side** (user, LDPlayer). The cause was the new tag label: it covers each row's right 140, empty or not, and took the tap; `OnTap` had no case for it. It now counts as the row. Verified at the user's own tap point (427,305 logical).
+- **Quest rewards always in view** (user: "why I dont see the reward"). Before, they were the last lines of the scrolling body, below the fold, with no scroll bar. The live PC window is the classic one (bFeatureModernQuestWindow is unset, so 0), where they sit behind a รางวัล button. The user chose an always-visible box: `m_pReward` sits above the item row, as tall as its wrapped lines (at most 40% of the text space, after which it scrolls), and the body scrolls above it (`PlaceDetailText`). The trade-off: less body in view, so steps can start below the fold. Verified on 4 quests. PC build clean.
+- **Chat box: page picker replaces the tab row and the filter** (user, 2026-10-10).
+  - The 7 page tabs and ตัวกรอง are gone, so the messages take the tab row's 50 units.
+  - The ก/A language button is gone too. It was dead on a phone: the shim's `ImmGetConversionStatus` is always FALSE.
+  - In its place, at the input row's end, is a second `CMobileChatChannelBar` in view mode (`MOBILE_CHAT_VIEW_BAR`), styled like the ทั่วไป send picker. Its drop-up is titled "แสดงข้อความจากช่อง" (MOBILE_CHAT 5) and has the 7 pages with their channel colours; choosing one sets `m_wDISPLAYTYPE` as the tab did.
+  - The filter state stays CHAT_ALL, as every session starts; it isn't saved.
+  - Verified on LDPlayer: the picker opens and closes on an outside tap; คลับ shows an empty page, back to ทั้งหมด restores it; typing is kept while the picker opens. PC build clean.
+- **Item detail is a window, with a dim behind it** (user, 2026-10-10: the bag's detail ran off the screen; asked for a window that scrolls, then for it to be a proper panel with a modal backdrop; 2026-10-11 also the stall).
+  - `CMobileItemInfoBox` (MobileItemInfoBox.cpp) is a kit panel: the item name is the title, and the game's own tooltip lines are on the left with every colour piece kept. The body scrolls with a scroll bar. The PC's mouse hints (CTRL+click etc.) are dropped.
+  - The item sheet's actions are kit buttons in a right-hand column, the first one primary. The sheet's own ปิด row is dropped (X and the dim do it). `CMobileItemSheet` still builds the rows and runs them (`FireRow`); while the window is up, its old PC-skin frame and rows aren't drawn.
+  - `CMobileItemInfoVeil` dims the whole screen, takes every press that misses the window, and closes on it. It also puts a solid black card behind the window: the kit body is see-through, and the bag slots showed through the text.
+  - A press on the dim doesn't reach what is under it. The sheet's own outside-press close is off while the window is up (it ran above the dim, so the bag got the press and opened that item), and the press-to-release match is broken (`MobileCloseItemDetail`).
+  - No hover tooltip where the window closed: a phone's pointer stays where the finger lifted (`m_bMobileHoverMuted`). After Back, the PC tooltip was popping up over the bag.
+  - **Stall** (`CTX_PMARKET`): a tap on a stall slot opens the same window. Its first button runs the slot's own tap, buy / นำออก (owner, before opening, MOBILE_ITEM_SHEET 22) / ขาย (into a buy order), through `CPrivateMarketWindow::ActOnItem`. That code was moved unchanged out of TranslateUIMessage, so the PC path is the same. The detail shows the stall price (bInPrivateMarket).
+  - **Verified on LDPlayer:**
+    - The bag: X, Back and a dim tap above the window or over another bag item each close the window, with no new sheet and no tooltip. ลิงก์ในแชท puts the link in the chat field and closes.
+    - A worn +7 weapon fills the screen height, and a swipe scrolls it to the end with the bar moving.
+    - A visitor at admin#1's stall sees the price. ซื้อ opens the stall's quantity dialog (cancelled). A dim tap over the world closes the window without walking.
+  - **Not tested:** your own stall (นำออก) and buy-order stalls; the other three themes (only Original was seen); the Tab S9; iPhone. All the code is shared SOURCE, so iOS gets the same code. PC client, Emulator and servers build clean. Gui.rcc repacked for the label.
+- **NPC talk translated to Thai: imported by the user and checked by them on LDPlayer (2026-10-10).** Re-export of the live npctalk folder is identical to the Thai file. NpcTalk.rcc matches all loose .ntk; the only odd entry is a stray copy, 'NPC_D_Police1 - สำเนา.ntk', stored under its cp874 name. Output: `CLIENT/data/glogic/npctalkText_TH.txt`.
+  - **Editor:** Editor_NpcAction has new Text Export / Text Import buttons (`EditorNpcAction/NtkTextIO.cpp`) and a `/ntkexport` / `/ntkimport <folder> <file>` command line. The build is copied to CLIENT; the old one is `Editor_NpcAction.exe.bak_pre_textio`.
+  - **Scope:** 664 .ntk files, 20947 strings. Korean, English and Chinese (Big5, 938 unique lines the first classifier took for Thai) were translated; other-server branding was rewritten for RAN Legacy M. Names follow the existing Thai: Tiger Command, สายเวทย์, กลุ่มการเงิน Sacred.
+  - **Verified:** import into a scratch copy changed 9986 strings in 473 files with 0 unmatched keys and 0 failures; re-export from the saved files is byte-identical to the input file; all 664 reload.
+  - **Still open:** in-game check after the import; repack NpcTalk.rcc and ship it.
+  - **For the user to review:** Taiwan charity notices; one garbled source line (z0164); the School Wars mention; Korean-grammar quiz lines; skill names translated by meaning.
+- **Quest text translated to Thai: imported by the user and checked by them on LDPlayer.** All 688 .qst were re-saved, and Quest.rcc matches all 890 loose files. Output: `CLIENT/data/glogic/quest/questText_TH.txt` (CP874, CRLF); the original is untouched.
+  - **Scope:** 192 quests, 1470 fields (832 Korean, 638 English), from 586 unique strings translated once each.
+  - **Detecting Korean:** clean-Hangul decode and no Hanja gave 181 candidates; each was read by hand, 5 were Thai and 176 Korean. Earlier statistical tests were wrong.
+  - **Names:** taken from the game data (a `questdump` diag, now removed). Quest 693's data names a return card as the "Research Document"; the text says เอกสารวิจัย.
+  - **Checks:** no Korean or English left (only the 22 letter-event codes); untouched blocks are byte-identical; a replay of `ImportText` gives the same 688 IDs and step counts.
+  - **Still open:**
+    - 334 Korean objective lines (`m_strOBJ_*`, "เป้าหมายตอนนี้") are not in the text export, so they need another route.
+    - After import: repack Quest.rcc and ship it in the patch.
+- **Scrolling text shows a scroll bar** (user: users will not know it scrolls). `CMobileTextArea` now owns the lists' thumb (KIND_BAR, `MobilePlaceThumb`), 4 wide, just past the text's right edge in the box margin, shown only while the text is longer than the box. It applies to all 21 `MobileMakeTextArea` users. Verified on the quest detail (moves on drag, clear of the text at 1:1). The other windows are not yet checked one by one.
+- **innerzone_01 black on LDPlayer: closed, user says it renders OK.** Measured before the user stopped it:
+  - The map's geometry is in `DxStaticMesh`; its `DxOctree` is empty.
+  - The vertex colours are correct.
+  - Fog and lighting were ruled out.
+  - All the diagnostics (nofog, nolight, octreelog, colorlog, fog change log) were reverted.
+- Not yet checked on the tablet or the iPhone.
+- **Still open:** the new item flows are not tested on device. test01 has none of those items, and admin was refused (`result=4`, already connected). Needs one of each item, then a real use per type. Gameword 81-85 are added in Gui.rcc.
 
 ## 2026-10-10 — Render-pass splits 25.7 -> 3.5 a frame, every change proven pixel-exact (patch 757, APK 259, iOS 1.0.259; awaiting upload)
 
