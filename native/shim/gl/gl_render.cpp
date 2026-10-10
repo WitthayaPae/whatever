@@ -1152,6 +1152,16 @@ bool g_skipPaletteUni = false;
 bool g_streamSub   = false;
 //  "vaocache": a VAO per client vertex buffer and layout. See drawInternal.
 bool g_vaoCacheOn  = false;
+//  The default differs by driver: on Apple's ES 3.0 (no separate attribute
+//  format) a VAO bind replaces ~5 attribute calls a draw; on LDPlayer the bind
+//  cost more than it saved. "novaocache" turns it off where it is on.
+#if defined(__APPLE__)
+const bool kVaoCacheDefault = true;
+#else
+const bool kVaoCacheDefault = false;
+#endif
+bool g_noVaoCache = false;
+inline bool vaoCacheWanted() { return (kVaoCacheDefault || g_vaoCacheOn) && !g_noVaoCache; }
 //  On the ES 3.0 path, a layout that differs only in where it reads from
 //  re-issues just the enabled attributes' pointers (see drawInternal). On by
 //  default; "nobaseonly" turns it off to A/B it.
@@ -1251,6 +1261,7 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
         { "noattribformat", &g_noAttribFmt, "ES 3.1 separate attribute format" },
         { "nouisharp", &g_noUiSharp, "the sharper magnification filter on interface art" },
         { "vaocache",  &g_vaoCacheOn, "NOT using a VAO per client buffer layout (on while present)" },
+        { "novaocache", &g_noVaoCache, "the VAO per client buffer layout (Apple default)" },
         { "nobaseonly", &g_noBaseOnly, "re-issuing only pointers when just the vertex source moved" },
         //  Present = ON, unlike its neighbours: this is a candidate waiting for
         //  a measurement on a phone, not something being switched off.
@@ -3544,7 +3555,14 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     //  either, and in a crowd 11,000 of its 16,000 GL calls a frame were
     //  attribute setup - each costume part has its own buffer, so each draw
     //  re-specified all seven attributes. Switchable to measure it there.
-    const bool kUseVaoCache = g_vaoCacheOn;
+    //
+    //  Only for draws from the start of the buffer. Measured on the iPhone with
+    //  the key including the start offset: ~1,000 new VAOs a frame, a 77% hit
+    //  rate and the whole cache thrown away at 2,048 every couple of seconds -
+    //  the engine's dynamic buffers are appended to, so every draw from one has
+    //  a new offset. A mesh drawn from offset 0 (characters, the world) has
+    //  one layout for as long as its buffer lives, and that is what pays.
+    const bool kUseVaoCache = vaoCacheWanted() && vbByteOffset == 0;
     if (glVB && kUseVaoCache) {
         VaoKey key;
         key.vb = glVB; key.ib = glIB; key.fvf = fvf; key.stride = stride;
@@ -3557,7 +3575,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
         } else {
             //  A map this large means something is generating layouts rather
             //  than reusing them; start again rather than grow without bound.
-            if (g_vaoCache.size() > 2048) {
+            if (g_vaoCache.size() > 8192) {
                 for (std::map<VaoKey, GLuint>::iterator d = g_vaoCache.begin(); d != g_vaoCache.end(); ++d) {
                     GLuint v = d->second;
                     glDeleteVertexArrays(1, &v);
@@ -3678,7 +3696,11 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
                                        g_gl.vertexBase != vbBase || g_gl.vertexBuffer != layoutBuffer);
     if (g_skipAttr) {
         // nothing: the layout stays whatever the last draw left behind
-    } else if (g_haveAttribFormat && !g_noAttribFmt) {
+    } else if (g_haveAttribFormat && !g_noAttribFmt && !(glVB && kUseVaoCache)) {
+        //  (A draw through the layout cache takes the ES 3.0 path below even
+        //  where 3.1 exists: its VAO is described with plain attribute
+        //  pointers, the way it is on the iPhone. Through this branch the new
+        //  VAO never got a format and the characters drew nothing.)
         //  Format first, and only when the shape of a vertex actually changed -
         //  or, with a VAO per FVF, only when that VAO was just made.
         if (fv ? fvCreated : (g_gl.fvf != fvf)) {

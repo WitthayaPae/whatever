@@ -32,6 +32,14 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-10 — VAO per mesh buffer on Apple (built, not released)
+
+- **iPhone 15, 1.0.252 + glthread, SG crowd, what the 44k GL calls a frame are:** attribute setup 22.6k, uniforms 10.9k, draws 5.2k; 2,034 program switches. Cost switches there: `nolightblock` (light uploads) no change, `nopaletteuni` (bone palettes) ~2 ms. `vaocache` (one VAO per vertex buffer + layout, the old key): calls 43k -> 37k, GL thread 35 -> 29 ms, 3 rounds, but it thrashed: ~1,000 new VAOs a frame, 77% hits, the whole cache dropped at 2,048 every couple of seconds.
+- Cause: the key included the draw's start offset, and the engine's dynamic buffers are appended to, so each draw from one is a new key. Now only draws from offset 0 use the cache (characters, the world: one layout for the buffer's life); cap 8,192.
+- Fixed on the way: on an ES 3.1 driver the cached VAO took the separate-attribute-format branch and was never given a format, so character bodies drew nothing (LDPlayer). Cached draws now always describe the VAO with plain attribute pointers, the iPhone's path.
+- **Default on for Apple only** (`novaocache` turns it off); `vaocache` still turns it on elsewhere. LDPlayer, same crowd, with `vaocache`: 0 new / 5.4 M hits, 477 VAOs live; GL calls 24k -> 20k; characters correct at 1:1. Interleaved 4 rounds there: cache on 51-59 ms, off 52-55 ms (no gain on the emulator's GL transport, which is why Android stays off). **iPhone with the new key: to measure** after the next release.
+- `tools/ios-sampler.py` names functions with llvm-nm (the binary has symbols, no DWARF, so llvm-symbolizer gave "??"); `--under NAME` prints callers, children and leaves of one function.
+
 ## 2026-10-10 — GL on its own thread, opt-in; crowd CPU fixes (patch 743, APK 252, iOS 1.0.252; awaiting upload)
 
 - `shim/gl/gl_thread.{h,cpp}` + `gl_thunks.{h,cpp}`. While the game loop runs, the GL context lives on a thread of its own ("RanGL"). gl_render.cpp, touch_ui.cpp and splash.cpp include gl_thunks.h last, so every gl* call there is recorded into a command queue (1 MB blocks), with any data it reads copied, and replayed in order on that thread. One frame in flight. Calls that answer (glGet*, glCreate*, status) run there while the caller waits ("syncs"). Per-frame answers come from shadow state instead: caps for glIsEnabled, live textures for glIsTexture, unpack alignment. glGen* names come from batches generated ahead. Streaming ring writes keep their cursor on the game thread and copy on the GL thread. DXT upload + error check + decode fallback run together there. Shader variants and glyph-atlas clears run there in one trip. GPU timer sections are off while it is on.

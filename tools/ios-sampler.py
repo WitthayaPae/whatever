@@ -18,7 +18,10 @@ NDK = r'C:\Program Files\Unity\Hub\Editor\6000.5.8f1\Editor\Data\PlaybackEngines
 SYMBOLIZER = os.path.join(NDK, 'llvm-symbolizer.exe')
 PY = r'C:\Users\tapnu\AppData\Local\Programs\Python\Python312\python.exe'
 
-args = [a for a in sys.argv[1:] if not a.startswith('--')]
+under = None
+if '--under' in sys.argv:
+    under = sys.argv[sys.argv.index('--under') + 1]
+args = [a for a in sys.argv[1:] if not a.startswith('--') and a != under]
 top = 40
 if '--top' in sys.argv:
     top = int(sys.argv[sys.argv.index('--top') + 1])
@@ -67,14 +70,27 @@ for st in stacks:
     for k, a in enumerate(st):
         addrs.add(unslid(a, k == 0))
 addrs = sorted(addrs)
-inp = '\n'.join('0x%x' % a for a in addrs) + '\n'
-r = subprocess.run([SYMBOLIZER, '--obj=' + binary, '--functions=short', '--demangle', '--no-inlines', '--output-style=GNU'],
-                   input=inp, capture_output=True, text=True)
-lines = r.stdout.split('\n')
+#  The shipped binary has a symbol table but no DWARF, which llvm-symbolizer
+#  answers with "??" - so look each address up in llvm-nm's sorted list instead.
+import bisect
+NM = os.path.join(NDK, 'llvm-nm.exe')
+out = subprocess.run([NM, '-n', '--defined-only', '-C', binary], capture_output=True, text=True,
+                     encoding='utf-8', errors='replace').stdout
+starts, labels = [], []
+for line in out.splitlines():
+    parts = line.split(' ', 2)
+    if len(parts) == 3 and parts[1] in ('t', 'T'):
+        try: starts.append(int(parts[0], 16)); labels.append(parts[2])
+        except ValueError: pass
 names = {}
-for k, a in enumerate(addrs):
-    nm = lines[2 * k] if 2 * k < len(lines) else '??'
-    names[a] = nm if nm and nm != '??' else '0x%x' % a
+for a in addrs:
+    i = bisect.bisect_right(starts, a) - 1
+    if i >= 0 and a - starts[i] < 0x100000:
+        nm = labels[i]
+        nm = nm.split('(')[0] if not nm.startswith('(') else nm
+        names[a] = nm
+    else:
+        names[a] = '[system] 0x%x' % a
 
 self_c = collections.Counter()
 incl = collections.Counter()
@@ -93,3 +109,21 @@ for f, c in self_c.most_common(top):
 print('--- inclusive (anywhere on the stack)')
 for f, c in incl.most_common(top):
     print('%6.1f%%  %s' % (100 * c / N, f[:140]))
+
+#  --under NAME: where the time inside NAME goes (its direct children, and the
+#  leaves), and who calls it.
+if under:
+    kids = collections.Counter(); leaves = collections.Counter(); parents = collections.Counter(); tot = 0
+    for st in stacks:
+        if not st: continue
+        fs = [names[unslid(a, k == 0)] for k, a in enumerate(st)]
+        idx = [i for i, f in enumerate(fs) if f.startswith(under)]
+        if not idx: continue
+        tot += 1; i = idx[-1]
+        kids[fs[i - 1] if i > 0 else '(self)'] += 1
+        leaves[fs[0]] += 1
+        parents[fs[i + 1] if i + 1 < len(fs) else '-'] += 1
+    print('=== %s: %.1f%% of samples' % (under, 100 * tot / N))
+    for t, c in (('callers', parents), ('children', kids), ('leaves', leaves)):
+        print('--- ' + t)
+        for f, v in c.most_common(18): print('%6.1f%%  %s' % (100 * v / N, f[:120]))
