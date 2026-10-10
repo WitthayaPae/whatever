@@ -32,7 +32,7 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-10 — Game-thread CPU per draw: uniform block skip, hashed lookups, pool free list (patch 746, APK 254, iOS 1.0.254; awaiting upload)
+## 2026-10-10 — Game-thread CPU per draw: uniform block skip, hashed lookups, pool free list (patch 747, APK 254, iOS 1.0.254; awaiting upload)
 
 - Profiled the LDPlayer 250-player crowd with `glthread` on (game thread only; the scripts now pick the thread with `android_main`, not the busiest one, which is now the GL thread).
 - **Uniforms:** ~30 rarely-changing uniforms (texture stage, material, fog, alpha test, camera) are compared as one snapshot per program. 80% of crowd draws skip them. A new diag, `stablecheck`, compares every skipped block with the cache. Its first run found mismatches at the login page: `RanGLR_InvalidateStateCache` (called by the touch HUD every frame) drops the bound variant without parking it, and the variant's parked snapshot survived its reload while the cache did not. Fixed: the snapshot is taken, not copied, like the cache. After the fix: **0 mismatches over ~2.6 M skipped blocks** (login page and crowd). `nostableskip` turns the skip off.
@@ -41,7 +41,7 @@ the patch ships a needless APK bump).
 - **CMemPool** (SOURCE, `RAN_MOBILE`): its free list was a `std::list`, so every Release allocated a node and every New freed one. Now a vector stack. Weapon-blur trails were the main user. **Heap calls on the game thread 3.5% -> 0.9%**; CreateBlur 2.18 -> 0.25%. Effects checked at 1:1 (trails, weapon glow, sparks). PC GameClient2, Emulator, ServerAgent and ServerField build (MSVC, exit 0).
 - The emulator's frame rate does not show any of this: there the GL thread is the limit (~32 ms) and the game thread waits ~16 ms a frame. **iPhone: to measure** (game thread 16-20 ms at heat fair with 1.0.252).
 
-## 2026-10-10 — VAO per mesh buffer on Apple (built as patch 745 / APK 253 / iOS 1.0.253, superseded by 746 before upload)
+## 2026-10-10 — VAO per mesh buffer on Apple (built as patch 745 / APK 253 / iOS 1.0.253, superseded by 747 before upload)
 
 - **iPhone 15, 1.0.252 + glthread, SG crowd, what the 44k GL calls a frame are:** attribute setup 22.6k, uniforms 10.9k, draws 5.2k; 2,034 program switches. Cost switches there: `nolightblock` (light uploads) no change, `nopaletteuni` (bone palettes) ~2 ms. `vaocache` (one VAO per vertex buffer + layout, the old key): calls 43k -> 37k, GL thread 35 -> 29 ms, 3 rounds, but it thrashed: ~1,000 new VAOs a frame, 77% hits, the whole cache dropped at 2,048 every couple of seconds.
 - Cause: the key included the draw's start offset, and the engine's dynamic buffers are appended to, so each draw from one is a new key. Now only draws from offset 0 use the cache (characters, the world: one layout for the buffer's life); cap 8,192.
