@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-11
+- **Last updated:** 2026-10-12
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -32,7 +32,7 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-12 — User batch of 8 (built and tested on LDPlayer; shared SOURCE, so Android and iOS alike)
+## 2026-10-12 — User batch of 8 (patch 774, APK 267, iOS 1.0.267; awaiting upload)
 
 1. **Bag opened by another window hides เรียง / ย่อย.** `CMobileBagPanel`: shown only when not `Beside()` (shop, locker, item bank, exchange, enhance, break-down, auction, side bags) and no stall / trade / gamble window (`OtherOpen`). The money row takes their room. LDPlayer: hidden beside the item exchange; still shown on the plain bag.
 2. **Sound on for a fresh install.** The seeded `option.ini` had every volume at -10000 (silent; switches "on", sliders 0%). The seed now comes from `MOBILE/tools/patch/seed/option.ini` (CLIENT's file with the three volumes at -400 = 80%); `make-manifest.js` takes an item `src`. Existing installs keep their own file. Not tested as a fresh install.
