@@ -16,7 +16,7 @@ If anything here disagrees with another file, this file wins.
 | Track | State |
 |---|---|
 | Game (direct APK + SideStore) | Live, patch 721 built. Normal develop -> test -> patch on `main`. |
-| Google Play | Account in Google identity review. Store build done on branch `store` (`STORE=1 ./build-apk.sh` -> .aab). Next: 12 testers x 14 days closed test. |
+| Google Play | Account in Google identity review. Store build done on branch `store` (`STORE=1 ./build-apk.sh` -> .aab). Internal track: 1.1.77 (261), uploaded 2026-10-11 (main merged into store, libs rebuilt on main after). Next: 12 testers x 14 days closed test. |
 | TestFlight | Apple enrollment paid, pending approval. Store build + CI (`ios-testflight.yml`, Xcode 26.6) green on `store`; signing/upload wait for the API key. |
 | Mobile UI redesign | **Built, on by default, in patch 725 (APK 242, iOS 1.0.242); awaiting upload.** Plan `UI-MOBILE-PLAN.md`. Four styles: D Original (classic grey chrome, first on the picker), A Crystal, B Royal, C Tactical (default C). Tier 1 and tier 2 windows are re-laid out; every other window gets a themed skin. Not checked on the Tab S9 or an iPhone; trade, stalls, auction, party and club actions need a second player. Backup: git tag `ui-classic-2026-10-08` (SOURCE + MOBILE) and `BACKUP/ui-classic-2026-10-08/`; `classicui` diag forces the old UI, `uitheme0..3` force a style. |
 | Store paperwork | `store/privacy.html` + `store/listing.md` on `store`: placeholders (name, email), reviewer account, gacha-odds question open. |
