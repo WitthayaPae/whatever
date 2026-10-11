@@ -4177,6 +4177,15 @@ extern "C" void RanTouch_GetAttackCircle(float *cx, float *cy, float *r) {
     if (r)  *r  = baseR * a.scale / h;
 }
 
+extern "C" void RanTouch_GetStickCircle(float *cx, float *cy, float *r) {
+    const float w = (g_width  > 0) ? (float)g_width  : 1.0f;
+    const float h = (g_height > 0) ? (float)g_height : 1.0f;
+    //  1.06: the base cell is drawn that much past the stick radius.
+    if (cx) *cx = g_stick.centre.x / w;
+    if (cy) *cy = g_stick.centre.y / h;
+    if (r)  *r  = g_stick.radius * 1.06f / h;
+}
+
 //  The tray owns the tab index; the overlay only draws it.
 extern "C" void RanTouch_SetChatButton(float cx, float cy, float r, int mode) {
     g_chatMode  = mode;

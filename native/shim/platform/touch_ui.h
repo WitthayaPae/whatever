@@ -208,6 +208,10 @@ extern "C" void RanTouch_SetSkillIcons(int count, const unsigned *tex,
 //  overlay does not duplicate it, it just tells it where to go.
 extern "C" void RanTouch_GetAttackCircle(float *cx, float *cy, float *r);
 
+//  The stick as drawn (its base ring), the same way: cx of the width, cy and r
+//  of the height. Windows that grow down the left edge stop above it.
+extern "C" void RanTouch_GetStickCircle(float *cx, float *cy, float *r);
+
 //  Is a two-finger pinch in progress?
 //
 //  The touch layer has to know, because a pinch is two fingers moving and the
