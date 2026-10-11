@@ -64,8 +64,12 @@ const SHIP = [
       reset everyone's graphics, sound and gameplay options on every patch.
       With seed:true it is installed when absent - so a fresh install still
       starts on sane defaults, the way the PC client ships one - and never
-      touched again.                                                          */
-  { file: 'option.ini', seed: true },
+      touched again.
+      The seed is the mobile copy in tools/patch/seed, not CLIENT's: CLIENT's
+      is whatever the PC client last saved, and it has every volume at -10000
+      (silent). The mobile seed is the same file with the volumes at -400 (80%)
+      so a fresh install has sound (the user, 2026-10-12).                    */
+  { file: 'option.ini', seed: true, src: 'MOBILE/tools/patch/seed/option.ini' },
   { file: 'comment.ini' },
 
   /*  The packs. These ARE the game data - the client reads them, not the
@@ -387,10 +391,14 @@ const wanted = [];
 //  authored with forward slashes, which is also the form manifest paths take,
 //  so these compare directly.
 const seeded = new Set();
+//  Ship path -> source on disk, for entries whose content is not CLIENT's.
+const SRC = new Map();
+const srcOf = rel => SRC.get(rel.replace(/\\/g, '/')) || path.join(CLIENT, rel);
 for (const item of SHIP) {
   if (item.file) {
     if (excluded(path.basename(item.file))) continue;
-    if (!fs.existsSync(path.join(CLIENT, item.file))) {
+    if (item.src) SRC.set(item.file, path.join(ROOT, item.src));
+    if (!fs.existsSync(srcOf(item.file))) {
       console.error('  ! missing file: ' + item.file);
       continue;
     }
@@ -419,7 +427,7 @@ const files = [];
 let bytes = 0, linked = 0, copied = 0, kept = 0;
 let n = 0;
 for (const rel of wanted) {
-  const abs = path.join(CLIENT, rel);
+  const abs = srcOf(rel);
   const st = fs.statSync(abs);
   const hash = sha256(abs);
   const how = place(abs, path.join(OUT, 'blobs', hash));
