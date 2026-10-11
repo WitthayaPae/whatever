@@ -76,7 +76,7 @@ the patch ships a needless APK bump).
   - In its place, at the input row's end, is a second `CMobileChatChannelBar` in view mode (`MOBILE_CHAT_VIEW_BAR`), styled like the ทั่วไป send picker. Its drop-up is titled "แสดงข้อความจากช่อง" (MOBILE_CHAT 5) and has the 7 pages with their channel colours; choosing one sets `m_wDISPLAYTYPE` as the tab did.
   - The filter state stays CHAT_ALL, as every session starts; it isn't saved.
   - Verified on LDPlayer: the picker opens and closes on an outside tap; คลับ shows an empty page, back to ทั้งหมด restores it; typing is kept while the picker opens. PC build clean.
-- **Tap to inspect, every window** (user, 2026-10-11: some windows still showed the PC panel; holding an item showed it too). Not released.
+- **Tap to inspect, every window** (user, 2026-10-11: some windows still showed the PC panel; holding an item showed it too). Released in patch 761 / APK 261 / iOS 1.0.261 (built 2026-10-11, awaiting upload), with the Config.ini skill-book switch (`bFeatureSkillNeedBook`) and the data edits (skill-book names, mob 85_0-85_10 from EP1, GLogic.rcc + Quest.rcc + config.ini).
   - On mobile, `SHOW_ITEM_INFO` from a hover draws nothing. If the press was a tap (under 0.45 s, moved at most 24), `MobileNoteItemTap` keeps its arguments. `MobileTapFrame` opens the item window with them next frame. It doesn't if the tap opened something itself (top window changed, sheet open, item in hand).
   - View-mode buttons: ดูตัวอย่าง (if previewable), ดูของข้างใน (boxes), ลิงก์ในแชท. Windows with a sheet keep their actions (`MobileDetailRows` / `MobileDetailFire`).
   - Chat item links: `SET_INFO_ITEM_LINK` opens the same window on mobile, not the PC link window.
