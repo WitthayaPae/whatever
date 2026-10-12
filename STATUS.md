@@ -34,6 +34,8 @@ the patch ships a needless APK bump).
 
 ## 2026-10-12 — User batch of 8 (patch 776, APK 268, iOS 1.0.268; awaiting upload; 774 never uploaded)
 
+**2026-10-12 later: user uploaded patch 776 (live, minApk 268) before Play had 268; Play testers on 266 were blocked.** Store branch merged (b57491e), store 1.1.84 / 268 built, installed on LDPlayer (passes the patch page, boots to server select), uploaded to the Alpha closed test as completed; waiting for Google review. NOT verified in-world: LDPlayer got "connection failed" at server select (server down or this IP banned, not probed). Main build trees and file times restored.
+
 **Upload of patch 776 is ON HOLD (user, 2026-10-12: "ok then we can wait").** 776 sets minApk 268; the Play store build never installs an APK and stops below minApk with "ต้องอัปเดตแอปก่อนเล่น", and Play has only 1.1.82 (266). Order: merge main into `store`, STORE=1 build 1.1.84 / 268, LDPlayer check, upload to the Alpha closed test, wait for Google approval, THEN upload out/upload (776). Restore main file times after (see play-build note). The store checkout/merge/push was blocked by the permission classifier this session; the user has to allow it or do that step.
 
 1. **Bag opened by another window hides เรียง / ย่อย.** `CMobileBagPanel`: shown only when not `Beside()` (shop, locker, item bank, exchange, enhance, break-down, auction, side bags) and no stall / trade / gamble window (`OtherOpen`). The money row takes their room. LDPlayer: hidden beside the item exchange; still shown on the plain bag.
