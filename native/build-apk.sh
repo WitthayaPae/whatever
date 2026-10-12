@@ -116,6 +116,14 @@ echo "== java =="
 JSRC="$HERE/android/java"
 if [ -d "$JSRC" ]; then
   JOUT="$OUT/classes"
+  #  The Play build compiles a copy without the APK self-update (see
+  #  android/store-java.py). Old .class files must go too: the cut code's
+  #  anonymous classes would otherwise ride into the jar from the last build.
+  if [ "${STORE:-0}" = 1 ]; then
+    python "$(cygpath -m "$HERE/android/store-java.py")" "$(cygpath -m "$JSRC")" "$(cygpath -m "$OUT/java-store")" || exit 1
+    JSRC="$OUT/java-store"
+  fi
+  rm -rf "$JOUT"
   mkdir -p "$JOUT"
   #  javac and d8 are Windows tools: they need Windows paths, and this tree
   #  lives under "DEV EP9", a directory with a space in it. An @argfile of
@@ -136,6 +144,12 @@ if [ -d "$JSRC" ]; then
   "$JAVA" -cp "$(cygpath -w "$BT/lib/d8.jar")" com.android.tools.r8.D8 \
       --min-api 24 --lib "$(cygpath -w "$PLATFORM")" \
       --output "$(cygpath -w "$OUT")" "$(cygpath -w "$OUT/classes.jar")"
+  if [ "${STORE:-0}" = 1 ]; then
+    for bad in 'Landroid/content/pm/PackageInstaller' 'android.intent.extra.INTENT' 'MANAGE_UNKNOWN_APP_SOURCES'; do
+      if grep -a -q -- "$bad" "$OUT/classes.dex"; then echo "[!] store dex still has $bad"; exit 1; fi
+    done
+    echo "  store dex: no APK self-update code"
+  fi
   printf "  + %s classes -> classes.dex %.1f KB\n" "$CLASSES" \
       "$(stat -c%s "$OUT/classes.dex" | awk '{print $1/1024}')"
 else
