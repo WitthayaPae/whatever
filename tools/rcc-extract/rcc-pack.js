@@ -186,6 +186,8 @@ function pack(inPath, outPath, replacements) {
   console.log(`${outPath}: ${items.length} entries, ${(out.length / 1048576).toFixed(2)} MB, verified`);
 }
 
+module.exports = { pack };
+
 if (require.main === module) {
   const [, , inPath, outPath, ...rest] = process.argv;
   if (!inPath || !outPath) {

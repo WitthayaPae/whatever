@@ -89,15 +89,17 @@ function readAction(c, blockStart, blockSize) {
 
 // SCROWGEN::LOAD (GLCrowDataGen.cpp:78). Must be parsed structurally because its
 // declared size (sizeof) undercounts the two std::strings it writes.
-function skipGen(c) {
-  c.u16();  // m_wGenItem_Rate
-  c.u16();  // m_wGenMoney_Rate
-  c.u32();  // m_sGenItemID.dwID
-  c.u32();  // m_dwGenMoney
-  c.str();  // m_strQtGenItem
-  c.str();  // m_strGenItem
-  c.f32();  // m_fMoneyLuckRate
-  c.u16();  // m_wMoneyLuckMax
+function readGen(c) {
+  const at = c.p;             // file offset of this block (for in-place edits)
+  const itemRate = c.u16();   // m_wGenItem_Rate
+  const moneyRate = c.u16();  // m_wGenMoney_Rate
+  const itemId = c.u32();     // m_sGenItemID.dwID (low word main, high word sub)
+  const money = c.u32();      // m_dwGenMoney
+  const qtGenItem = c.str();  // m_strQtGenItem
+  const genItem = c.str();    // m_strGenItem: up to 10 files, ';' separated
+  const moneyLuckRate = c.f32();
+  const moneyLuckMax = c.u16();
+  return { at, itemRate, moneyRate, itemId, money, qtGenItem, genItem, moneyLuckRate, moneyLuckMax };
 }
 
 /**
@@ -137,6 +139,8 @@ function parse(raw) {
         rec.main = c.b.readUInt16LE(start);
         rec.emCrow = c.b.readUInt32LE(start + 4);   // SCROWBASIC::m_emCrow, right after sNativeID
         rec.sub = c.b.readUInt16LE(start + 2);
+        rec.level = c.b.readUInt16LE(start + 50);   // m_wLevel: after m_szName[33] @16, WORD-aligned
+        rec.hp = c.b.readUInt32LE(start + 52);      // m_dwHP
         const nm = c.b.slice(start + NAME_OFF, start + NAME_OFF + NAME_LEN);
         const z = nm.indexOf(0);
         rec.nameKey = (z < 0 ? nm : nm.slice(0, z)).toString('latin1');
@@ -147,7 +151,7 @@ function parse(raw) {
         rec.saleFiles = a.saleFiles;
         rec.shopFile = a.shopFile;
       } else if (dt === FILE_SGEN) {
-        skipGen(c);                       // size unreliable — structural
+        rec.gen = readGen(c);             // size unreliable — structural
       } else if (dt === FILE_SATTACK) {
         c.p = start + blockSize;          // BeginBlock/EndBlock size is exact
       } else {

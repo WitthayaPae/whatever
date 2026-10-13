@@ -73,6 +73,81 @@ import java.util.concurrent.atomic.AtomicReference;
  *  needs, so it earns its place twice.
  */
 public class RanLauncher extends Activity {
+    //  Thai / English. The game writes lang.txt beside option.ini when the player
+    //  picks a language on the server page; before that, the phone language decides.
+    //  Every Thai string on this page goes through L(), which returns its English
+    //  from the table below when the language is English.
+    private static final java.util.HashMap<String, String> LANG_EN = new java.util.HashMap<String, String>();
+    private static int sLang = -1;      // -1 not read yet, 0 Thai, 1 English
+    static {
+        LANG_EN.put("กำลังเริ่ม", "Starting");
+        LANG_EN.put("พื้นที่ในเครื่องเต็ม", "Device storage is full");
+        LANG_EN.put("กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน ", "Please delete files or other apps to free space. Retrying in ");
+        LANG_EN.put(" วินาที", " sec");
+        LANG_EN.put("  (ว่าง ", "  (free ");
+        LANG_EN.put("เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้", "Cannot reach the update server");
+        LANG_EN.put("จะลองใหม่ใน ", "Retrying in ");
+        LANG_EN.put(" วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (", " sec. Please check your internet  (");
+        LANG_EN.put("กำลังเชื่อมต่ออีกครั้ง", "Reconnecting");
+        LANG_EN.put("กำลังย้ายข้อมูลเกม", "Moving game data");
+        LANG_EN.put("ครั้งเดียว ไปยังพื้นที่ส่วนตัวของแอป", "One time only, into the app private storage");
+        LANG_EN.put("พื้นที่ว่างไม่พอ", "Not enough free space");
+        LANG_EN.put("ต้องการ ", "Need ");
+        LANG_EN.put(" มีอยู่ ", ", have ");
+        LANG_EN.put("กำลังตรวจสอบอัปเดต", "Checking for updates");
+        LANG_EN.put("เป็นเวอร์ชันล่าสุด", "Up to date");
+        LANG_EN.put("เวอร์ชัน ", "Version ");
+        LANG_EN.put("กำลังตรวจสอบไฟล์", "Checking files");
+        LANG_EN.put(" ไฟล์", " files");
+        LANG_EN.put("กำลังดาวน์โหลดอัปเดต", "Downloading update");
+        LANG_EN.put(" ไฟล์, ", " files, ");
+        LANG_EN.put("อัปเดตเสร็จแล้ว", "Update complete");
+        LANG_EN.put("ต้องอัปเดตแอปก่อนเล่น", "The app must be updated before you can play");
+        LANG_EN.put("แอปในเครื่องนี้เป็นเวอร์ชันเก่า (", "This device has an old version (");
+        LANG_EN.put(") ต้องเป็นเวอร์ชัน ", "). Version ");
+        LANG_EN.put(" ขึ้นไป\n", " or newer is required\n");
+        LANG_EN.put("การติดตั้งอัปเดตยังไม่สำเร็จ เครื่องอาจบล็อกการติดตั้งไว้\n\n", "The update has not been installed. The device may be blocking it\n\n");
+        LANG_EN.put("วิธีแก้:\n", "How to fix:\n");
+        LANG_EN.put("1. เปิดเกมใหม่ แล้วกด อัปเดต / ติดตั้ง เมื่อระบบถาม\n", "1. Open the game again and tap Update / Install when asked\n");
+        LANG_EN.put("2. ถ้าขึ้นว่าไม่อนุญาต ให้เปิด \"ติดตั้งแอปที่ไม่รู้จัก\" ให้ Ran Legacy M ในการตั้งค่า\n", "2. If it says not allowed, turn on \"Install unknown apps\" for Ran Legacy M in Settings\n");
+        LANG_EN.put("3. หรือกด ไปหน้าดาวน์โหลด แล้วติดตั้งแอปใหม่ทับ (ข้อมูลตัวละครไม่หาย)\n\n", "3. Or tap Open download page and install the app over this one (characters are kept)\n\n");
+        LANG_EN.put("ถ้ายังทำไม่ได้ กด ค้นหาวิธีใน Google", "If it still does not work, tap Search on Google");
+        LANG_EN.put("วิธีติดตั้งไฟล์ apk อนุญาตติดตั้งแอปที่ไม่รู้จัก ", "how to install apk allow install unknown apps ");
+        LANG_EN.put("ไปหน้าดาวน์โหลด", "Open download page");
+        LANG_EN.put("ค้นหาวิธีใน Google", "Search on Google");
+        LANG_EN.put("ปิด", "Close");
+        LANG_EN.put("ต้องติดตั้งอัปเดตนี้ก่อนจึงจะเล่นได้", "This update must be installed before you can play");
+        LANG_EN.put("จะเล่นด้วยเวอร์ชันที่ติดตั้งไว้", "Continuing with the installed version");
+        LANG_EN.put("มีอัปเดตใหม่", "Update available");
+        LANG_EN.put(" พร้อมแล้ว แต่แอปนี้ติดตั้งเองไม่ได้\n", " is ready, but this app cannot install it by itself\n");
+        LANG_EN.put("อนุญาตใน ติดตั้งแอปที่ไม่รู้จัก แล้วเปิดเกมใหม่", "Allow it under Install unknown apps, then open the game again");
+        LANG_EN.put("อัปเดตไม่สำเร็จ", "Update failed");
+        LANG_EN.put("กำลังติดตั้งอัปเดต", "Installing update");
+        LANG_EN.put("\nกดยืนยันการติดตั้งเมื่อระบบถาม", "\nConfirm the install when asked");
+        LANG_EN.put("ยังไม่ได้ยืนยันการติดตั้ง", "The install was not confirmed");
+        LANG_EN.put("ติดตั้ง ", "Installed ");
+        LANG_EN.put(" แล้ว", "");
+        LANG_EN.put("ติดตั้งอัปเดตไม่สำเร็จ", "Could not install the update");
+    }
+    private int readLang() {
+        try {
+            java.io.File f = new java.io.File(getExternalFilesDir(null), "lang.txt");
+            if (f.isFile()) {
+                java.io.FileInputStream in = new java.io.FileInputStream(f);
+                try { byte[] b = new byte[8]; int n = in.read(b); String v = n > 0 ? new String(b, 0, n, "US-ASCII").trim() : "";
+                      if (v.startsWith("en")) return 1; if (v.startsWith("th")) return 0; }
+                finally { in.close(); }
+            }
+        } catch (Throwable t) { /* fall through to the phone language */ }
+        return "th".equals(java.util.Locale.getDefault().getLanguage()) ? 0 : 1;
+    }
+    String L(String th) {
+        if (sLang < 0) sLang = readLang();
+        if (sLang != 1) return th;
+        String en = LANG_EN.get(th);
+        return en != null ? en : th;
+    }
+
 
     /*  The patch host. Everything else about publishing is derived from this. */
     private static final String BASE_DEFAULT = "https://ran-legacy-m.com/launcher_mobile/";
@@ -235,7 +310,7 @@ public class RanLauncher extends Activity {
         status.setTextColor(Color.parseColor("#F0F4F6"));
         status.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         status.setGravity(Gravity.CENTER);
-        status.setText("กำลังเริ่ม");
+        status.setText(L("กำลังเริ่ม"));
         band.addView(status);
 
         bar = new PatchBar(this);
@@ -583,16 +658,16 @@ public class RanLauncher extends Activity {
                     if (noSpace) {
                         long free = -1;
                         try { free = new File(ROOT).getUsableSpace(); } catch (Throwable e) { /* unknown */ }
-                        say("พื้นที่ในเครื่องเต็ม",
-                            "กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน " + left + " วินาที"
-                            + (free >= 0 ? "  (ว่าง " + mb(free) + ")" : ""), -1);
+                        say(L("พื้นที่ในเครื่องเต็ม"),
+                            L("กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน ") + left + L(" วินาที")
+                            + (free >= 0 ? L("  (ว่าง ") + mb(free) + ")" : ""), -1);
                     } else {
-                        say("เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้",
-                            "จะลองใหม่ใน " + left + " วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (" + why + ")", -1);
+                        say(L("เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้"),
+                            L("จะลองใหม่ใน ") + left + L(" วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (") + why + ")", -1);
                     }
                     sleep(1000);
                 }
-                say("กำลังเชื่อมต่ออีกครั้ง", null, -1);
+                say(L("กำลังเชื่อมต่ออีกครั้ง"), null, -1);
                 if (wait < 30) wait += 5;
             }
         }
@@ -644,7 +719,7 @@ public class RanLauncher extends Activity {
      *  interrupted migration leaves the private root without it, so the next
      *  run starts again rather than running against half a tree.             */
     private boolean migrate(File legacy, File priv) {
-        say("กำลังย้ายข้อมูลเกม", "ครั้งเดียว ไปยังพื้นที่ส่วนตัวของแอป", -1);
+        say(L("กำลังย้ายข้อมูลเกม"), L("ครั้งเดียว ไปยังพื้นที่ส่วนตัวของแอป"), -1);
 
         String[] names = legacy.list();
         if (names == null) return false;
@@ -659,7 +734,7 @@ public class RanLauncher extends Activity {
         long free = priv.getUsableSpace();
         if (free < need + (64L << 20)) {
             Log.w(TAG, "migration needs " + mb(need) + ", only " + mb(free) + " free");
-            say("พื้นที่ว่างไม่พอ", "ต้องการ " + mb(need) + " มีอยู่ " + mb(free), 1000);
+            say(L("พื้นที่ว่างไม่พอ"), L("ต้องการ ") + mb(need) + L(" มีอยู่ ") + mb(free), 1000);
             sleep(2500);
             return false;
         }
@@ -726,7 +801,7 @@ public class RanLauncher extends Activity {
         //  screen should not hand anyone the patch address. It goes to the log,
         //  which is where someone diagnosing a patch failure is looking anyway.
         Log.i(TAG, "patch base " + base());
-        say("กำลังตรวจสอบอัปเดต", null, -1);
+        say(L("กำลังตรวจสอบอัปเดต"), null, -1);
 
         /*  Fetched as bytes and checked before being parsed: a JSON parser is
          *  the first thing an attacker reaches, so it must not run on anything
@@ -775,7 +850,7 @@ public class RanLauncher extends Activity {
             throw new Exception("cannot create " + ROOT);
 
         int localVersion = readVersion();
-        if (localVersion == version) { say("เป็นเวอร์ชันล่าสุด", "เวอร์ชัน " + label(), 1000); return; }
+        if (localVersion == version) { say(L("เป็นเวอร์ชันล่าสุด"), L("เวอร์ชัน ") + label(), 1000); return; }
 
         /*  Never go backwards.
          *
@@ -793,7 +868,7 @@ public class RanLauncher extends Activity {
         List<String[]> todo = new ArrayList<String[]>();  //  {path, sha, size}
         long todoBytes = 0;
 
-        say("กำลังตรวจสอบไฟล์", arr.length() + " ไฟล์", 0);
+        say(L("กำลังตรวจสอบไฟล์"), arr.length() + L(" ไฟล์"), 0);
         for (int i = 0; i < arr.length(); i++) {
             JSONObject e = arr.getJSONObject(i);
             String p = e.getString("path");
@@ -830,16 +905,16 @@ public class RanLauncher extends Activity {
         if (todo.isEmpty()) {
             writeIndexFrom(arr, rootDir);
             writeVersion(version);
-            say("เป็นเวอร์ชันล่าสุด", "เวอร์ชัน " + label(), 1000);
+            say(L("เป็นเวอร์ชันล่าสุด"), L("เวอร์ชัน ") + label(), 1000);
             return;
         }
 
-        say("กำลังดาวน์โหลดอัปเดต", todo.size() + " ไฟล์, " + mb(todoBytes), 0);
+        say(L("กำลังดาวน์โหลดอัปเดต"), todo.size() + L(" ไฟล์, ") + mb(todoBytes), 0);
         downloadAll(todo, rootDir, todoBytes, blobBase(m));
 
         writeIndexFrom(arr, rootDir);
         writeVersion(version);                 //  last, always
-        say("อัปเดตเสร็จแล้ว", "เวอร์ชัน " + label(), 1000);
+        say(L("อัปเดตเสร็จแล้ว"), L("เวอร์ชัน ") + label(), 1000);
     }
 
     /*  The key the manifest must be signed with.
@@ -1400,25 +1475,25 @@ public class RanLauncher extends Activity {
 
     private void failApkTooOld(int minApk, int myApk) {
         mFatal = true;
-        final String title = "ต้องอัปเดตแอปก่อนเล่น";
+        final String title = L("ต้องอัปเดตแอปก่อนเล่น");
         final String msg =
-            "แอปในเครื่องนี้เป็นเวอร์ชันเก่า (" + myApk + ") ต้องเป็นเวอร์ชัน " + minApk + " ขึ้นไป\n" +
-            "การติดตั้งอัปเดตยังไม่สำเร็จ เครื่องอาจบล็อกการติดตั้งไว้\n\n" +
-            "วิธีแก้:\n" +
-            "1. เปิดเกมใหม่ แล้วกด อัปเดต / ติดตั้ง เมื่อระบบถาม\n" +
-            "2. ถ้าขึ้นว่าไม่อนุญาต ให้เปิด \"ติดตั้งแอปที่ไม่รู้จัก\" ให้ Ran Legacy M ในการตั้งค่า\n" +
-            "3. หรือกด ไปหน้าดาวน์โหลด แล้วติดตั้งแอปใหม่ทับ (ข้อมูลตัวละครไม่หาย)\n\n" +
-            "ถ้ายังทำไม่ได้ กด ค้นหาวิธีใน Google";
-        final String query = "วิธีติดตั้งไฟล์ apk อนุญาตติดตั้งแอปที่ไม่รู้จัก " + Build.MANUFACTURER;
+            L("แอปในเครื่องนี้เป็นเวอร์ชันเก่า (") + myApk + L(") ต้องเป็นเวอร์ชัน ") + minApk + L(" ขึ้นไป\n") +
+            L("การติดตั้งอัปเดตยังไม่สำเร็จ เครื่องอาจบล็อกการติดตั้งไว้\n\n") +
+            L("วิธีแก้:\n") +
+            L("1. เปิดเกมใหม่ แล้วกด อัปเดต / ติดตั้ง เมื่อระบบถาม\n") +
+            L("2. ถ้าขึ้นว่าไม่อนุญาต ให้เปิด \"ติดตั้งแอปที่ไม่รู้จัก\" ให้ Ran Legacy M ในการตั้งค่า\n") +
+            L("3. หรือกด ไปหน้าดาวน์โหลด แล้วติดตั้งแอปใหม่ทับ (ข้อมูลตัวละครไม่หาย)\n\n") +
+            L("ถ้ายังทำไม่ได้ กด ค้นหาวิธีใน Google");
+        final String query = L("วิธีติดตั้งไฟล์ apk อนุญาตติดตั้งแอปที่ไม่รู้จัก ") + Build.MANUFACTURER;
         ui.post(new Runnable() { public void run() {
             bar.setVisibility(ViewGroup.INVISIBLE);
             status.setText(title);
             detail.setText(msg);
             AlertDialog d = new AlertDialog.Builder(RanLauncher.this)
                 .setTitle(title).setMessage(msg).setCancelable(false)
-                .setPositiveButton("ไปหน้าดาวน์โหลด", null)
-                .setNeutralButton("ค้นหาวิธีใน Google", null)
-                .setNegativeButton("ปิด", null)
+                .setPositiveButton(L("ไปหน้าดาวน์โหลด"), null)
+                .setNeutralButton(L("ค้นหาวิธีใน Google"), null)
+                .setNegativeButton(L("ปิด"), null)
                 .create();
             d.show();
             //  The two links keep the dialog up: coming back from the browser
@@ -1483,7 +1558,7 @@ public class RanLauncher extends Activity {
             bar.setVisibility(ViewGroup.INVISIBLE);
             new AlertDialog.Builder(RanLauncher.this)
                 .setTitle(title).setMessage(msg).setCancelable(false)
-                .setPositiveButton("ปิด", null).show();
+                .setPositiveButton(L("ปิด"), null).show();
             status.setText(title);
             detail.setText(msg);
         }});
@@ -1535,8 +1610,8 @@ public class RanLauncher extends Activity {
     private volatile boolean mApkRequired = false;
 
     private String keepOld() {
-        return mApkRequired ? "ต้องติดตั้งอัปเดตนี้ก่อนจึงจะเล่นได้"
-                            : "จะเล่นด้วยเวอร์ชันที่ติดตั้งไว้";
+        return mApkRequired ? L("ต้องติดตั้งอัปเดตนี้ก่อนจึงจะเล่นได้")
+                            : L("จะเล่นด้วยเวอร์ชันที่ติดตั้งไว้");
     }
 
     /*  What the player is told the version is: the app's own label (1.1.0 at
@@ -1560,15 +1635,15 @@ public class RanLauncher extends Activity {
         final String sha  = apk.getString("sha256");
         final long   size = apk.getLong("size");
         final String name = apk.optString("versionName", "");
-        final String what = "เวอร์ชัน " + (name.length() == 0 ? String.valueOf(want) : name);
+        final String what = L("เวอร์ชัน ") + (name.length() == 0 ? String.valueOf(want) : name);
 
         /*  Installing needs the player's consent once, in Settings. Asking is
          *  all this can do, and being refused is not a reason to keep them out
          *  of the game.                                                       */
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 && !getPackageManager().canRequestPackageInstalls()) {
-            say("มีอัปเดตใหม่", what + " พร้อมแล้ว แต่แอปนี้ติดตั้งเองไม่ได้\n" +
-                "อนุญาตใน ติดตั้งแอปที่ไม่รู้จัก แล้วเปิดเกมใหม่", -1);
+            say(L("มีอัปเดตใหม่"), what + L(" พร้อมแล้ว แต่แอปนี้ติดตั้งเองไม่ได้\n") +
+                L("อนุญาตใน ติดตั้งแอปที่ไม่รู้จัก แล้วเปิดเกมใหม่"), -1);
             try {
                 startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                                          Uri.parse("package:" + getPackageName())));
@@ -1577,7 +1652,7 @@ public class RanLauncher extends Activity {
             return false;
         }
 
-        say("กำลังดาวน์โหลดอัปเดต", what + ", " + mb(size), 0);
+        say(L("กำลังดาวน์โหลดอัปเดต"), what + ", " + mb(size), 0);
 
         PackageInstaller pi = getPackageManager().getPackageInstaller();
         PackageInstaller.SessionParams sp =
@@ -1620,7 +1695,7 @@ public class RanLauncher extends Activity {
         } catch (Throwable t) {
             session.abandon();
             Log.e(TAG, "apk update failed", t);   //  reason to the log, not the screen
-            say("อัปเดตไม่สำเร็จ", keepOld(), -1);
+            say(L("อัปเดตไม่สำเร็จ"), keepOld(), -1);
             sleep(2500);
             return false;                              //  the old binary still works
         }
@@ -1673,14 +1748,14 @@ public class RanLauncher extends Activity {
             if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
             PendingIntent pe = PendingIntent.getBroadcast(this, sessionId, i, flags);
 
-            say("กำลังติดตั้งอัปเดต", what + "\nกดยืนยันการติดตั้งเมื่อระบบถาม", -1);
+            say(L("กำลังติดตั้งอัปเดต"), what + L("\nกดยืนยันการติดตั้งเมื่อระบบถาม"), -1);
             session.commit(pe.getIntentSender());
             session.close();
 
             /*  Generous: the prompt waits on a human. If it expires the app is
              *  simply left as it was.                                         */
             if (!done.await(5, TimeUnit.MINUTES)) {
-                say("ยังไม่ได้ยืนยันการติดตั้ง", keepOld(), -1);
+                say(L("ยังไม่ได้ยืนยันการติดตั้ง"), keepOld(), -1);
                 sleep(2000);
                 return false;
             }
@@ -1689,11 +1764,11 @@ public class RanLauncher extends Activity {
         }
 
         if (status[0] == PackageInstaller.STATUS_SUCCESS) {
-            say("อัปเดตเสร็จแล้ว", "ติดตั้ง " + what + " แล้ว", 1000);
+            say(L("อัปเดตเสร็จแล้ว"), L("ติดตั้ง ") + what + L(" แล้ว"), 1000);
             return true;                     //  the process is about to be replaced
         }
         Log.w(TAG, "install not completed: status " + status[0] + " " + why[0]);
-        say("ติดตั้งอัปเดตไม่สำเร็จ", why[0] + "\n" + keepOld(), -1);
+        say(L("ติดตั้งอัปเดตไม่สำเร็จ"), why[0] + "\n" + keepOld(), -1);
         sleep(2500);
         return false;
     }

@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-12
+- **Last updated:** 2026-10-13
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -32,7 +32,58 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-13 — Thai / English language option (built, NOT yet patched or committed)
+
+**What the player gets.** The phone build no longer skips the server page (`MobileAutoEnter` removed): server -> channel -> login, as on PC. That page has two buttons, ไทย and English, on their own row above Quit. A tap switches everything at once and is saved (`option.ini` `nLanguage`, plus plain `lang.txt` beside it for the launcher, which reads it before the game runs; with no `lang.txt` the launcher follows the phone language).
+
+**How it works.** Thai stays the base everywhere; English rides on top, so anything without English shows Thai.
+
+| Text | English source | Hook |
+|---|---|---|
+| UI words/messages (`gameword`, `gameintext`, `gameextext`) | `<name>_en.xml` in Gui.rcc, merged over the base | `CGameTextMan::LoadText` / `ReloadAll` |
+| Item, skill, monster names | `ItemStrTable_en.txt` etc. in GLogic.rcc | `GLogicData::LoadStringTable`, `GLStringTable::LOADFILE(.., bOverlay)` |
+| NPC talk, quest titles/steps, map names | `LangText_en.txt` in GLogic.rcc (keys `n:<file>_<dlg>_<case>[_<talk>]`, `q:<id>[:<step>]:t|c`, `m:<map id>`) | `GLStringTable::LOADLANGTEXT`; applied in `CNpcDialogueSet::Load`, `GLQuestMan::LoadQuest`, `GLMapList::LoadMapsListFile` |
+| Class / weapon / part names, bus stops | whole-file twins `comment_english.ini`, `busmain_english.ini` | `CUnzipper::GOTOFILEPOS` opens `<name>_english.<ext>` when English |
+| Strings written in C++ (about 50) | `RANPARAM::LANG ( thai, english )` at each site | |
+| Launcher / patch page | `L("...")` (Java) and `RanL(@"...")` (iOS), same table on both | `RanLauncher.java`, `ran_ios_main.mm`, `ran_ios_patch.mm` |
+
+Switching (`CSelectServerPage::SetLanguage`) reloads the text tables, name tables, comment.ini and the map list, drops loaded quests, and rebuilds the lobby UI on the next frame (`DxLobyStage::RebuildInterface`).
+
+**Volume.** 28,541 unique Thai strings translated (18,328 UI + names, 10,213 NPC talk + quests), machine-checked: every id present, ASCII only, format specifiers and XML entities preserved. The translation memory, glossary and build scripts are in `MOBILE/tools/lang/` (see its README). Quest objective lines (kill / collect / talk / reach) were added after: dumped from the client with `GLQuestMan::DumpObjectiveText` (file `questdump` in the data root, then switch language), 647 more strings; 56 whose source is unreadable bytes stay as they are. 209 short labels were shortened to fit their buttons; "Mission" was unified to "Quest".
+
+**Bug found on the way (both platforms).** The shim's `StringCchCopy` was `strncpy`, which zero-fills to the caller's size; `DxResponseMan` copies into the 128-byte `_DEFAULT_FONT` with size MAX_PATH, wiping `CD3DFontPar::nCodePage/nCharSet` beside it. Hidden until text was parsed again at run time (reloaded Thai came out as ASCII junk). Fixed in `shim/win/strsafe.h` and `lstrcpyn`.
+
+**Verified on LDPlayer (x86_64):** launcher in English; lobby switches both ways without a crash; login, character list (class names), world entry, map name, inventory, item sheet, system chat lines and an NPC dialogue all in English.
+**Not verified:** iOS (the launcher `.mm` changes are not even compiled yet: needs a CI build); the tablet; quests in the quest window; bus stop list; text overflow in narrow buttons (English is longer in places); translation quality beyond spot checks; PC client behaviour (it compiles the shared code but has no language buttons on its page layout check).
+**Not translated:** server-sent announcements, 5 strings whose Thai source is garbled, PC `launcher.xml`.
+
+### Server drop tables (2026-10-13, repo data only, NOT deployed to the live server)
+
+`CLIENT/data/glogicserver/GLogicServer.rcc` + the loose `.genitem` beside it. Tools: `MOBILE/tools/rcc-extract/drop-report.js`, `drop-clean.js`, `drop-restore-classic.js`, `drop-compare-ep1.js`. Reports: `drop_analysis_2026-10-13/`.
+- Dead lines (empty spec group / missing item id) commented out with `//`; tables over 100% left alone. Item data untouched (user: critical).
+- 121 tables restored to the developer originals (`DEV EP1/FULLSOURCE/=Document/glogic/glogicserver`, cipher v3; GENRATE 75-85 -> 7-50). Not restored: 54 with no v3 original (incl. lv22/81/91/104/139, lvNNN SB, sbboss, zeita), 19 question-box tables edited in this tree, everything above level 200 (no original exists).
+- Then (user: "follow the classic rate, I can adjust by event in game") 61 ordinary-mob tables with no original lowered to the classic pattern by `drop-classic-rule.js` (never raises a number; fires 25-50% by level; osaka, lvNNN SB, gmd_*, Infinitystairs, lv22/81/91/104/139...). 55 boss-style tables (mob HP >= 250k or 3+ rolls) left alone.
+- Backups: `GLogicServer.rcc.bak_pre_dropclean` (before everything), `.bak_pre_classic` (after dead-line pass, before restore), `.bak_pre_classic_rule` (before the rule pass).
+- 76 mobs' fixed Red Gem / Fine Polish drop lowered in `CLIENT/data/glogic/crow.mnsf` + `GLogic.rcc` by `crow-fixed-drop-rate.js` (5%,10% -> 1%; 20% -> 2%; the rate is a WORD of whole per cent). 76 bytes changed, backups `*.bak_pre_gemrate`. Only the SERVER copy matters for drops.
+- Open: user to deploy; 34 mob links to missing drop files; boss tables untouched by choice.
+
+### Pet food / vehicle fuel on a pet that is not out (2026-10-13, built, NOT patched, NOT tested on a device)
+
+`MobileItemSheet.cpp` `MobileApplyFrame`: new `APPLY_WAITING` stage. The server answers food for an unsummoned pet (and fuel, always) after a DB read and needs the item still in SLOT_HOLD (`MsgGetPetFullFromDB`); the apply flow put it back at once, so a 0% pet could never be fed. Now the hand is kept until its count changes or 2 s pass. Shared code: Android + iOS. Needs a pet card at 0% and food to test.
+
+### User batch of 5 (2026-10-13, built, NOT yet patched or committed)
+
+6. **Bag buttons swapped (added later the same day).** `CMobileBagPanel`: ย่อย left, เรียง right, both layouts (shared code, Android + iOS). LDPlayer: seen on the wide layout. Not patched.
+
+1. **Skill page: one column.** `CMobileSkillPanel` NCOL 2 -> 1 (NLINE 8). LDPlayer: four rows visible, scrolls.
+2. **Create character: name box under the keyboard.** The lift (`RanUI_LiftFocusedWindow`) never held on the lobby's character pages, for two reasons: `COuterInterface` re-places them at a fixed top every frame, and `MobileApplyMagnify` pushes a magnified window back inside the screen. Now the lobby subtracts `CUIMan::MobileLiftOf(page)`, the magnify leaves the lifted window's height alone (sideways it is still kept on screen), and `RanUI_FocusedEditRect` reports where the box is DRAWN (magnified about its anchor), not its rectangle. LDPlayer with diag `fakekb` = 520: box 372 -> 304, clear of a keyboard top at 345; back in place when typing ends. Shared code, so iOS gets it; not run on a real phone or iPhone.
+3. **Skill page: what the next step needs.** New line per row (`NeedLine`): level, skill points, each stat, the prerequisite skill and its step, for learning or for the next level; red while something is missing, green when it can be done; empty once mastered. Words `MOBILE_PANEL` 93-95 (Thai + English). A learned skill's "Next:" line was not seen on device (the test character has no skills).
+4. **Item window: side panel instead of modal.** No dim layer (`MOBILE_ITEM_INFO_VEIL` is no longer shown). The window docks on the half of the screen away from the tap (`CMobileItemInfoBox::DockAwayFrom`, 631 wide so a 16:9 bag grid stays clear). A press outside closes it and is not eaten, so a tap on another item opens that item in one tap; a tap on another slot while a sheet is open switches to it (`IsOpenFor`); the same slot still closes. LDPlayer: bag item, equipped item -> another equipped item (one tap), tap on an empty slot closes. NOT tested: stall, chat item link, item bank, trade, NPC shop (same window and code path).
+5. **Quest tracker at the top-left.** Not reproduced (emulator: correct after adding a quest, after background/resume, after opening windows). `CQuestHelper::Update` now sets the box and its text from the screen size every frame (right edge 15 short of the screen, authored top), so a wrong position cannot outlive a frame. Cause still unknown.
+
 ## 2026-10-12 — User batch of 8 (patch 776, APK 268, iOS 1.0.268; awaiting upload; 774 never uploaded)
+
+**2026-10-12 evening: Play policy notice "Device and Network Abuse: Intent Redirection".** Cause: the APK self-update receiver in RanLauncher (EXTRA_INTENT from a broadcast passed to startActivity). The store build never ran it, but it was in the dex. Store branch now compiles a copy without offerApk/commitInstall (native/android/store-java.py, build fails if PackageInstaller/EXTRA_INTENT is still in the dex; commits 9dc93af, 7e2ab81). Built as STORE_VC=269 (versionName 1.1.84), LDPlayer: patch page, login, character creation OK. Uploaded: Alpha and Internal both 269, completed. Waiting for Google review. NOTE: Play has used version code 269, main is still 268: the next store build must be 270 or higher (bump main past 269 or pass STORE_VC). The direct APK still has the receiver unchanged; not on Play, not changed today.
 
 **2026-10-12 later: user uploaded patch 776 (live, minApk 268) before Play had 268; Play testers on 266 were blocked.** Store branch merged (b57491e), store 1.1.84 / 268 built, installed on LDPlayer (passes the patch page, boots to server select), uploaded to the Alpha closed test as completed; waiting for Google review. NOT verified in-world: LDPlayer got "connection failed" at server select (server down or this IP banned, not probed). Main build trees and file times restored.
 
