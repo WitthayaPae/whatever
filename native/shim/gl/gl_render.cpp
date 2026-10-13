@@ -908,7 +908,22 @@ struct GlState {
     GLsizei vertexBase;
     GLuint vertexBuffer;
 
-    void reset() { memset(this, 0, sizeof(*this)); depthFunc = 0; fvf = 0xFFFFFFFF; }
+    //  A reset means "I no longer know what GL holds". For the three enables
+    //  that is -1, which matches neither on nor off, so the next set* always
+    //  issues its call. They used to be 0, which CLAIMS "off": the scene blit
+    //  and the render-target clear reset the cache while blending was still
+    //  enabled in GL, the next opaque draw's setBlend(false) compared 0 with 0
+    //  and skipped the glDisable, and the land was drawn with the sky pass's
+    //  multiply blend (ZERO, SRC_COLOR) over a black clear - an entirely black
+    //  room (the club war room, for a character whose effects put a target
+    //  clear between the sky quads and the land; the user, 2026-10-13). The
+    //  blend factors get a value no GL factor has, so (ZERO, ZERO) is not
+    //  mistaken for already set.
+    void reset() {
+        memset(this, 0, sizeof(*this)); depthFunc = 0; fvf = 0xFFFFFFFF;
+        blendEnabled = depthTest = cullEnabled = -1;
+        blendSrc = blendDst = 0xFFFFFFFFu;
+    }
 };
 GlState g_gl;
 
@@ -2529,6 +2544,9 @@ extern "C" void RanGLR_SetMaterialAlpha(float a) { g_matAlpha = a; }
 //  longer exists and the next draw silently skips the binds it still needs.
 extern "C" void RanGLR_InvalidateStateCache(void) {
     g_gl.reset();
+    //  The depth mask stays a plain 0 / 1 (the clears read it to know whether
+    //  to open it), so GL is put where the reset says it is.
+    glDepthMask(GL_FALSE);
     //  g_gl.reset() forgets which program is bound, so the variant cache has to
     //  forget too: they are two halves of one piece of state, and leaving this
     //  one set is what let a draw skip its glUseProgram entirely.

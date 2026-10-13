@@ -32,6 +32,50 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-13 (late night) — Drop rates REVERTED to the old (boosted) tables (user: "revert it to the one before")
+
+- `CLIENT/data/glogicserver/GLogicServer.rcc` <- `.bak_pre_classic` (old rates; the dead lines stay commented, which changes no rate), the 182 loose `.genitem` that differed rewritten from it (597 loose files now equal the archive); `CLIENT/data/glogic/GLogic.rcc` + `crow.mnsf` <- `.bak_pre_gemrate` (fixed gem drop back to 5 / 10 / 20 %; only crow.mnsf differed).
+- The classic version is kept: `GLogicServer.rcc.classic_2026-10-13`, `GLogic.rcc.classic_2026-10-13`, `crow.mnsf.classic_2026-10-13`, the loose tables in `glogicserver/_classic_2026-10-13_genitem/`, and `SHIP_SERVER_2026-10-13/` (do NOT copy that folder to the server unless the user wants the classic rates again).
+- Verified by re-running drop-report.js: ordinary-mob table equals the old one (e.g. 261+ weapon 36.08 /100 kills), gem mobs 28 at 5%, 24 at 10%, 24 at 20%.
+- Patch 778 in `out/upload` was built with the classic `GLogic.rcc` (gem rates 1-2%); the next patch build carries the reverted file. The "Server drop tables" section below describes the classic state that is no longer in the tree.
+
+## 2026-10-13 (late night) — Chat channel button shifted up; trade view item window (built x86_64, NOT installed, NOT tested, NOT patched, NOT committed)
+
+1. **Chat channel button 14 up, sometimes** (was "OPEN, not reproduced" below). Caught on screen by the user. Cause (log `RanEdge : id 30 434,699 100x21 -> 434,685`): the once-a-second edge sweep (`DxGameStage`, "nothing on the HUD touches a screen edge") moved `TARGETINFO_DISPLAY` (a mob's name/health bar, sliding along the bottom edge) up by the margin; the channel button touched it and was chained into the move; `CMobileChatChannelBar::PlaceNew` only re-lays when its rect changes, so it stayed. Fix: the sweep skips `TARGETINFO_DISPLAY*` and the three chat bars (they place themselves every frame), and `PlaceNew` also re-lays when the group is not where it was laid. NOT tested (needs a mob under the chat at the bottom edge).
+2. **Trade with a player: a tap shows the item** (user: "you fix in the inventory but not in the trading view"). New sheet contexts `CTX_TRADE_BAG` (10), `CTX_TRADE_MINE` (11), `CTX_TRADE_THEIR` (12): bag cell while trading -> detail + เสนอเทรด (`ACT_TRADE_PUT`: `ReqInvenTo` names it, `ReqTradeBoxTo` on the first cell `IsInsertable`); my box -> detail + เอากลับ (`ACT_TRADE_TAKE`); their box -> detail (+ preview / contents, or ปิด). Before: the bag tap named the item at once and the box tap placed / removed, nothing shown. Drag of a named item onto a cell and empty cells are unchanged. Existing words reused (no Gui.rcc change). Files: MobileItemSheet.h/.cpp, InnerInterfaceSimple.cpp (`MobilePinItemInfo`), MobileTradeWindowPanel.cpp, MobileBagPanel.cpp. NOT tested: needs two characters in a trade. My design choice, not the user's words: the action became a button (as the item bank, 2026-10-12).
+3. Shared SOURCE: Android + iOS. arm64, MSVC and iOS not built after these edits.
+
+## 2026-10-13 (night) — Black room for some characters: blend left on behind the state cache (FIXED on LDPlayer; NOT patched, NOT committed, temp diag code STILL IN THE TREE)
+
+User: ห้องคอม TD (`clubwar_inzone.wld`) entirely black for Sixnine90s (wings, auras), fine for GameMaster#1; same on phones.
+
+- **Cause (measured):** `GlState::reset()` zeroed the cache, which CLAIMS blend / depth test / cull are off. `RanGLR_InvalidateStateCache` is called after the scene blit and after a render-target clear without switching anything off. With blending still enabled in GL, the next opaque draw's `setBlend(false)` compared 0 with 0 and skipped the `glDisable`; the land (first world draw) was drawn with the sky pass's (ZERO, SRC_COLOR) over a black clear. GL read-out at the land draw: BLEND=1 src=ZERO dst=SRC_COLOR while D3D state said blend off.
+- **Fix:** `gl_render.cpp`: reset sets `blendEnabled = depthTest = cullEnabled = -1` (unknown) and the blend factors to 0xFFFFFFFF; `RanGLR_InvalidateStateCache` issues `glDepthMask(GL_FALSE)` so the 0 the clears read is true. Shared shim: Android + iOS.
+- **Verified:** LDPlayer x86_64 test APK, Sixnine90s in the room: floor and walls drawn. NOT verified: arm64 phone, iPhone, GameMaster#1 on the same build, other maps for regressions.
+- **Why some characters:** inferred, not measured (an effect's target clear falling between the sky quads and the land).
+- **TO REMOVE before any patch (a `git checkout` of these was blocked by the permission classifier; the user has to allow it or do it):**
+  - `SOURCE/Lib_Engine/DxCommon/NsOCTree.cpp`: three `RanLandCol` log blocks.
+  - `SOURCE/Lib_Engine/DxCommon/DxFogMan.cpp`: the `m_bFogStaticRange = FALSE` reset + `RanFog load` log (measured: the flag never carried over; this change does nothing).
+  - `MOBILE/native/shim/d3d/d3d9_impl.cpp`: `lightlog`, `RanFog CHG`, `vbresync` blocks (all of today's diff in this file).
+  - `MOBILE/native/shim/gl/gl_render.cpp`: `RanGeo` block, `uPlain` 2/3/4 + `plainMode()`, the extra `RanGL_ProbeState` lines and the "land draw" probe. KEEP `reset()` and the `glDepthMask` line.
+- **Tools found broken:** `texprobe` crashes the game (attaches a stale texture name to an FBO; twice today). Do not use until fixed.
+- Other finding, not fixed: three files are named `black.dds`; the map got `textures/bike/Kawasaki_NinjaH2_2017/black.dds` instead of `textures/map/black.dds` (both black, no visible effect here).
+- Wrong turns, for the record: lights, land vertex colours, fog distance, fog flag carry-over, shadow texture, ceiling shell, stale VBs, gamma, VAO shortcuts. What found it: flat-magenta fragment output (no pixels from the land) then reading GL's own state at the land draw.
+
+## 2026-10-13 (evening) — Skill page: list left, detail right (NOT in patch 778; not patched, not committed)
+
+User: "you have space left and right... left is the skill, when click right side is the detail. Do this and do not patch yet."
+
+- `CMobileSkillPanel`: the list takes 44% of the width (icon, name, grade/level, +); the rest is a detail box for the tapped skill: icon, name, state, + and the ring button (ตั้งปุ่ม, learned active skills only), and a scrolling text = "Next: ..." line for a learned skill, then the PC tooltip's own lines. The first skill of a tab is selected until one is tapped; the selected row's name is in the title colour. The floating tooltip pop-up is no longer used by this page.
+- Tooltip text: `NS_SKILLINFO::MOBILE_CAPTURE` (UISkillInfoLoader.cpp, RAN_MOBILE) runs the classic `LOAD` with its lines sent to a vector instead of INFO_DISPLAY. No new words, no Gui.rcc change.
+- Shared SOURCE code: Android and iOS get it from the same edit. No iOS build made yet (do not patch yet).
+- Built: arm64 + x86_64 0 errors; MSVC GameClient2, Emulator, ServerAgent, ServerField OK (before the last two mobile-only edits).
+- LDPlayer (test APK `out/RanTest.apk`, `out/RanMobile.apk` untouched): tap a row shows it on the right, detail text scrolls, list scrolls separately, tab's first skill preselected, แก้ไขช่องสกิล picker opens.
+- NOT tested: a learned skill (ring button, "Next:" line, level-up confirm), + learning a skill (not pressed, would spend the test character's point), Tab S9 / phone layout, iPhone.
+- Later the same evening (user): แต้มสกิล and แก้ไขช่องสกิล moved onto the tabs' line (right end); the freed line goes to the list and detail (rows grow to fill, 11 detail lines in view). LDPlayer: seen.
+- OPEN, not reproduced (user: "the chat box channel and filter buttons shift up a bit, sometimes"): on LDPlayer both buttons stayed level with the input field after typing, closing the keyboard, folding/reopening the chat, opening the bag. Left by the user's word. Needs a screenshot from the device where it happens. Code: `CMobileChatChannelBar::PlaceNew` (own top-level group, re-laid only when its rect changes).
+- The libraries are newer than `out/RanMobile.apk`, so the next MAKE-PATCH bumps to 271; Play has 270 in review, so a patch with this needs a new store build too.
+
 ## 2026-10-13 — Patch 778 / APK 270 (1.1.85) / iOS 1.0.270 built; Play 270 sent for review; upload ON HOLD until Google approves
 
 - Contents: language option, server page shown, user batch of 5, bag button swap, pet food / fuel on a stored pet. Data: Gui.rcc, GLogic.rcc (English tables + the gem-rate crow.mnsf), and NpcTalk.rcc, Quest.rcc, textures/club/Club_00_00.dds, Club_Tex.dat, which changed in CLIENT today (14:29, 14:03, 13:40) and were NOT edited in this session (the user or another tool); they ship with this patch.
