@@ -5,7 +5,18 @@
 #define STRSAFE_E_INSUFFICIENT_BUFFER ((HRESULT)0x8007007AL)
 #define STRSAFE_MAX_CCH 2147483647
 #ifdef __cplusplus
-inline HRESULT StringCchCopyA(char *d, size_t n, const char *s) { if (!d || !n) return STRSAFE_E_INVALID_PARAMETER; strncpy(d, s ? s : "", n); d[n-1] = 0; return S_OK; }
+//  Copies the string and its terminator, nothing more. Windows StringCchCopy
+//  never pads, and callers pass a capacity that is not always the real
+//  buffer size: DxResponseMan copies into the 128-byte _DEFAULT_FONT with
+//  cchDest MAX_PATH, and the strncpy this used to be zero-filled 260 bytes,
+//  wiping CD3DFontPar::nCodePage / nCharSet next to it (2026-10-13).
+inline HRESULT StringCchCopyA(char *d, size_t n, const char *s) {
+    if (!d || !n) return STRSAFE_E_INVALID_PARAMETER;
+    if (!s) s = "";
+    size_t l = strnlen(s, n - 1);
+    memmove(d, s, l); d[l] = 0;
+    return S_OK;
+}
 inline HRESULT StringCchCatA(char *d, size_t n, const char *s) { if (!d || !n) return STRSAFE_E_INVALID_PARAMETER; size_t l = strlen(d); if (l + 1 < n) strncat(d, s ? s : "", n - l - 1); return S_OK; }
 inline HRESULT StringCchLengthA(const char *s, size_t, size_t *pl) { if (pl) *pl = s ? strlen(s) : 0; return S_OK; }
 inline HRESULT StringCchVPrintfA(char *d, size_t n, const char *f, va_list a) {
@@ -26,7 +37,13 @@ inline HRESULT StringCchVPrintfA(char *d, size_t n, const char *f, va_list a) {
     return S_OK;
 }
 inline HRESULT StringCchPrintfA(char *d, size_t n, const char *f, ...) { va_list a; va_start(a, f); StringCchVPrintfA(d, n, f, a); va_end(a); return S_OK; }
-inline HRESULT StringCchCopyW(wchar_t *d, size_t n, const wchar_t *s) { if (!d || !n) return STRSAFE_E_INVALID_PARAMETER; wcsncpy(d, s ? s : L"", n); d[n-1] = 0; return S_OK; }
+inline HRESULT StringCchCopyW(wchar_t *d, size_t n, const wchar_t *s) {
+    if (!d || !n) return STRSAFE_E_INVALID_PARAMETER;
+    if (!s) s = L"";
+    size_t l = 0; while (l < n - 1 && s[l]) ++l;      // no padding, see StringCchCopyA
+    memmove(d, s, l * sizeof(wchar_t)); d[l] = 0;
+    return S_OK;
+}
 inline HRESULT StringCchCatW(wchar_t *d, size_t n, const wchar_t *s) { if (!d || !n) return STRSAFE_E_INVALID_PARAMETER; size_t l = wcslen(d); if (l + 1 < n) wcsncat(d, s ? s : L"", n - l - 1); return S_OK; }
 inline HRESULT StringCchLengthW(const wchar_t *s, size_t, size_t *pl) { if (pl) *pl = s ? wcslen(s) : 0; return S_OK; }
 #define StringCchCopy    StringCchCopyA

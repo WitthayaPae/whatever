@@ -25,6 +25,8 @@
 #define LOGE(...) RanPlat_Log(RANLOG_ERROR, "RanPatch", __VA_ARGS__)
 
 extern "C" const char *RanIOS_DataRoot ( void );
+//  Thai / English for the patch page: see RanL in ran_ios_main.mm.
+NSString *RanL ( NSString *th );
 
 //  RanPatchProgress / RanPatchDone: a headline, a detail line and a permille
 //  for the bar, straight out of the Java.
@@ -492,7 +494,7 @@ extern "C" void RanIOS_RunPatch ( RanPatchProgress say, RanPatchDone done )
         //  screen should not hand anyone the patch address. It goes to the log,
         //  where someone diagnosing a patch failure is already looking.
         LOGI ( "patch base %s", base.UTF8String );
-        say ( @"กำลังตรวจสอบอัปเดต", nil, -1 );
+        say ( RanL ( @"กำลังตรวจสอบอัปเดต" ), nil, -1 );
 
         //  Fetched as bytes and checked before being parsed: a JSON parser is
         //  the first thing an attacker reaches, so it must not run on anything
@@ -544,13 +546,13 @@ extern "C" void RanIOS_RunPatch ( RanPatchProgress say, RanPatchDone done )
             //  The same steps and two buttons as Android's failApkTooOld
             //  (ran_ios_main.mm adds the buttons for this fatal stop).
             done ( NO, YES, [NSString stringWithFormat:
-                        @"ต้องอัปเดตแอปก่อนเล่น\n"
+                        RanL ( @"ต้องอัปเดตแอปก่อนเล่น\n"
                         @"แอปในเครื่องนี้เป็นเวอร์ชันเก่า (%d) ต้องเป็นเวอร์ชัน %d ขึ้นไป\n"
                         @"วิธีแก้:\n"
                         @"1. เปิด LocalDevVPN กด Connect แล้วเปิด SideStore\n"
                         @"2. ไปที่แท็บ My Apps แล้วกด Update ที่ RAN Legacy M\n"
                         @"3. หรือกด ไปหน้าวิธีติดตั้ง แล้วทำตามขั้นตอน\n"
-                        @"ถ้ายังทำไม่ได้ กด ค้นหาวิธีใน Google",
+                        @"ถ้ายังทำไม่ได้ กด ค้นหาวิธีใน Google" ),
                         myBuild, minIos] );
             return;
         }
@@ -560,7 +562,7 @@ extern "C" void RanIOS_RunPatch ( RanPatchProgress say, RanPatchDone done )
 
         const int localVersion = ReadVersion ();
         if (localVersion == version) {
-            say ( @"เป็นเวอร์ชันล่าสุด", [NSString stringWithFormat:@"เวอร์ชัน %@", AppLabel ()], 1000 );
+            say ( RanL ( @"เป็นเวอร์ชันล่าสุด" ), [NSString stringWithFormat:RanL ( @"เวอร์ชัน %@" ), AppLabel ()], 1000 );
             done ( YES, NO, nil );
             return;
         }
@@ -583,7 +585,7 @@ extern "C" void RanIOS_RunPatch ( RanPatchProgress say, RanPatchDone done )
         NSMutableArray *todo = [NSMutableArray array];      //  @[rel, sha, @(size), parts or NSNull]
         long long todoBytes = 0;
 
-        say ( @"กำลังตรวจสอบไฟล์", [NSString stringWithFormat:@"%lu ไฟล์",
+        say ( RanL ( @"กำลังตรวจสอบไฟล์" ), [NSString stringWithFormat:RanL ( @"%lu ไฟล์" ),
                                   (unsigned long)files.count], 0 );
 
         for (NSUInteger i = 0; i < files.count; ++i) {
@@ -631,13 +633,13 @@ extern "C" void RanIOS_RunPatch ( RanPatchProgress say, RanPatchDone done )
         if (todo.count == 0) {
             WriteIndexFrom ( files, root );
             WriteVersion ( version );
-            say ( @"เป็นเวอร์ชันล่าสุด", [NSString stringWithFormat:@"เวอร์ชัน %@", AppLabel ()], 1000 );
+            say ( RanL ( @"เป็นเวอร์ชันล่าสุด" ), [NSString stringWithFormat:RanL ( @"เวอร์ชัน %@" ), AppLabel ()], 1000 );
             done ( YES, NO, nil );
             return;
         }
 
-        say ( @"กำลังดาวน์โหลดอัปเดต",
-              [NSString stringWithFormat:@"%lu ไฟล์, %.1f MB",
+        say ( RanL ( @"กำลังดาวน์โหลดอัปเดต" ),
+              [NSString stringWithFormat:RanL ( @"%lu ไฟล์, %.1f MB" ),
                (unsigned long)todo.count, todoBytes / 1048576.0], 0 );
 
         //  kDlThreads workers pull entries off one shared counter. A failure
@@ -692,7 +694,7 @@ extern "C" void RanIOS_RunPatch ( RanPatchProgress say, RanPatchDone done )
 
         WriteIndexFrom ( files, root );
         WriteVersion ( version );                   //  last, always
-        say ( @"อัปเดตเสร็จแล้ว", [NSString stringWithFormat:@"เวอร์ชัน %@", AppLabel ()], 1000 );
+        say ( RanL ( @"อัปเดตเสร็จแล้ว" ), [NSString stringWithFormat:RanL ( @"เวอร์ชัน %@" ), AppLabel ()], 1000 );
         done ( YES, NO, nil );
     });
 }

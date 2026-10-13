@@ -77,6 +77,49 @@ void        RanIOS_InstallPlatformPaths ( void );
 void RanD3D_LiveMemLine ( char *out, int cap );
 void RanD3D_HeldMemLine ( char *out, int cap );
 }
+//  Thai / English. The game writes lang.txt beside option.ini when the player
+//  picks a language on the server page; before that, the phone language decides.
+//  Every Thai string on the patch page goes through RanL, which returns its
+//  English from the table below when the language is English. The same table,
+//  word for word, is in RanLauncher.java (LANG_EN).
+NSString *RanL ( NSString *th )
+{
+    static int lang = -1;       //  -1 not read yet, 0 Thai, 1 English
+    static NSDictionary<NSString *, NSString *> *en = nil;
+    if ( lang < 0 ) {
+        NSString *path = [@(RanIOS_DataRoot()) stringByAppendingPathComponent:@"lang.txt"];
+        NSString *v = [NSString stringWithContentsOfFile:path encoding:NSASCIIStringEncoding error:nil];
+        if ( [v hasPrefix:@"en"] )      lang = 1;
+        else if ( [v hasPrefix:@"th"] ) lang = 0;
+        else lang = [[[NSLocale preferredLanguages] firstObject] hasPrefix:@"th"] ? 0 : 1;
+        en = @{
+            @"กำลังตรวจสอบอัปเดต" : @"Checking for updates",
+            @"ต้องอัปเดตแอปก่อนเล่น\nแอปในเครื่องนี้เป็นเวอร์ชันเก่า (%d) ต้องเป็นเวอร์ชัน %d ขึ้นไป\nวิธีแก้:\n1. เปิด LocalDevVPN กด Connect แล้วเปิด SideStore\n2. ไปที่แท็บ My Apps แล้วกด Update ที่ RAN Legacy M\n3. หรือกด ไปหน้าวิธีติดตั้ง แล้วทำตามขั้นตอน\nถ้ายังทำไม่ได้ กด ค้นหาวิธีใน Google" : @"The app must be updated before you can play\nThis device has an old version (%d). Version %d or newer is required\nHow to fix:\n1. Open LocalDevVPN, tap Connect, then open SideStore\n2. Go to the My Apps tab and tap Update on RAN Legacy M\n3. Or tap Open install guide and follow the steps\nIf it still does not work, tap Search on Google",
+            @"เป็นเวอร์ชันล่าสุด" : @"Up to date",
+            @"เวอร์ชัน %@" : @"Version %@",
+            @"กำลังตรวจสอบไฟล์" : @"Checking files",
+            @"%lu ไฟล์" : @"%lu files",
+            @"กำลังดาวน์โหลดอัปเดต" : @"Downloading update",
+            @"%lu ไฟล์, %.1f MB" : @"%lu files, %.1f MB",
+            @"อัปเดตเสร็จแล้ว" : @"Update complete",
+            @"กำลังเริ่ม" : @"Starting",
+            @"ไปหน้าวิธีติดตั้ง" : @"Open install guide",
+            @"ค้นหาวิธีใน Google" : @"Search on Google",
+            @"วิธีอัปเดตแอปใน SideStore iPhone" : @"how to update an app in SideStore iPhone",
+            @"ปิด" : @"Close",
+            @"กำลังเชื่อมต่ออีกครั้ง" : @"Reconnecting",
+            @"พื้นที่ในเครื่องเต็ม" : @"Device storage is full",
+            @"กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน %d วินาที%@" : @"Please delete files or other apps to free space. Retrying in %d sec%@",
+            @"  (ว่าง %.1f MB)" : @"  (free %.1f MB)",
+            @"เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้" : @"Cannot reach the update server",
+            @"จะลองใหม่ใน %d วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (%@)" : @"Retrying in %d sec. Please check your internet  (%@)",
+        };
+    }
+    if ( lang != 1 ) return th;
+    NSString *e = en[th];
+    return e ? e : th;
+}
+
 
 //  Set by RanIME_SetNumeric, read when UIKit builds the keyboard.
 static bool g_imeNumeric      = false;
@@ -981,7 +1024,7 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
     self.status.textColor = [UIColor colorWithRed:0xF0/255.0 green:0xF4/255.0
                                              blue:0xF6/255.0 alpha:1.0];
     self.status.textAlignment = NSTextAlignmentCenter;
-    self.status.text = @"กำลังเริ่ม";
+    self.status.text = RanL ( @"กำลังเริ่ม" );
 
     //  Drawn, not a UIProgressView - see RanPatchBar. 8pt tall, the Java's 8dp.
     self.bar = [RanPatchBar new];
@@ -1164,7 +1207,7 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
                                 [me presentViewController:wa animated:YES completion:nil];
                         });
                     };
-                    [a addAction:[UIAlertAction actionWithTitle:@"ไปหน้าวิธีติดตั้ง"
+                    [a addAction:[UIAlertAction actionWithTitle:RanL ( @"ไปหน้าวิธีติดตั้ง" )
                                                           style:UIAlertActionStyleDefault
                                                         handler:^(UIAlertAction *x) {
                         [UIApplication.sharedApplication openURL:[NSURL URLWithString:
@@ -1172,17 +1215,17 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
                                                          options:@{} completionHandler:nil];
                         reshow ();
                     }]];
-                    [a addAction:[UIAlertAction actionWithTitle:@"ค้นหาวิธีใน Google"
+                    [a addAction:[UIAlertAction actionWithTitle:RanL ( @"ค้นหาวิธีใน Google" )
                                                           style:UIAlertActionStyleDefault
                                                         handler:^(UIAlertAction *x) {
-                        NSString *q = [@"วิธีอัปเดตแอปใน SideStore iPhone"
+                        NSString *q = [RanL ( @"วิธีอัปเดตแอปใน SideStore iPhone" )
                             stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
                         [UIApplication.sharedApplication openURL:[NSURL URLWithString:
                             [@"https://www.google.com/search?q=" stringByAppendingString:q]]
                                                          options:@{} completionHandler:nil];
                         reshow ();
                     }]];
-                    [a addAction:[UIAlertAction actionWithTitle:@"ปิด"
+                    [a addAction:[UIAlertAction actionWithTitle:RanL ( @"ปิด" )
                                                           style:UIAlertActionStyleCancel
                                                         handler:nil]];
                     [me presentViewController:a animated:YES completion:nil];
@@ -1203,7 +1246,7 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
 - (void)countdown:(int)left reason:(NSString *)why
 {
     if (left <= 0) {
-        self.status.text = @"กำลังเชื่อมต่ออีกครั้ง";
+        self.status.text = RanL ( @"กำลังเชื่อมต่ออีกครั้ง" );
         self.detail.text = @"";
         self.bar.permille = -1;
         [self attempt];
@@ -1216,14 +1259,14 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
         NSString *root = [@(RanIOS_DataRoot()) stringByStandardizingPath];
         NSNumber *free = [[NSFileManager.defaultManager attributesOfFileSystemForPath:root error:NULL]
                              objectForKey:NSFileSystemFreeSize];
-        self.status.text = @"พื้นที่ในเครื่องเต็ม";
+        self.status.text = RanL ( @"พื้นที่ในเครื่องเต็ม" );
         self.detail.text = [NSString stringWithFormat:
-            @"กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน %d วินาที%@", left,
-            free ? [NSString stringWithFormat:@"  (ว่าง %.1f MB)", free.doubleValue / 1048576.0] : @""];
+            RanL ( @"กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน %d วินาที%@" ), left,
+            free ? [NSString stringWithFormat:RanL ( @"  (ว่าง %.1f MB)" ), free.doubleValue / 1048576.0] : @""];
     } else {
-        self.status.text = @"เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้";
+        self.status.text = RanL ( @"เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่ได้" );
         self.detail.text = [NSString stringWithFormat:
-            @"จะลองใหม่ใน %d วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (%@)", left, why];
+            RanL ( @"จะลองใหม่ใน %d วินาที กรุณาตรวจสอบอินเทอร์เน็ต  (%@)" ), left, why];
     }
     self.bar.permille = -1;
     __weak RanPatchViewController *weakSelf = self;

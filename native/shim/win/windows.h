@@ -897,7 +897,13 @@ typedef struct { WORD vt; union { LONG lVal; double dblVal; void *byref; }; } VA
 #define _tstoi atoi
 #define _tcstod strtod
 #define _ttof   atof
-#define lstrcpynA(d,s,n) (strncpy((d),(s),(n)-1), (d)[(n)-1]=0, (d))
+//  No zero padding (Windows does not pad either; see strsafe.h StringCchCopyA).
+inline char *lstrcpynA(char *d, const char *s, int n) {
+    if (!d || n <= 0) return d;
+    size_t l = s ? strnlen(s, (size_t)n - 1) : 0;
+    memmove(d, s, l); d[l] = 0;
+    return d;
+}
 #define lstrcpyn lstrcpynA
 #define MB_ICONSTOP 0x10
 #define ERROR_READ_FAULT 30
