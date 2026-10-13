@@ -32,6 +32,15 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-13 23:20 — Patch 780 / APK 271 (1.1.86) / iOS 1.1.86 (271) built; Play 271 sent for review; upload ON HOLD until Google approves
+
+- Contents: skill page list/detail, trade item window, chat channel button fix, black-room fix (GL state cache), `GLogic.rcc` with the gem rates reverted. Temp diag code removed first (exact-text removal of the hunks; only the `reset()` / `glDepthMask` fix left in gl_render.cpp).
+- Live server is at patch 778 (the user uploaded it; minApk 270). `out/upload` = 123 MB: 2 blobs + `ios/` + `android/` + manifest; minApk 271, minIos 271.
+- Play: `RanMobile-store.aab` 1.1.86 (271) on Alpha (closed test) and Internal, completed; waiting for review. DO NOT upload patch 780 before Play has 271 (Play testers on 270 would be stopped by minApk).
+- Verified: arm64 + x86_64 0 errors; MSVC GameClient2 / Emulator / ServerAgent / ServerField OK; LDPlayer main build in world + skill page; store build 271 boots to the server page; iOS CI run 38425720113 success, binary 1.1.86 (271) contains the new symbols. User confirmed on LDPlayer: black room fixed, trade + chat ("ok perfect").
+- NOT verified: arm64 phone, iPhone, store build in world, GameMaster#1 in the room on the new build.
+- Commits: SOURCE main 3e38b40; MOBILE main 9c3a90c (+ this note); store 283bd5e. Main build trees and file times restored after the store build (libran.so times unchanged).
+
 ## 2026-10-13 (late night) — Drop rates REVERTED to the old (boosted) tables (user: "revert it to the one before")
 
 - `CLIENT/data/glogicserver/GLogicServer.rcc` <- `.bak_pre_classic` (old rates; the dead lines stay commented, which changes no rate), the 182 loose `.genitem` that differed rewritten from it (597 loose files now equal the archive); `CLIENT/data/glogic/GLogic.rcc` + `crow.mnsf` <- `.bak_pre_gemrate` (fixed gem drop back to 5 / 10 / 20 %; only crow.mnsf differed).
