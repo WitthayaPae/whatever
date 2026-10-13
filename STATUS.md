@@ -32,7 +32,16 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-13 — Thai / English language option (built, NOT yet patched or committed)
+## 2026-10-13 — Patch 778 / APK 270 (1.1.85) / iOS 1.0.270 built; Play 270 sent for review; upload ON HOLD until Google approves
+
+- Contents: language option, server page shown, user batch of 5, bag button swap, pet food / fuel on a stored pet. Data: Gui.rcc, GLogic.rcc (English tables + the gem-rate crow.mnsf), and NpcTalk.rcc, Quest.rcc, textures/club/Club_00_00.dds, Club_Tex.dat, which changed in CLIENT today (14:29, 14:03, 13:40) and were NOT edited in this session (the user or another tool); they ship with this patch.
+- Order (user, 2026-10-13: "put for google review first, if pass I will upload the patch"): Play Alpha + Internal = 1.1.85 (270), uploaded by `tools/play-mcp/call.mjs` (the MCP server was down), status completed, waiting for review. THEN the user uploads `native/out/upload` (minApk 270, minIos 270).
+- Checked before sending: the new build on the data that is live now (patch 776) shows the server page without the language buttons, then server -> channel -> login -> world works (direct build with old Gui/GLogic pushed, and store build 270 on its own synced data, in-world, bag opens). So the store build is playable before the patch is up.
+- iOS: CI run 38380810636 green (first compile of the RanL launcher strings); binary has the new strings; `make-ios-source.js` done. Not run on a phone.
+- Store branch: main merged (dd4f8d9; conflict in ran_ios_main.mm = store TestFlight block kept + RanL line). Main build trees and file times restored; libs did not rebuild; patch 778 says "no code change".
+- Not tested on a device: pet food on a 0% pet (no pet on the test account), real keyboard lift, tablet, iPhone.
+
+## 2026-10-13 — Thai / English language option (in patch 778)
 
 **What the player gets.** The phone build no longer skips the server page (`MobileAutoEnter` removed): server -> channel -> login, as on PC. That page has two buttons, ไทย and English, on their own row above Quit. A tap switches everything at once and is saved (`option.ini` `nLanguage`, plus plain `lang.txt` beside it for the launcher, which reads it before the game runs; with no `lang.txt` the launcher follows the phone language).
 
@@ -67,11 +76,11 @@ Switching (`CSelectServerPage::SetLanguage`) reloads the text tables, name table
 - 76 mobs' fixed Red Gem / Fine Polish drop lowered in `CLIENT/data/glogic/crow.mnsf` + `GLogic.rcc` by `crow-fixed-drop-rate.js` (5%,10% -> 1%; 20% -> 2%; the rate is a WORD of whole per cent). 76 bytes changed, backups `*.bak_pre_gemrate`. Only the SERVER copy matters for drops.
 - Open: user to deploy; 34 mob links to missing drop files; boss tables untouched by choice.
 
-### Pet food / vehicle fuel on a pet that is not out (2026-10-13, built, NOT patched, NOT tested on a device)
+### Pet food / vehicle fuel on a pet that is not out (2026-10-13, in patch 778, NOT tested on a device)
 
 `MobileItemSheet.cpp` `MobileApplyFrame`: new `APPLY_WAITING` stage. The server answers food for an unsummoned pet (and fuel, always) after a DB read and needs the item still in SLOT_HOLD (`MsgGetPetFullFromDB`); the apply flow put it back at once, so a 0% pet could never be fed. Now the hand is kept until its count changes or 2 s pass. Shared code: Android + iOS. Needs a pet card at 0% and food to test.
 
-### User batch of 5 (2026-10-13, built, NOT yet patched or committed)
+### User batch of 5 (2026-10-13, in patch 778)
 
 6. **Bag buttons swapped (added later the same day).** `CMobileBagPanel`: ย่อย left, เรียง right, both layouts (shared code, Android + iOS). LDPlayer: seen on the wide layout. Not patched.
 
