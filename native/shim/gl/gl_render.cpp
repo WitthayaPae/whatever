@@ -598,8 +598,20 @@ bool g_stableCheck = false;
 unsigned long g_stableMismatch = 0;
 
 bool uniformChanged(GLint loc, const float *values, int count) {
-    if (loc < 0 || count > (int)(sizeof(((UniformSlot *)0)->values) / sizeof(float))) return loc >= 0;
+    if (loc < 0) return false;
     if ((int)g_uniformCache.size() <= loc) g_uniformCache.resize(loc + 1);
+    if (count > (int)(sizeof(((UniformSlot *)0)->values) / sizeof(float))) {
+        //  Too big to cache, so it is always sent - and the slot must forget
+        //  what it held. Left alone, it still described the last small upload:
+        //  a bone palette of 9+ matrices overwrote slot 0 on the GPU, then the
+        //  next 1-matrix upload to the same location matched that stale entry
+        //  and was skipped. Measured (ghostprobe, 2026-10-15): the +5 claw's
+        //  level-glow pass drew with the body's bone 0 from the body's pass
+        //  just before it - a copy of the claw beside the character, there
+        //  whenever the claw had not moved since its last upload.
+        g_uniformCache[loc].count = 0;
+        return true;
+    }
     UniformSlot &slot = g_uniformCache[loc];
     if (slot.count == count && memcmp(slot.values, values, sizeof(float) * count) == 0)
         return false;
@@ -808,6 +820,15 @@ int g_diagDraws = 0, g_diagUI = 0, g_diagUpload = 0;
 //  -1 leaves every draw alone.
 int g_drawLimit = -1;
 int g_frameDraw = 0;
+//  "ghostprobe" (re-arm by deleting and touching the file): for the next few
+//  frames, after every on-screen draw read a 32x32 block of the frame at
+//  g_ghostX/Y (fractions of the viewport, from the bottom left) and log each
+//  draw that changes it - which draw really puts pixels there, measured on the
+//  GPU rather than computed. Measurement only; it stalls the pipeline per draw.
+int   g_ghostProbe = 0;
+bool  g_ghostLastValid = false;
+float g_ghostLast[4] = { 0, 0, 0, 0 };
+float g_ghostX = 0.378f, g_ghostY = 0.421f;
 //  Whether this frame has cleared the colour buffer yet.
 //
 //  Without preservation the buffer a frame starts on holds whatever was in it
@@ -1429,6 +1450,23 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
                 //  black panel.
                 g_diagUI = 600;
                 LOGI("diagnostic: dumping the next 600 world draws and 600 interface draws");
+            }
+        }
+    }
+    {
+        static bool s_ghostArmed = false;
+        const bool on = (RanPlat_DiagExists("ghostprobe"));
+        if (on != s_ghostArmed) {
+            s_ghostArmed = on;
+            if (on) {
+                g_ghostProbe = 4;
+                FILE *f = RanPlat_DiagOpen("ghostprobe");
+                if (f) {
+                    float x = 0, y = 0;
+                    if (fscanf(f, "%f %f", &x, &y) == 2 && x > 0 && x < 1 && y > 0 && y < 1) { g_ghostX = x; g_ghostY = y; }
+                    fclose(f);
+                }
+                LOGI("diagnostic: ghost probe at %.3f,%.3f for 3 frames", g_ghostX, g_ghostY);
             }
         }
     }
@@ -2473,6 +2511,8 @@ extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil
     //  only frame boundary visible from this layer.
     if (!g_rtActive && (flags & D3DCLEAR_TARGET)) {
         if (g_drawLog > 0) --g_drawLog;
+        if (g_ghostProbe > 0) --g_ghostProbe;
+        g_ghostLastValid = false;
         g_frameDraw = 0;
         g_frameClearedColor = true;
     }
@@ -3790,14 +3830,15 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
             }
             LOGI("draw #%d: fvf=%08lX stride=%u tex=%u prim=%lu vc=%u "
                  "box=(%.0f,%.0f)-(%.0f,%.0f) rhw=%d blend=%lu(%lu,%lu) "
-                 "cop=%lu,%lu,%lu aop=%lu,%lu,%lu tfactor=%.2f,%.2f,%.2f,%.2f",
+                 "cop=%lu,%lu,%lu aop=%lu,%lu,%lu tfactor=%.2f,%.2f,%.2f,%.2f target=%s %dx%d",
                  g_frameDraw, (unsigned long)fvf, stride, glTexture,
                  (unsigned long)primCount, vcount, bx0, by0, bx1, by1,
                  (fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW ? 1 : 0,
                  (unsigned long)g_dsBlend, (unsigned long)g_dsSrc, (unsigned long)g_dsDst,
                  (unsigned long)g_colorOp, (unsigned long)g_colorArg1, (unsigned long)g_colorArg2,
                  (unsigned long)g_alphaOp, (unsigned long)g_alphaArg1, (unsigned long)g_alphaArg2,
-                 g_texFactor[0], g_texFactor[1], g_texFactor[2], g_texFactor[3]);
+                 g_texFactor[0], g_texFactor[1], g_texFactor[2], g_texFactor[3],
+                 g_rtActive ? "offscreen" : "SCREEN", g_rtActive ? g_rtW : 0, g_rtActive ? g_rtH : 0);
             //  Which engine code asked for this draw. Bisecting with drawlimit
             //  says WHICH draw paints a thing on screen; without this it still
             //  takes guesswork to say what drew it, and guessing at that has
@@ -3962,6 +4003,39 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
                     if (ndc[k] < bmin[k]) bmin[k] = ndc[k];
                     if (ndc[k] > bmax[k]) bmax[k] = ndc[k];
                 }
+            }
+        }
+        //  Which palette slots this draw's vertices really reach: for an
+        //  indexed format (XYZBn + LASTBETA_UBYTE4) the shader reads all four
+        //  indices whatever VERTEXBLEND says, and only VERTEXBLEND+1 slots are
+        //  uploaded. A slot past that with weight on it reads a stale matrix.
+        if ((fvf & D3DFVF_LASTBETA_UBYTE4) && dumpVerts) {
+            int nW = 0;
+            switch (fvf & D3DFVF_POSITION_MASK) {
+                case D3DFVF_XYZB2: nW = 1; break;
+                case D3DFVF_XYZB3: nW = 2; break;
+                case D3DFVF_XYZB4: nW = 3; break;
+                case D3DFVF_XYZB5: nW = 4; break;
+                default: break;
+            }
+            if (nW > 0) {
+                unsigned slotHits[256] = { 0 };
+                unsigned nVerts = 0;
+                for (UINT i = 0; i < vcount; ++i) {
+                    const BYTE *vp = (const BYTE *)dumpVerts + (size_t)i * stride;
+                    const float *w = (const float *)(vp + 12);
+                    const BYTE *idx = vp + 12 + 4 * nW;
+                    float wt[4] = { 0, 0, 0, 0 }, used = 0.0f;
+                    for (int k = 0; k < nW && k < 3; ++k) { wt[k] = w[k]; used += w[k]; }
+                    wt[nW < 3 ? nW : 3] = 1.0f - used;
+                    for (int k = 0; k < 4; ++k) if (wt[k] > 0.001f) ++slotHits[idx[k]];
+                    ++nVerts;
+                }
+                char sz[512]; int at = 0;
+                for (int s = 0; s < 256 && at < 440; ++s)
+                    if (slotHits[s]) at += snprintf(sz + at, sizeof(sz) - at, " slot%d:%u", s, slotHits[s]);
+                RanPlat_Log(RANLOG_INFO, "RanIdx", "%s vc=%u vblend=%d palslots=%d weighted:%s",
+                            g_diagTag, nVerts, g_vertexBlend, g_palSlotsRaw, at ? sz : " none");
             }
         }
         if (bmin[0] <= bmax[0]) {
@@ -4549,6 +4623,40 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     } else {
         glDrawArrays(mode, 0, vcount);
         ++g_callsDraw;
+    }
+
+    if (g_ghostProbe > 0 && g_ghostProbe < 4 && (!g_rtActive || g_rtW > 600)) {
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const int bx = vp[0] + (int)(vp[2] * g_ghostX) - 16, by = vp[1] + (int)(vp[3] * g_ghostY) - 16;
+        unsigned char px[32 * 32 * 4];
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(bx, by, 32, 32, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        float m[4] = { 0, 0, 0, 0 };
+        int teal = 0;
+        for (int i = 0; i < 32 * 32; ++i) {
+            const int r = px[i * 4], gg = px[i * 4 + 1], b = px[i * 4 + 2];
+            m[0] += r; m[1] += gg; m[2] += b;
+            if (gg - r > 12 && b - r > 12 && gg > 70) ++teal;
+        }
+        m[0] /= 1024.f; m[1] /= 1024.f; m[2] /= 1024.f; m[3] = (float)teal;
+        if (g_ghostLastValid) {
+            const float d = fabsf(m[0] - g_ghostLast[0]) + fabsf(m[1] - g_ghostLast[1]) + fabsf(m[2] - g_ghostLast[2]);
+            if (d > 3.0f || m[3] != g_ghostLast[3]) {
+                char bt[512]; bt[0] = 0;
+                RanDiag_Backtrace(bt, sizeof(bt));
+                RanPlat_Log(RANLOG_INFO, "RanGhost",
+                    "frame-draw %d: rgb %.0f,%.0f,%.0f teal %d -> rgb %.0f,%.0f,%.0f teal %d | fvf=%08lX tex=%u vc=%u prim=%lu blend=%lu(%lu,%lu) z=%lu zw=%lu cop=%lu,%lu,%lu vp=%d,%d %dx%d at%s",
+                    g_frameDraw, g_ghostLast[0], g_ghostLast[1], g_ghostLast[2], (int)g_ghostLast[3],
+                    m[0], m[1], m[2], teal, (unsigned long)fvf, glTexture, vcount, (unsigned long)primCount,
+                    (unsigned long)g_dsBlend, (unsigned long)g_dsSrc, (unsigned long)g_dsDst,
+                    (unsigned long)g_dsZ, (unsigned long)g_dsZW,
+                    (unsigned long)g_colorOp, (unsigned long)g_colorArg1, (unsigned long)g_colorArg2,
+                    vp[0], vp[1], vp[2], vp[3], bt);
+            }
+        }
+        memcpy(g_ghostLast, m, sizeof(m));
+        g_ghostLastValid = true;
     }
 
 #ifdef RAN_TIME_DRAWS

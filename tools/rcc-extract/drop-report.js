@@ -194,7 +194,9 @@ function table(name) {
     }
     // SELECTNUM stops at the first wNum == 0.
     const z = t.nums.findIndex((x) => x.n === 0); if (z >= 0) t.nums.length = z;
-    t.rolls = t.nums.reduce((a, x) => a + x.n * x.pct / 100, 0);
+    // GENNUM ranges are stacked [L, L+pct) one after another (GLCrowDataLoad.cpp
+    // SGENITEM::LOADFILE) and SELECTNUM rolls 0..100: a part past 100 never happens.
+    { let lo = 0; t.rolls = 0; for (const x of t.nums) { const hi = lo + x.pct; t.rolls += x.n * Math.max(0, Math.min(hi, 100) - Math.min(lo, 100)) / 100; lo = hi; } }
     t.entryPct = t.entries.reduce((a, x) => a + x.pct, 0);
   }
   tableCache.set(k, t);

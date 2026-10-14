@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-13
+- **Last updated:** 2026-10-14
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -11,7 +11,26 @@ If anything here disagrees with another file, this file wins.
 - **Release flow:** MAKE-PATCH.bat on `main` -> push -> ios-build.yml -> make-ios-source.js ->
   patch again -> user uploads `native/out/upload`. See CLAUDE.md and PATCHING.md.
 
-### Where we are (2026-10-08)
+### Where we are (2026-10-14 evening)
+
+| Track | State |
+|---|---|
+| Patch 780 / APK 271 / iOS 1.1.86 (271) | Built 2026-10-13, in `native/out/upload`. **Upload ON HOLD** until Google approves Play 271 (in review). Live server is at patch 778. |
+| Drop tables (server) | Built and installed locally, **not on the live server yet**. User uploads both: `CLIENT/data/glogicserver/GLogicServer.rcc` 1,651,123 bytes (sha eb2956d3ccf5) -> server `data\glogicserver\`, and `CLIENT/data/glogic/GLogic.rcc` 12,321,198 bytes (sha 04655f179584) -> server `data\glogic\`, then restart. Contents: stones 2% in every normal lv* table (5 tables got the line added), weapon/armor of the 100 normal field tables kept in 4.30-5.30 per 100 kills (existing lines only), empty lines removed (lv220SB/230SB/240SB potions now drop), missing tables added (lv220, SaintSS_01_1, SaintSS_01_2, suryun), 10 monsters with no table given the table of their level. Sections 2026-10-14 (1)-(4) below. |
+| Drop test in game | User spawned 300 monsters on the live server (emulator, GM) and got no stone (2026-10-14). Not resolved: which monster, and whether the server had the new file + restart, are unknown. Test plan in `drop_analysis_2026-10-13/stone_normal_monsters_2026-10-14.md`: 300 x 38/12 Ice Tyrant (~20 stones with any file) then 300 x 40/1 (~5 new file, ~1 old). |
+| Next patch | Will carry the new `GLogic.rcc` (crow.mnsf table names only; phones do not use drop tables). Patch 780 still has the previous one. |
+| Offline market reel | Waiting for the user's phone screen recording (stall open -> logout -> buy with a 2nd ID -> relog sales list). Emulator recording does not work (screenrecord: 15 frames in 5 s; LDPlayer window 1052x631). Config: offline stall 24 h, max 300. Earlier reel project for style: `PROMO/early-access-reel`. |
+| Live DB | Port 1433 at 143.14.11.244 did not answer from this PC on 2026-10-14 (worked 2026-10-12). Needed to count real drops from logs. |
+| Enhance window: protection slot | Done 2026-10-14, user checked on LDPlayer ("working ok"). Third slot shows the protection card the server will use (neck, then ornament; ITEM_ANTI_DISAPPEAR), its count in the corner and "ป้องกัน xN" / "ไม่มีป้องกัน" / "คูลดาวน์" under it, refreshed every frame. `SOURCE/Lib_ClientUI/Interface/MobileEnhanceWindow.cpp/.h` (shared, both platforms) + `gameword.xml`/`gameword_en.xml` MOBILE_ENHANCE 5-7 repacked into `CLIENT/data/gui/Gui.rcc` (backup `.bak_pre_protect`; only the 2 word files differ). arm64 + x86_64 0 errors. Not committed, not in a patch yet; not seen on a phone or iPhone. |
+| Quests 172 / 248 stuck | Fixed in data 2026-10-14, not yet on server or in a patch. The physics teacher's step answer required quest 168 (SG) / 244 (PHX) done, but the foreman's page nid 7 gives the quest at level 38 without it, so those players never saw the answer. Condition list removed (EP9 original had none for 172). `CLIENT/data/glogic/npctalk/npc_1_t_ex2.ntk` 28,307 + `npc_3_t_ex2.ntk` 24,056 + `NpcTalk.rcc` 1,311,434 (only those 2 entries differ; backups `*.bak_pre_questfix`). Verified: parses to the last byte, every talk number unchanged. Quest 208 (MP): no data fault found; waiting for a screenshot or char name. NOTE: the server uses talk numbers; its npctalk must equal the phones' copy. |
+| Class trainer orb exchanges | Fixed in data 2026-10-14, not yet on server or in a patch. 12 trainers (npc_{1,2,3}_t_{knight,fighter,archer,spirit}1.ntk): Spirit Orb N = class grade-N skills (skill.csv dwGRADE). 35 skills x 3 schools had a scroll but no answer (e.g. sword Blood Thirst 6/6, orb 5) -> added (copy of a trade on the same page, lowest scroll id); 3 wrong-grade answers removed (MP/PHX magic orb 7 Hellfire -> moved to orb 16; PHX sword orb 16 ดาบผ่าโลกันต์, already on orb 15). Tool `MOBILE/tools/rcc-extract/trainer-orb-fix.js`. Verified: original parser EOF-exact 12/12, recheck 0 missing / 0 wrong grade / 0 wrong class / 0 label mismatch, back answer stays last. `NpcTalk.rcc` 1,313,787 (also carries the quest 172/248 fix; NPC text "คัมภีร์สกิล" -> "ม้วนสกิล" in 15 files, 129 places, backups `npctalk/_pre_textfix/`; fist Orb-7 label "Kick Punch Combo" -> "Kick Punch" to match skill 0/4 and scroll 71/5, backups `npctalk/_pre_relabel/`); backups `NpcTalk.rcc.bak_pre_orbfix`, `npctalk/_pre_orbfix/`. Talk numbers in these 12 files changed: server and phones must get the new NpcTalk together. |
+| Weapon ghost / flicker (หมัดมังกรดำ 1000/22) | Fixed 2026-10-15, user checked on LDPlayer ("look good"). Not committed, not in a patch. Cause (measured with the `ghostprobe` GPU pixel read-back): shim uniform cache, `uniformChanged` in `native/shim/gl/gl_render.cpp`. A palette upload over 136 floats (9+ matrices, e.g. the body's 13) bypassed the cache without clearing the slot, so the next 1-matrix upload to `uWorldM` in the same shader variant matched the stale entry and was skipped: the +5 claw's level-glow pass drew with the body's bone 0, beside the character, whenever the claw had not moved. Fix: an oversized upload clears the slot. Shared shim: Android + iOS. arm64 + x86_64 0 errors. Earlier wrong attempts (pmatRigid matrix, level switches) reverted. New measurement tools kept: `ghostprobe` (log draws that change a 32x32 block, file holds "x y" fractions from bottom-left), RanIdx slot log in drawdump, draw-limit log names its target, `RanD3D_StateDiff`, effskip/effprof on the select page. |
+| Trails smear + fps drop in fights | Fix built 2026-10-15, not yet confirmed by the user in a fight; not committed. Measured on LDPlayer: trails on 14.6 fps, off 59.5 fps; the red/cyan smear over mobs was DxEffCharBlur. Cause: m_Property sits in an anonymous union so EFFCHAR_PROPERTY_BLUR's constructor never runs; blur versions 0x100-0x104 (333 records: 270 x 0x104, 62 x 0x103, 1 x 0x100 - mobs and weapons, e.g. bat.cps, mob_ac_01.cps) carry no life, so life was heap garbage (logged 444.87 s): trails never aged, hit the 6398-point cap and were redrawn whole every frame. Fix: `m_Property = EFFCHAR_PROPERTY_BLUR ()` before loading (RAN_MOBILE, DxEffCharBlur.cpp LoadFile). All 3260 newer records hold 0.05-0.6 s. FOLLOW-UP: every DxEffChar* uses the same union, so their old-version loaders may leave other fields unset - audit. |
+| Costume apply / remove like pet food | Built 2026-10-15, on LDPlayer for the user to test; not committed. Item sheet: a costume (IsDISGUISE suit) gets ทับชุด -> the bag picks the gear it fits (CMobileBagPanel::BeginApply, CanApply = ReqDisguise's rules) -> confirm -> ReqInvenDrug -> ReqDisguise. Gear wearing a costume gets แยกชุด -> first ITEM_DISJUNCTION card in the bag with this item pre-picked (BeginApplyTo) -> confirm -> ReqDisJunction (server gives the costume back, uses the card); no card: "ต้องมีการ์ดแยกชุดในกระเป๋า". Words MOBILE_ITEM_SHEET 24-26 in gameword.xml/_en.xml, Gui.rcc repacked (backups *.bak_pre_costume; only the 2 word files differ). Enhance-window costume row unchanged. arm64 + x86_64 0 errors. Shared SOURCE: both platforms. |
+| Quests 303-306 any class | Fixed in data 2026-10-14, not yet on server or in a patch. "คำขอร้องจากผู้เชี่ยวชาญด้านภาพ" gives one class's C-level coat each (303 fist 93/29, 304 sword 93/30, 305 bow 93/31, 306 magic 94/32). NPC `npc_c1_video_1.ntk` page 1 answers were class-locked, but page 2 ("รับคำขอร้อง", talks 1-4) was 0xffff; set to 0x41/0x82/0x104/0x208 (server start checks only the talk condition, GLCharQuestMsg.cpp:97). Quest start class 0x3cf -> same values in `glogic/quest/00278_1..4.qst` + `Quest.rcc` (881,559). `NpcTalk.rcc` now 1,313,792. Backups `*.bak_pre_classfix`. Verified: only those class fields differ, files parse to the last byte, talk numbers unchanged. Server needs both Quest.rcc and NpcTalk.rcc. |
+| Uncommitted | MOBILE: `tools/rcc-extract/drop-report.js` (GENNUM fix), `drop-stone-share.js`, `drop-field-even.js`, `crow-gen-table.js`, this file. CLIENT data is not a repo; backups `*.bak_pre_stone2/_gear/_stoneadd/_fill2/_crowgen` next to the files. |
+
+### Where we were (2026-10-08)
 
 | Track | State |
 |---|---|
@@ -31,6 +50,46 @@ the patch ships a needless APK bump).
 2026-10-08). Full list in the dated sections below.
 
 ---
+
+## 2026-10-13 23:20 — Patch 780 / APK 271 (1.1.86) / iOS 1.1.86 (271) built; Play 271 sent for review; upload ON HOLD until Google approves
+
+- Contents: skill page list/detail, trade item window, chat channel button fix, black-room fix (GL state cache), `GLogic.rcc` with the gem rates reverted. Temp diag code removed first (exact-text removal of the hunks; only the `reset()` / `glDepthMask` fix left in gl_render.cpp).
+- Live server is at patch 778 (the user uploaded it; minApk 270). `out/upload` = 123 MB: 2 blobs + `ios/` + `android/` + manifest; minApk 271, minIos 271.
+- Play: `RanMobile-store.aab` 1.1.86 (271) on Alpha (closed test) and Internal, completed; waiting for review. DO NOT upload patch 780 before Play has 271 (Play testers on 270 would be stopped by minApk).
+- Verified: arm64 + x86_64 0 errors; MSVC GameClient2 / Emulator / ServerAgent / ServerField OK; LDPlayer main build in world + skill page; store build 271 boots to the server page; iOS CI run 38425720113 success, binary 1.1.86 (271) contains the new symbols. User confirmed on LDPlayer: black room fixed, trade + chat ("ok perfect").
+- NOT verified: arm64 phone, iPhone, store build in world, GameMaster#1 in the room on the new build.
+- Commits: SOURCE main 3e38b40; MOBILE main 9c3a90c (+ this note); store 283bd5e. Main build trees and file times restored after the store build (libran.so times unchanged).
+
+## 2026-10-14 (4) — Normal monsters that dropped nothing now use the table of their level (user: "put similar for the mob ... in the similar level")
+
+- 10 monsters had an empty m_strGenItem: `crow-gen-table.js` (new) set 1/1=lv14, 57/21=lv36, 80/38=lv39, 13/1=lv72, 15/1=lv72, 16/13=lv77, 16/7=lv77, 16/8=lv69, 15/2=lv95, 44/20=lv220SB (nearest-level normal table; 44/20 = its family 44/21). SCROWGEN::LOAD (0x0200) reads field by field, so the longer string is safe; every other crow record verified identical.
+- 3 tables named by monsters did not exist (nothing dropped): SaintSS_01_1, SaintSS_01_2 (added = SaintSS_01) and suryun (added = lv220SB). Server zip lookup lowercases both sides (Unzipper.cpp:50/66). Cube_lapse2 got a 2% stone line (`drop-stone-share.js --add` now also takes non-lv tables).
+- Report diff: exactly 18 monsters changed, nothing else.
+- Installed: `CLIENT/data/glogic/GLogic.rcc` 12,321,198 bytes sha 04655f179584 (+ loose crow.mnsf 2,893,038; backups `*.bak_pre_crowgen`); `CLIENT/data/glogicserver/GLogicServer.rcc` 1,651,123 bytes sha eb2956d3ccf5 (backup `.bak_pre_fill2`, 601 loose = archive).
+- GLogic.rcc is now changed: the server needs it, and the next MAKE-PATCH ships it to phones (patch 780 in out/upload still has the old one).
+
+## 2026-10-14 (3) — Stone line added to the 5 normal tables that had none (user found 16/6 Sacred Gate Defender drops no stone)
+
+- `lv02`, `lv05`, `lv08`, `lv11`, `lv75S` had no ITEMSPEC 191 line, so the 2% change skipped them (my earlier note "only lv 1-13" was wrong: lv75S is level 71-73). `drop-stone-share.js ... 2 --write --add=<tables>` adds the line at 2% after the potion line, taking 2% from it.
+- 14 monsters changed, stones 0 -> 1.53-1.56 per 100 kills, potions -1.5; nothing else moved (report diff of every monster). Simulation: 1.50-1.56.
+- Installed `GLogicServer.rcc` 1,649,336 bytes, sha 8fdf06d06f13; 598 loose = archive. Backup `GLogicServer.rcc.bak_pre_stoneadd` (= the 4.30-5.30 build), loose copies in `_pre_stoneadd_genitem/`.
+- List for checking: `drop_analysis_2026-10-13/stone_normal_monsters_2026-10-14.md` (+ .csv), 433 normal monsters with stone / weapon / armor per 100 kills, generated from the report.
+
+## 2026-10-14 (2) — Weapon / armor of the normal field tables kept in 4.30-5.30 per 100 kills (user: "build this")
+
+- Tool: `MOBILE/tools/rcc-extract/drop-field-even.js <data> <report> <work> --write`. 100 normal field tables (lv*, osaka, Infinitystairs*, gmd_*; not *_leader/boss/treasure). A table inside 4.30-5.30 is left; outside, its EXISTING weapon/armor lines are scaled to the nearer edge (mixed groups counted). No line added: tables the game made without weapons/armor keep none (lv02-lv39 armor, gmd_*/Infinitystairs_normal2 gear). Empty-spec lines commented out (they blocked potions in lv220SB/lv230SB/lv240SB). `lv220.genitem` added (= new lv220SB; monster 44/30 pointed at a missing file). Leaders/bosses/events, stones, accessories, books, keys, materials unchanged. GLogic.rcc untouched.
+- drop-report.js fixed: GENNUM ranges are stacked and rolled 0..100 (GLCrowDataLoad.cpp:190-199); it used to add them up (osaka 2.3 rolls instead of 1.2).
+- Verified two ways: drop-report table, and an independent simulation from the server code (100,000 kills per table): largest difference 0.19 per 100 kills over 202 values; none outside 4.30-5.30.
+- Installed: `CLIENT/data/glogicserver/GLogicServer.rcc` 1,649,096 bytes, sha f6ba52b448d7, 598 loose = archive. Backup `GLogicServer.rcc.bak_pre_gear` (= the 2% stone file), loose copies in `_pre_gear_genitem/`.
+- [ ] User: test, then upload to the server's `data\glogicserver\`. Live DB port 1433 did not answer from this PC on 2026-10-14 (real-drop count from logs not possible).
+
+## 2026-10-14 — Upgrade stones: stone share in the normal lv*.genitem tables raised to 2% (user: "do the 2% for now")
+
+- Problem (measured with drop-report.js): the 4 stones (spec 191: 11/0, 11/1, 11/4, 11/6) were 0.2-1% of the normal level tables, and the game cuts entries under 2% by `fITEM_DROP_LOWER_SCALE` 0.70. A typical lv 21-150 mob gave 1 stone per ~330-370 kills; 179 of 753 mobs drop none.
+- Change: `MOBILE/tools/rcc-extract/drop-stone-share.js <data> <work> 2 --write`. 114 `lv*` tables: stone line -> 2%, the same amount taken from the table's largest all-potion line; entry totals unchanged. Left alone: 26 lv tables with no stone line (mostly lv 1-20, so lv 1-20 still drops none), 12 already at 2% or more. Bosses / event / other tables untouched. GLogic.rcc (items, mobs) untouched.
+- Result (typical mob, kills per stone): lv 21-50 373 -> 65, 51-100 366 -> 64, 101-150 333 -> 64, 201-260 134 -> 113; others unchanged. Whole-game totals: potions -1.6%, stones +2.3%, weapons -0.01% (9 tables run over 100%). A stone line at exactly 2% is not cut by the 0.7 scale, and is also not raised by a player's drop-rate bonus (SGENITEM::SELECTSPECID).
+- Installed: `CLIENT/data/glogicserver/GLogicServer.rcc` (1,646,538 bytes, sha 150144560cc0) + the 114 loose tables (597 loose = archive). Backups: `GLogicServer.rcc.bak_pre_stone2` (= reverted old rates, 1,645,152), loose copies in `_pre_stone2_genitem/`.
+- [ ] User: upload `GLogicServer.rcc` to the server's `data\glogicserver\` and restart. Server-only file; not in the mobile patch.
 
 ## 2026-10-13 (late night) — Drop rates REVERTED to the old (boosted) tables (user: "revert it to the one before")
 

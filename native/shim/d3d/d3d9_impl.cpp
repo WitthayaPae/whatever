@@ -1507,6 +1507,17 @@ public:
         if (idx != 0) return D3DERR_INVALIDCALL;
         flushUIBatch();
         if (!m_backBuffer) makeFrameBuffers();
+        if (!pRT) {
+            //  D3D9 refuses a NULL colour target on slot 0 (D3DERR_INVALIDCALL)
+            //  and keeps the current one. Say who asked, once per caller.
+            static int s_said = 0;
+            if (s_said < 8) {
+                ++s_said;
+                char szTrace[512];
+                RanDiag_Backtrace(szTrace, sizeof(szTrace));
+                LOGW("SetRenderTarget(0, NULL) - treated as the back buffer - at%s", szTrace);
+            }
+        }
         RanSurface *s = pRT ? (RanSurface *)pRT : m_backBuffer;
         m_renderTarget = s;
         //  A format with no alpha channel reads its destination alpha as one in
@@ -2723,6 +2734,42 @@ extern "C" void RanD3D_StateRestore(IDirect3DDevice9 *dev, const void *p) {
 }
 
 extern "C" void RanD3D_StateFree(void *p) { delete (RanDeviceState *)p; }
+
+//  What differs between a saved state and the device now, as text. Measurement:
+//  which states a pass leaves behind that its own restore does not put back.
+extern "C" int RanD3D_StateDiff(IDirect3DDevice9 *dev, const void *p, char *out, int cap) {
+    if (!dev || !p || !out || cap <= 0) return 0;
+    RanDevice *d = (RanDevice *)dev;
+    const RanDeviceState *st = (const RanDeviceState *)p;
+    int at = 0, n = 0;
+    out[0] = 0;
+#define RAN_SAY(...) do { if (at < cap - 64) at += snprintf(out + at, cap - at, __VA_ARGS__); ++n; } while (0)
+    for (int i = 0; i < 256; ++i)
+        if (d->m_renderState[i] != st->renderState[i]) RAN_SAY(" rs%d:%lx>%lx", i, (unsigned long)st->renderState[i], (unsigned long)d->m_renderState[i]);
+    for (int s = 0; s < 8; ++s)
+        for (int t = 0; t < 33; ++t)
+            if (d->m_textureStageState[s][t] != st->textureStageState[s][t])
+                RAN_SAY(" tss%d.%d:%lx>%lx", s, t, (unsigned long)st->textureStageState[s][t], (unsigned long)d->m_textureStageState[s][t]);
+    for (int s = 0; s < 16; ++s)
+        for (int t = 0; t < 14; ++t)
+            if (d->m_samplerState[s][t] != st->samplerState[s][t])
+                RAN_SAY(" ss%d.%d:%lx>%lx", s, t, (unsigned long)st->samplerState[s][t], (unsigned long)d->m_samplerState[s][t]);
+    for (int i = 0; i < 512; ++i)
+        if (memcmp(&d->m_transform[i], &st->transform[i], sizeof(D3DMATRIX)) != 0) RAN_SAY(" xf%d", i);
+    for (int i = 0; i < 16; ++i)
+        if (d->m_texture[i] != st->texture[i]) RAN_SAY(" tex%d:%p>%p", i, (void *)st->texture[i], (void *)d->m_texture[i]);
+    for (int i = 0; i < 16; ++i) {
+        if (memcmp(&d->m_light[i], &st->light[i], sizeof(D3DLIGHT9)) != 0) RAN_SAY(" light%d", i);
+        if (d->m_lightEnabled[i] != st->lightEnabled[i]) RAN_SAY(" lighton%d", i);
+    }
+    if (memcmp(&d->m_material, &st->material, sizeof(D3DMATERIAL9)) != 0) RAN_SAY(" material");
+    if (memcmp(&d->m_viewport, &st->viewport, sizeof(D3DVIEWPORT9)) != 0) RAN_SAY(" viewport");
+    if (d->m_fvf != st->fvf) RAN_SAY(" fvf:%lx>%lx", (unsigned long)st->fvf, (unsigned long)d->m_fvf);
+    if (d->m_stream0 != st->stream0 || d->m_stream0Offset != st->stream0Offset || d->m_stream0Stride != st->stream0Stride) RAN_SAY(" stream0");
+    if (d->m_indices != st->indices) RAN_SAY(" indices");
+#undef RAN_SAY
+    return n;
+}
 
 //  Send draws the device is still holding (the screen-space quad batch) to GL,
 //  so a read-back sees everything issued so far. Diagnostics.
