@@ -1,0 +1,12 @@
+{
+  "name": "ran-asc-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for the App Store Connect API (TestFlight) (Legacy M Online)",
+  "main": "server.mjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "zod": "^3.25.0"
+  }
+}
