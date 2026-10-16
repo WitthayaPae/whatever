@@ -1732,7 +1732,11 @@ public:
             m_flushSites.clear();
             m_flushFrames = 0;
             m_flushLog = RanPlat_DiagExists("uiflushlog") != 0;
-            m_batchKeep = RanPlat_DiagExists("uibatchkeep") != 0;
+            //  On by default since 2026-10-17: measured at 500 players it halves
+            //  the interface draws (731 -> 350 a frame, LIGHTING 0 -> 1 was 392 of
+            //  the flushes), static HUD pixels identical. "nouibatchkeep" turns
+            //  it off; "uibatchkeep" is accepted and means nothing now.
+            m_batchKeep = RanPlat_DiagExists("nouibatchkeep") == 0;
         }
         if (m_flushLog) ++m_flushFrames;
         //  A new frame gets a fresh allowance of character shadows.
@@ -1815,7 +1819,12 @@ public:
         //  and it was the next restore to end the batch once LIGHTING stopped.
         const bool keep = m_batchKeep && m_uiBatch.active &&
             ((State < 256 && m_renderState[State] == Value) ||
-             ((State == D3DRS_LIGHTING || State == D3DRS_CULLMODE) && batchIsScreenSpace()));
+             ((State == D3DRS_LIGHTING || State == D3DRS_CULLMODE) && batchIsScreenSpace()) ||
+             //  FOGCOLOR with fog off: the shader mixes uFogColor only under
+             //  uFogMode > 0, and a FOGENABLE change still ends the batch, so no
+             //  queued draw can see the new colour. 47 flushes a frame at 500
+             //  players came from the name plates setting it.
+             (State == D3DRS_FOGCOLOR && m_renderState[D3DRS_FOGENABLE] == 0));
         if (keep) keepBatchAcrossCall();
         else if (m_uiBatch.active && m_renderState[State < 256 ? State : 0] != Value) {
             //  uiflushlog: which state change ends the batch, old value -> new.
