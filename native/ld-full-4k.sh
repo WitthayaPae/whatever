@@ -1,6 +1,6 @@
 #!/bin/bash
 # Restart the client on LDPlayer (4K) and walk into the world. Test rig only.
-A=/c/LDPlayer/LDPlayer14/adb.exe; D="${D:-127.0.0.1:5555}"; HERE="$(cd "$(dirname "$0")" && pwd)"
+A="${ADB:-/c/LDPlayer/LDPlayer14/adb.exe}"; D="${D:-127.0.0.1:5555}"; HERE="$(cd "$(dirname "$0")" && pwd)"
 t() { "$A" -s "$D" shell input tap "$1" "$2"; sleep "${3:-1}"; }
 "$A" -s "$D" shell am force-stop com.ran.native; sleep 3; "$A" -s "$D" logcat -c
 "$A" -s "$D" shell am start -n com.ran.native/com.ran.launcher.RanLauncher >/dev/null

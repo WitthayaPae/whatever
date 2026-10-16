@@ -1,5 +1,5 @@
 #!/bin/bash
-A=/c/LDPlayer/LDPlayer14/adb.exe; D="${D:-127.0.0.1:5555}"
+A="${ADB:-/c/LDPlayer/LDPlayer14/adb.exe}"; D="${D:-127.0.0.1:5555}"
 L=$(python -c "import sys;l=open('.login',encoding='utf-8').read().replace('\r','').split('\n');print(l[0]);print(l[1])")
 U=$(echo "$L" | sed -n 1p); P=$(echo "$L" | sed -n 2p)
 t() { "$A" -s "$D" shell input tap "$1" "$2"; sleep "${3:-1}"; }

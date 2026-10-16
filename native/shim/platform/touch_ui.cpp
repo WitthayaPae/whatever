@@ -2126,8 +2126,11 @@ int RanTouch_PointerMove(int id, float x, float y) {
             const float kPixelsPerNotch = 12.0f;
             if (fabsf(delta) >= kPixelsPerNotch) {
                 const int notches = (int)(delta / kPixelsPerNotch);
-                //  Spreading the fingers zooms in, which is the wheel going up.
-                RanInput_PointerWheel(notches * 120);
+                //  Spreading the fingers zooms in. A positive wheel notch makes
+                //  DxViewPort::CameraZoom LENGTHEN the camera (zoom out), so a
+                //  spread is a negative notch. It was sent positive, and the
+                //  gesture ran backwards (user, 2026-10-17).
+                RanInput_PointerWheel(-notches * 120);
                 g_pinch.lastDist += (float)notches * kPixelsPerNotch;
             }
         }
