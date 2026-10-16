@@ -702,7 +702,8 @@ New words: MOBILE_EVENT 15-17, MOBILE_ITEM_SHEET 23 (Gui.rcc repacked). Builds: 
   - [ ] User decision: the launcher splash still shows the "RAN LEGACY M" logo while the store name avoids "Ran".
   - [ ] User decision: random boxes in the item shop (rating questionnaire + odds).
   - Building the store version: `git checkout store`, `git merge main`, `./build.sh && ABI=x86_64 ./build.sh && STORE=1 ./build-apk.sh`, then **`git checkout main` and rebuild both ABIs** before any MAKE-PATCH (the store branch links 16 KB pages and the patch ships whatever libs are in out/).
-  - [ ] User: Apple enrollment approval, then App Store Connect app record + API key (Admin) into native/.appstore/.
+  - [x] 2026-10-16: Apple approved; API key in native/.appstore/ (gitignored, back it up with dist.p12/dist.pass/profile). ios-signing-setup.py: bundle id registered, distribution cert (expires 2027-10-16), App Store profile, 7 GitHub secrets. User created app record "Legacy M Online". Run 38873107007 (store, 1.1.88 / 273) built, signed, uploaded: Delivery UUID 6f8b269f-e71b-4029-bbd2-c57ec7eb3330.
+  - [ ] User: internal group (auto distribution on), external "Public" group + Test Information + Beta App Review, then public link; Claude puts the link in the POST.txt files.
   - [ ] User: fill privacy.html placeholders (name, contact email) and upload it; reviewer account; gacha odds question.
   - [ ] Claude: run ios-signing-setup.py, then ios-testflight.yml with upload; test store Android build on the Tab S9 / Android 15+.
   - [ ] Privacy policy, account deletion, data safety, content rating, reviewer account.
