@@ -108,6 +108,8 @@ HudAdj g_adj[kGrpCount];
 //  Multiplies the alpha of every vertex written, so a control drawn under it
 //  comes out at the player's chosen opacity without each shape knowing.
 float g_drawAlpha = 1.0f;
+//  And over the whole overlay (RanTouch_SetDim).
+float g_dim = 1.0f;
 //  The attack button's radius before the player's size is applied: the skill
 //  arc is sized from this and the arc's own size, not from the button's.
 float g_attackBaseR = 0.0f;
@@ -646,7 +648,7 @@ static void streamOrSub(GLuint vbo, const void *data, unsigned bytes, GLsizei st
 inline void vtx(float x, float y, Col c) {
     if (g_n + kFloatsPerVert > (int)(sizeof(g_verts) / sizeof(g_verts[0]))) return;
     g_verts[g_n++] = x; g_verts[g_n++] = y;
-    g_verts[g_n++] = c.r; g_verts[g_n++] = c.g; g_verts[g_n++] = c.b; g_verts[g_n++] = c.a * g_drawAlpha;
+    g_verts[g_n++] = c.r; g_verts[g_n++] = c.g; g_verts[g_n++] = c.b; g_verts[g_n++] = c.a * g_drawAlpha * g_dim;
 }
 inline void begin() { g_n = 0; }
 
@@ -1741,6 +1743,10 @@ void RanTouch_Resize(int w, int h) {
     if (g_inited) layout();
 }
 
+void RanTouch_SetDim(float k) {
+    g_dim = k < 0.0f ? 0.0f : (k > 1.0f ? 1.0f : k);
+}
+
 void RanTouch_SetActive(int active) {
     const bool on = active != 0;
     if (on) g_activeAge = 0;
@@ -2498,7 +2504,7 @@ void drawHudCell(int cell, float cx, float cy, float half, float alpha) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glUniform2f(uTexViewport, (float)g_width, (float)g_height);
-    glUniform1f(uTexAlpha, alpha);
+    glUniform1f(uTexAlpha, alpha * g_dim);
     glUniform1i(uTexSampler, 0);
     glUniform2f(uTexTexSize, g_hudTexW, g_hudTexH);
     //  One output pixel per texel is the honest ratio here: the cell is square
@@ -2648,7 +2654,7 @@ void drawIcons(float w, float h) {
     if (!g_texProg) return;
     glUseProgram(g_texProg);
     glUniform2f(uTexViewport, w, h);
-    glUniform1f(uTexAlpha, g_adj[kGrpSkill].alpha);
+    glUniform1f(uTexAlpha, g_adj[kGrpSkill].alpha * g_dim);
     glUniform1i(uTexSampler, 0);
     for (int i = 0; i < g_iconCount; ++i) {
         SkillIcon ic = g_icons[i];
@@ -3547,7 +3553,7 @@ static void renderMenuAlert() {
 
 void RanTouch_Render(void) {
     ageActivity();
-    if (!g_inited || !g_active || !g_prog) return;
+    if (!g_inited || !g_active || !g_prog || g_dim <= 0.0f) return;
 
     //  Diagnostic: draw no overlay at all. Re-read once a second so it can be
     //  switched while the game runs.

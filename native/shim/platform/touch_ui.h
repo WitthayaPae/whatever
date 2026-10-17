@@ -225,6 +225,9 @@ extern "C" void RanTouch_SetLobbyPinch(int on);
 //  world - there is nothing to steer on the login screen, and a stick sitting
 //  over the server list would only eat taps.
 extern "C" void RanTouch_SetActive(int active);
+//  Overlay-wide alpha multiplier, 0..1 (the chat page fades it out as it
+//  slides in). At 0 nothing is drawn.
+extern "C" void RanTouch_SetDim(float k);
 extern "C" int  RanTouch_IsActive(void);
 
 //  The player's HUD arrangement: move, size and opacity per control group,
