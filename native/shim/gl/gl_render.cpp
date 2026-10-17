@@ -313,6 +313,9 @@ const char *kFS =
     //  texture fetch. If the frame does not get faster, the fragment shader is
     //  not what the GPU is spending its time on and the fill is elsewhere.
     "uniform highp int uPlain;\n"
+    //  Measurement only, "fillcount": every fragment adds one step to red, so
+    //  the frame read back counts how many times each pixel was painted.
+    "uniform highp int uFill;\n"
     "uniform float uAlphaRef;\n"
     "out vec4 oColor;\n"
     //  Baked into the variant when the stage fold is on - see stageKeyId.
@@ -447,6 +450,7 @@ const char *kFS =
     "        uvS = t.xy / tz;\n"
     "    }\n"
     "    vec4 tex = (uUseTexture == 1) ? texture(uTex, uvS) : vec4(1.0);\n"
+    "    if (uFill == 1) { oColor = vec4(1.0 / 255.0, 0.0, 0.0, 0.0); return; }\n"
     "    if (uPlain == 1) { oColor = tex * vColor; return; }\n"
     "    //  With lighting on, the pipeline's diffuse alpha is the material's;\n"
     "    //  the vertex colour only carries it for unlit geometry.\n"
@@ -764,7 +768,7 @@ GLint  uMVP = -1, uViewport = -1, uPreTransformed = -1, uTex = -1,
        uAlphaOp = -1, uAlphaArg1 = -1, uAlphaArg2 = -1, uTexFactor = -1,
        uTexCube = -1, uStage1 = -1, uView = -1, uTexGen0 = -1, uTexMat0 = -1,
        uTexSize = -1, uUiSharpen = -1,
-       uGammaOn = -1, uGammaLut = -1, uPlain = -1;
+       uGammaOn = -1, uGammaLut = -1, uPlain = -1, uFill = -1;
 GLuint g_vbo = 0, g_ibo = 0, g_vao = 0;
 
 //  "fvfvao": a VAO per FVF. The vertex buffer binding is VAO state, so each one
@@ -1084,6 +1088,30 @@ struct SectionDraws {
 SectionDraws g_sectionDraws[48];
 int g_sectionDrawCount = 0;
 
+//  "fillcount": how many times each pixel of the frame is painted, the one cost
+//  an emulator cannot show (its GL runs on a desktop GPU - 8x the fragments
+//  changed its frame rate by nothing, phone-heat-is-gpu-fill). Every draw to
+//  the frame writes a constant 1/255 to red with additive blending instead of
+//  its colour, and the frame is read back before it is presented: the sum of
+//  red is the fragments the frame asked for, the same number on any device.
+//  With a section name in the file only that section's draws add (anywhere in
+//  the open stack, so "world-eff" includes what it nests); the rest keep
+//  their depth writes and paint nothing. Draws into render targets are left
+//  alone. The picture is meaningless while it is on.
+bool g_fillMode = false;
+bool g_fillEver = false;                //  once on, uFill is sent on every draw so it can go back to 0
+char g_fillSection[48] = { 0 };
+double g_fillSum = 0.0;                 //  fragments over the frames read back
+unsigned g_fillReads = 0;
+
+static bool fillCountsDraw() {
+    if (!g_fillSection[0]) return true;
+    const int top = g_sectionTop < 16 ? g_sectionTop : 16;
+    for (int i = 0; i < top; ++i)
+        if (g_sectionStack[i] && strcmp(g_sectionStack[i], g_fillSection) == 0) return true;
+    return false;
+}
+
 extern "C" void RanGLR_NoteSectionDraw(int vcount, int icount, int blended) {
     const char *sec = (g_sectionTop > 0 && g_sectionTop <= 16)
                     ? g_sectionStack[g_sectionTop - 1] : NULL;
@@ -1320,6 +1348,7 @@ extern "C" void RanGLR_LogSectionDraws(unsigned frames);
 extern "C" void  RanGLR_SetSceneScale(float s);
 extern "C" float RanGLR_SceneScale(void);
 extern "C" void  RanGLR_SetSceneScaleDiag(int pct);
+extern "C" void RanGLR_InvalidateStateCache(void);
 bool g_foldStages = false;
 
 extern "C" void RanGLR_RefreshDiagnostics(void) {
@@ -1435,6 +1464,34 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
         }
     }
 
+    {
+        const bool on = RanPlat_DiagExists("fillcount") != 0;
+        char name[48] = { 0 };
+        if (on) {
+            FILE *f = RanPlat_DiagOpen("fillcount");
+            if (f) {
+                if (fread(name, 1, sizeof(name) - 1, f) > 0) {
+                    size_t n = strlen(name);
+                    while (n > 0 && (unsigned char)name[n - 1] <= ' ') name[--n] = 0;
+                }
+                fclose(f);
+            }
+        }
+        if (on != g_fillMode || (on && strcmp(name, g_fillSection) != 0)) {
+            if (on) g_fillEver = true;
+            //  Off again: the colour mask was this switch's, and the blend it
+            //  forced went through the cache, which the next draw re-applies.
+            if (!on && g_fillMode) {
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                RanGLR_InvalidateStateCache();
+            }
+            g_fillMode = on;
+            memcpy(g_fillSection, name, sizeof(g_fillSection));
+            g_fillSum = 0.0; g_fillReads = 0;
+            LOGI("diagnostic: fill count %s%s", on ? "on " : "off", on ? (name[0] ? name : "(every draw)") : "");
+        }
+    }
+
     //  Not a skip: a one-shot burst of per-draw detail, re-armed by deleting
     //  the file and touching it again.
     {
@@ -1541,6 +1598,7 @@ void fetchUniformLocations(GLuint prog) {
     uTexHD          = glGetUniformLocation(prog, "uTexHD");
     uGammaOn        = glGetUniformLocation(prog, "uGammaOn");
     uPlain          = glGetUniformLocation(prog, "uPlain");
+    uFill           = glGetUniformLocation(prog, "uFill");
     uGammaLut       = glGetUniformLocation(prog, "uGammaLut");
     uSpecularOn     = glGetUniformLocation(prog, "uSpecularOn");
     uMatSpecular    = glGetUniformLocation(prog, "uMatSpecular");
@@ -1595,7 +1653,7 @@ GLint *const kLocationVars[] = {
     &uMVP, &uViewport, &uPreTransformed, &uFlipY, &uMatAlpha, &uWorldM, &uViewProj,
     &uVertexBlend, &uIndexedBlend, &uTex, &uUseTexture, &uAlphaTest, &uAlphaRef,
     &uColorOp, &uColorArg1, &uColorArg2, &uAlphaOp, &uAlphaArg1, &uAlphaArg2,
-    &uTexFactor, &uTexCube, &uStage1, &uTexGen0, &uTexMat0, &uTexSize, &uUiSharpen, &uPanelH, &uUiOrigin, &uTexHD, &uGammaOn, &uPlain,
+    &uTexFactor, &uTexCube, &uStage1, &uTexGen0, &uTexMat0, &uTexSize, &uUiSharpen, &uPanelH, &uUiOrigin, &uTexHD, &uGammaOn, &uPlain, &uFill,
     &uGammaLut, &uSpecularOn, &uMatSpecular, &uMatPower, &uLightSpecular, &uView,
     &uWorld, &uCameraPos, &uCameraPosF, &uLighting, &uLightCount, &uGlobalAmbient,
     &uMatDiffuse, &uHasVertexColor, &uMatAmbient, &uMatEmissive, &uLightType,
@@ -2480,11 +2538,97 @@ extern "C" void RanGLR_ClearRectOff(void) {
     if (g_inited) glDisable(GL_SCISSOR_TEST);
 }
 
+//  A scissor around the draws that follow, in the same client pixels as a
+//  clear rectangle (Y down), for a pass the engine knows only touches part of
+//  the screen - see DxEffectShadow's character shadows. Pixels outside are not
+//  rasterised at all, which is the point: the pass was a full-screen layer of
+//  fill to paint shadows inside a small box.
+extern "C" void RanGLR_DrawScissor(int x, int y, int w, int h) {
+    if (!g_inited) return;
+    if (w <= 0 || h <= 0) { glEnable(GL_SCISSOR_TEST); glScissor(0, 0, 0, 0); return; }
+    const float scale = g_rtActive ? 1.0f
+                                   : RanGL_UIScale() * (g_sceneActive ? g_sceneScale : 1.0f);
+    const int surfaceH = g_rtActive ? g_rtH : baseHeight();
+    const int x0 = (int)floorf(x * scale), x1 = (int)ceilf((x + w) * scale);
+    const int y0 = (int)floorf(y * scale), y1 = (int)ceilf((y + h) * scale);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(x0, g_rtActive ? y0 : surfaceH - y1, x1 - x0, y1 - y0);
+}
+
+extern "C" void RanGLR_DrawScissorOff(void) {
+    if (g_inited) glDisable(GL_SCISSOR_TEST);
+}
+
+//  Level 0 of a 2D texture as RGBA8, rows in upload order (the first row the
+//  client wrote comes first). For one-off analysis at load, never per frame:
+//  it binds a framebuffer and reads back. Returns 0 when it cannot.
+extern "C" int RanGLR_ReadTextureRGBA(unsigned glTex, int w, int h, unsigned char *out) {
+    if (!g_inited || !glTex || w <= 0 || h <= 0 || !out || g_ranGLTOn) return 0;
+    GLint wasRead = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &wasRead);
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glTex, 0);
+    int ok = 0;
+    if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, out);
+        ok = glGetError() == GL_NO_ERROR;
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)wasRead);
+    glDeleteFramebuffers(1, &fbo);
+    RanGLR_InvalidateStateCache();
+    return ok;
+}
+
 //  The frame is over: the next one starts on a buffer of unknown content.
 extern "C" int RanGLR_FrameDrawCount(void) { return g_frameDraw; }
 
 static void drainDeadTextures(void);
-extern "C" void RanGLR_FrameEnd(void) { g_frameClearedColor = false; ++g_rtFrame; drainDeadTextures(); }
+//  "fillcount": read the finished frame back and add up red - see g_fillMode.
+//  Every 20th frame, because a 4K read is tens of milliseconds; the log line is
+//  an average over the frames read, a few seconds' worth.
+static void fillReadback(void) {
+    static unsigned s_frame = 0;
+    static double s_lastLog = 0.0;
+    if (++s_frame % 20 != 0) return;
+    const int w = RanGL_Width(), h = RanGL_Height();
+    if (w <= 0 || h <= 0) return;
+    static std::vector<unsigned char> s_px;
+    s_px.resize((size_t)w * h * 4);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, RanGL_DefaultFramebuffer());
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, &s_px[0]);
+    RanGLR_InvalidateStateCache();
+    unsigned long long sum = 0;
+    unsigned long saturated = 0;
+    const size_t n = (size_t)w * h;
+    for (size_t i = 0; i < n; ++i) {
+        const unsigned v = s_px[i * 4];
+        sum += v;
+        if (v == 255) ++saturated;
+    }
+    g_fillSum += (double)sum;
+    ++g_fillReads;
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    const double now = (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+    if (now - s_lastLog >= 3.0) {
+        s_lastLog = now;
+        const double perFrame = g_fillSum / (double)g_fillReads;
+        LOGI("FILL %s: %.3f layers/pixel = %.2f Mfrag/frame (%u frames read, %dx%d, %lu px saturated)",
+             g_fillSection[0] ? g_fillSection : "all", perFrame / (double)n, perFrame / 1e6,
+             g_fillReads, w, h, saturated);
+        g_fillSum = 0.0; g_fillReads = 0;
+    }
+}
+
+extern "C" void RanGLR_FrameEnd(void) {
+    if (g_fillMode && !g_ranGLTOn) fillReadback();     //  GL is on another thread with glthread
+    g_frameClearedColor = false; ++g_rtFrame; drainDeadTextures();
+}
 
 //  "clearlog": every distinct clear (innermost frame section, flags, render
 //  target or not, target size) once with a backtrace, then counts per 300
@@ -2539,6 +2683,7 @@ extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil
         float r = ((color >> 16) & 0xFF) / 255.0f;
         float g = ((color >> 8) & 0xFF) / 255.0f;
         float b = (color & 0xFF) / 255.0f;
+        if (g_fillMode && !g_rtActive) r = g = b = a = 0.0f;    //  "fillcount" counts up from zero
         glClearColor(r, g, b, a);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         mask |= GL_COLOR_BUFFER_BIT;
@@ -4606,6 +4751,18 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     //  effect passes - where the cost is overdraw, not geometry - the triangle
     //  count is the closest proxy there is to how much fill they ask for.
     if (g_rtDepthPending && g_rtActive && (g_dsZ || g_dsZW)) rtClearDepthNow();
+    if (g_fillEver) {
+        const bool fill = g_fillMode && !g_rtActive;
+        setUniform1i(uFill, fill ? 1 : 0);
+        if (fill) {
+            if (fillCountsDraw()) {
+                setBlend(true, GL_ONE, GL_ONE);
+                glColorMask(GL_TRUE, GL_FALSE, GL_FALSE, GL_FALSE);
+            } else {
+                glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            }
+        }
+    }
     RanGLR_NoteSectionDraw(vcount, icount ? icount : vcount, g_dsBlend != 0);
     if (g_drawGroups) noteDrawGroup(glVB, glIB, ibByteOffset, icount, vbByteOffset, glTexture);
 

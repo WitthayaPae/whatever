@@ -107,3 +107,5 @@ native/.signing-upload
 # Google Play API service-account key (tools/play-mcp)
 native/.play/
 tools/play-mcp/node_modules/
+# App Store Connect MCP (tools/asc-mcp); key lives in native/.appstore/
+tools/asc-mcp/node_modules/
