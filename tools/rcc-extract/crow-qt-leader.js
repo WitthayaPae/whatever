@@ -11,9 +11,9 @@
 // commented out, and the q_002_* / q_003_* tables that carry the leader box are
 // used by no mob, so quests 702-711 ("kill 3 <leader>") could not be finished.
 //
-// For each mob below: if it already has a question table, a new table is made
-// from that table's QTITEM lines plus the leader box (so nothing it dropped is
-// lost); if it has none, it gets the original q_002_* / q_003_* table. Only
+// For each mob below a new table is made from its current question table (or,
+// when it has none, the original q_002_* / q_003_* table) plus the leader box at
+// RATE, so nothing it dropped is lost. Run it on the data from before the fix. Only
 // m_strQtGenItem changes in crow.mnsf. SQTGENITEM::SELECTITEM is one roll over
 // the summed rates (percent), at most EMQTMAX = 20 lines, total <= 100.
 //
@@ -35,17 +35,17 @@ const write = args.includes('--write');
 const [dataDir, workDir] = args.filter((a) => !a.startsWith('--'));
 if (!dataDir || !workDir) { console.error('usage: node crow-qt-leader.js <CLIENT/data> <work dir> [--write]'); process.exit(2); }
 
-const RATE = 0.5;   // the rate the original q_002_* / q_003_* tables give the leader box
+const RATE = 3.3;   // percent per kill: about one leader box per 30 kills (user, 2026-10-18; the q_002/q_003 tables had 0.5)
 //  mob -> leader box (item main/sub) and leader, or a ready table when the mob has none.
 const PLAN = [
   { mobs: ['2/0', '2/1'],   box: '9,11', leader: '2/2 Hime Leader' },
   { mobs: ['19/0', '19/1'], box: '9,19', leader: '19/2 Fancer Leader' },
   { mobs: ['4/1'],          box: '9,12', leader: '4/2 Gibbs Leader' },
-  { mobs: ['4/0'],          table: 'q_002_lv017.genitem', leader: '4/2 Gibbs Leader' },
+  { mobs: ['4/0'],          base: 'q_002_lv017.genitem', box: '9,12', leader: '4/2 Gibbs Leader' },
   { mobs: ['5/0', '5/1'],   box: '9,13', leader: '5/2 Bald Head Master' },
-  { mobs: ['10/0'],         table: 'q_002_lv028.genitem', leader: '10/2 Master Fu' },
-  { mobs: ['10/1'],         table: 'q_002_lv030.genitem', leader: '10/2 Master Fu' },
-  { mobs: ['22/0'],         table: 'q_003_lv050.genitem', leader: '22/1 Welding Master' },
+  { mobs: ['10/0'],         base: 'q_002_lv028.genitem', box: '9,15', leader: '10/2 Master Fu' },
+  { mobs: ['10/1'],         base: 'q_002_lv030.genitem', box: '9,15', leader: '10/2 Master Fu' },
+  { mobs: ['22/0'],         base: 'q_003_lv050.genitem', box: '9,20', leader: '22/1 Welding Master' },
   { mobs: ['27/0'],         box: '9,22', leader: '27/1 Furious Chef' },
   { mobs: ['28/0'],         box: '9,23', leader: '28/1 Obasan' },
   { mobs: ['7/0', '7/1', '7/2'], box: '9,14', leader: '7/7 Blood Robber' },
@@ -98,23 +98,23 @@ for (const p of PLAN) {
   for (const m of p.mobs) {
     const r = byId.get(m); if (!r) throw new Error('mob not found ' + m);
     const cur = r.c.gen.qtGenItem;
-    let table;
-    if (p.table) {
+    let src;
+    if (p.base) {
       if (cur) throw new Error(`${m} has ${cur}; plan expected none`);
-      table = p.table; readTable(table);
+      src = p.base;
     } else {
       if (!cur) throw new Error(`${m} has no question table; plan expected one`);
-      const base = readTable(cur);
-      const lines = qtLines(base);
-      if (lines.some((l) => qtParse(l).id === p.box)) throw new Error(`${cur} already has ${p.box}`);
-      const sum = lines.reduce((s, l) => s + qtParse(l).rate, 0) + RATE;
-      if (lines.length + 1 > 20 || sum > 100) throw new Error(`${cur} + leader exceeds the limits`);
-      table = cur.replace(/\.genitem$/i, '').toLowerCase() + '_ldr' + p.leader.split(' ')[0].replace('/', '_') + '.genitem';
-      const text = `// ${cur} + ${p.leader} summon box (crow-qt-leader.js, 2026-10-18)\r\n` +
-        lines.join('\r\n') + `\r\nQTITEM\t${p.box}\t${RATE}\t//MobGen ${p.leader}\r\n`;
-      if (newTables.has(table) && newTables.get(table) !== text) throw new Error('two texts for ' + table);
-      newTables.set(table, text);
+      src = cur;
     }
+    //  the source's lines, minus any line of this box (the q_002/q_003 tables carry it at 0.5)
+    const lines = qtLines(readTable(src)).filter((l) => qtParse(l).id !== p.box);
+    const sum = lines.reduce((s, l) => s + qtParse(l).rate, 0) + RATE;
+    if (lines.length + 1 > 20 || sum > 100) throw new Error(`${src} + leader exceeds the limits`);
+    const table = src.replace(/\.genitem$/i, '').toLowerCase() + '_ldr' + p.leader.split(' ')[0].replace('/', '_') + '.genitem';
+    const text = `// ${src} + ${p.leader} summon box at ${RATE}% (crow-qt-leader.js, 2026-10-18)\r\n` +
+      lines.join('\r\n') + `\r\nQTITEM\t${p.box}\t${RATE}\t//MobGen ${p.leader}\r\n`;
+    if (newTables.has(table) && newTables.get(table) !== text) throw new Error('two texts for ' + table);
+    newTables.set(table, text);
     want.set(m, table);
   }
 }
