@@ -73,6 +73,39 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-20 — Six HUD/menu fixes for the user to test on LDPlayer (NOT patched, NOT tested by me in world)
+
+User: "do it but did not patch yet just install in ldPlayer so I can test it". SOURCE 3a572b8.
+
+1. **Change character** in the menu (new cell, icon at mobile_icons.dds 512,384). Confirm ->
+   the server wait -> lobby, which replays this session's login once (`NSMobileRelogin`,
+   memory only) and stops on the character list. If the replay fails, the normal login page shows.
+2. **Event buffs** (`SYSTEM_BUFF_TIME_DISPLAY`, Tyranny etc.) now ride at the end of the pet /
+   vehicle row, units left to right (were top right under the minimap).
+3. **Talk-to-NPC button** is a HUD-editor group (`kGrpTalk`, shim touch_ui.cpp): move, size,
+   opacity; always shown in the editor. Saved as 4 floats at the END of the layout
+   (nMOBILE_HUD_FLOATS 223, 219 still read). Cannot be hidden.
+4. **Narrow chat scrolls again**: its plate stays visible at alpha 0 (hidden, nothing drawn
+   covered the lines, so a drag turned the camera).
+5. **Aimed skill past the front mob**: lock range at least reach + 50, scored along the drag
+   line (MobileAimPick pvDir). SkillReaction walks into range as before.
+6. **Large map tap after a drag**: a pan released off the map left the map grabbed with a stale
+   press point; the next tap scrolled instead of walking. Cleared when no finger is down.
+
+- Data: `Gui.rcc` repacked (uiinnercfg02 control, gameword/_en MOBILE_MENULABEL 23,
+  gameintext/_en MODAL_MOBILE_CHANGE_CHAR), `textures/gui/mobile_icons.dds` new cell.
+  Backups `backups/ui_changechar_20261019/`.
+- Built: arm64 + x86_64 0 errors; MiniA, Emulator, ServerAgent, ServerField 0 errors.
+- LDPlayer (emulator-5554): `out/RanTest.apk` installed (`out/RanMobile.apk` untouched), Gui.rcc
+  and mobile_icons.dds pushed (md5 checked), boots to the server list.
+- Trap hit: LDPlayer's storage stopped answering directory listings (every case-walk failed,
+  "File Open Config.ini", boot failed) after a push whose /sdcard path Git Bash had rewritten.
+  An emulator reboot cleared it. Use `MSYS_NO_PATHCONV=1` for adb push from Git Bash.
+- Libraries are newer than out/RanMobile.apk: the next MAKE-PATCH bumps versionCode (276) and
+  needs an iOS build too. Includes the club-chat agent fix's file (no phone behaviour).
+
+---
+
 ## 2026-10-19 — Club chat reached players outside the club (server; caused by my f773d7a; fixed bf41e76, NOT deployed)
 
 - **Symptom:** LEGACY#147 (no club, ordinary account) saw Sixnine90s club chat in the club colour.

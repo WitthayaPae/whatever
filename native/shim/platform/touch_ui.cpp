@@ -89,7 +89,15 @@ enum { kGrpStick, kGrpAttack, kGrpSkill, kGrpPage, kGrpAuto, kGrpPK,
        kGrpBot,
        //  The client's own HUD windows - health, minimap, buffs (2026-10-06).
        //  Saved in the same block as kGrpBot, then their own triples after it.
-       kGrpWin, kGrpCount };
+       kGrpWin,
+       //  The talk-to-NPC button (2026-10-19, the user: "the btn npc talking
+       //  should be editable position as well"). Saved at the very END of the
+       //  layout file, after the hidden flags: a group put before them would
+       //  shift every saved window and corner place.
+       kGrpTalk, kGrpCount };
+//  The groups the layout file carried before the talk button: every block
+//  sized by group count is this many long, and the talk group comes last.
+const int kGrpFile = kGrpTalk;
 //  The groups saved between the slots and the page triples.
 const int kGrpPreBot = kGrpBot;
 //  The groups saved in the first block of the layout file.
@@ -181,9 +189,10 @@ bool g_hidPage[kPageMax]                     = { };
 bool g_hidCorner[kCornerMax]                 = { };
 bool g_hidGrpB[kGrpCount], g_hidSkillB[RANTOUCH_MAX_SKILL_CIRCLES], g_hidPotB[kPotMax],
      g_hidPageB[kPageMax], g_hidCornerB[kCornerMax];     //  for cancel
-const int kHideSaved = kGrpCount + RANTOUCH_MAX_SKILL_CIRCLES + kPotMax + kPageMax + kCornerMax;
+const int kHideSaved = kGrpFile + RANTOUCH_MAX_SKILL_CIRCLES + kPotMax + kPageMax + kCornerMax;
 bool canHideGroup(int g) {
-    return g != kGrpStick && g != kGrpAttack && g != kGrpMenu && g != kGrpWin;
+    //  Not the talk button either: hidden, no NPC could be spoken to.
+    return g != kGrpStick && g != kGrpAttack && g != kGrpMenu && g != kGrpWin && g != kGrpTalk;
 }
 //  The size a control is laid out at: none while hidden, outside the editor.
 float shownScale(bool hidden, float s);
@@ -1380,6 +1389,8 @@ float g_potTW[kPotMax] = { 0 }, g_potTH[kPotMax] = { 0 };
 float g_potDim[kPotMax] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 int   g_potCount = 0;
 
+void talkCircle(Vec2 &c, float &r);     //  below, with the cancel circle it hangs off
+
 bool groupCircle(int g, Vec2 &c, float &r) {
     switch (g) {
         case kGrpStick:  c = g_stick.centre; r = g_stick.radius * 1.25f; return true;
@@ -1396,6 +1407,9 @@ bool groupCircle(int g, Vec2 &c, float &r) {
                           c = g_buttons[kBtnBot].centre; r = g_buttons[kBtnBot].radius * 1.35f; return true;
         case kGrpFist:    if (!g_vehShow) return false;
                           c = g_buttons[kBtnFist].centre; r = g_buttons[kBtnFist].radius * 1.35f; return true;
+        //  Always in the editor, NPC near or not: it has to be placed before
+        //  it is needed.
+        case kGrpTalk:    talkCircle(c, r); r *= 1.2f; return true;
         case kGrpPage: {
             c.x = (g_buttons[kBtnF1].centre.x + g_buttons[kBtnF4].centre.x) * 0.5f;
             c.y = g_buttons[kBtnF1].centre.y;
@@ -1469,7 +1483,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
 //  The group under a finger. Small buttons first, so one sitting on top of a
 //  bigger group can still be picked; the skill slots before the stick.
 int groupAt(float x, float y) {
-    static const int order[] = { -2, -3, -4, kGrpPickup, kGrpPage, kGrpAuto, kGrpPK,
+    static const int order[] = { -2, -3, -4, kGrpTalk, kGrpPickup, kGrpPage, kGrpAuto, kGrpPK,
                                  kGrpCamera, kGrpMenu, kGrpVehicle, kGrpFist, kGrpBot,
                                  -5, kGrpAttack, kGrpStick };
     g_editSlot = -1;
@@ -1699,11 +1713,20 @@ void cancelCircle(Vec2 &c, float &r) {
 }
 
 //  The talk button: the cancel circle's place, a little larger - it is a
-//  button to press, not a place to drop a drag.
+//  button to press, not a place to drop a drag. Then wherever, and as big as,
+//  the player put it in the HUD editor (kGrpTalk).
 void talkCircle(Vec2 &c, float &r) {
     float cr;
     cancelCircle(c, cr);
-    r = cr * 1.08f;
+    const HudAdj &a = g_adj[kGrpTalk];
+    r = cr * 1.08f * a.scale;
+    c.x += a.dx * g_unit;
+    c.y += a.dy * g_unit;
+    const float W = (float)g_width, H = (float)g_height;
+    if (c.x < r) c.x = r;
+    if (c.y < r) c.y = r;
+    if (W > 0.0f && c.x > W - r) c.x = W - r;
+    if (H > 0.0f && c.y > H - r) c.y = H - r;
 }
 
 bool talkVisible() { return g_talkShow && !g_edit && !(g_aim.ptr >= 0 && g_aim.aiming); }
@@ -3985,8 +4008,9 @@ void RanTouch_Render(void) {
     //  The talk button: the round bezel the skill slots wear, and a speech
     //  bubble in its seat where a skill's picture would be. Brighter while
     //  pressed.
-    g_drawAlpha = 1.0f;
-    if (talkVisible()) {
+    //  Drawn in the HUD editor too, so it can be found and placed.
+    g_drawAlpha = g_adj[kGrpTalk].alpha;
+    if (talkVisible() || g_edit) {
         Vec2 tc; float tr;
         talkCircle(tc, tr);
         const bool dn = g_talkDown && g_talkPtr >= 0;
@@ -4019,6 +4043,7 @@ void RanTouch_Render(void) {
                 discGrad(bx + (float)k * br * 0.42f, by, br * 0.13f, cd, cd);
         }
     }
+    g_drawAlpha = 1.0f;
 
     //  The skill under the thumb: the pad the knob travels in, the knob, and
     //  while aiming the cancel circle. Live, over the icon, at full opacity
@@ -4352,10 +4377,11 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
                 + (RANTOUCH_MAX_SKILL_CIRCLES + kPotMax + kCornerSaved) * 3
                 + (kGrpPreBot - kGrpLegacy) * 4
                 + kPageMax * 3                          //  F1-F4, appended 2026-10-05
-                + (kGrpCount - kGrpPreBot) * 4          //  auto-hunt button, appended 2026-10-05
+                + (kGrpFile - kGrpPreBot) * 4           //  auto-hunt button, appended 2026-10-05
                 + kWinMax * 3                           //  HUD windows, appended 2026-10-06
                 + (kCornerMax - kCornerSaved) * 3       //  corner icons 5-8, appended 2026-10-07
-                + kHideSaved;                           //  hidden flags, appended 2026-10-09
+                + kHideSaved                            //  hidden flags, appended 2026-10-09
+                + (kGrpCount - kGrpFile) * 4;           //  talk button, appended 2026-10-19
     if (!out || max < n) return n;
     for (int i = 0; i < kGrpLegacy; ++i) {
         out[i * 4]     = g_adj[i].dx;    out[i * 4 + 1] = g_adj[i].dy;
@@ -4374,7 +4400,7 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     for (int i = 0; i < kPageMax; ++i) {
         out[w++] = g_pageAdj[i].dx; out[w++] = g_pageAdj[i].dy; out[w++] = g_pageAdj[i].scale;
     }
-    for (int i = kGrpPreBot; i < kGrpCount; ++i) {
+    for (int i = kGrpPreBot; i < kGrpFile; ++i) {
         out[w++] = g_adj[i].dx;    out[w++] = g_adj[i].dy;
         out[w++] = g_adj[i].scale; out[w++] = g_adj[i].alpha;
     }
@@ -4384,11 +4410,15 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     for (int i = kCornerSaved; i < kCornerMax; ++i) {
         out[w++] = g_cornerAdj[i].dx; out[w++] = g_cornerAdj[i].dy; out[w++] = g_cornerAdj[i].scale;
     }
-    for (int i = 0; i < kGrpCount; ++i)                  out[w++] = g_hidGrp[i] ? 1.0f : 0.0f;
+    for (int i = 0; i < kGrpFile; ++i)                   out[w++] = g_hidGrp[i] ? 1.0f : 0.0f;
     for (int i = 0; i < RANTOUCH_MAX_SKILL_CIRCLES; ++i) out[w++] = g_hidSkill[i] ? 1.0f : 0.0f;
     for (int i = 0; i < kPotMax; ++i)                    out[w++] = g_hidPot[i] ? 1.0f : 0.0f;
     for (int i = 0; i < kPageMax; ++i)                   out[w++] = g_hidPage[i] ? 1.0f : 0.0f;
     for (int i = 0; i < kCornerMax; ++i)                 out[w++] = g_hidCorner[i] ? 1.0f : 0.0f;
+    for (int i = kGrpFile; i < kGrpCount; ++i) {
+        out[w++] = g_adj[i].dx;    out[w++] = g_adj[i].dy;
+        out[w++] = g_adj[i].scale; out[w++] = g_adj[i].alpha;
+    }
     return n;
 }
 
@@ -4443,7 +4473,7 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             g_pageAdj[i].dx = dx; g_pageAdj[i].dy = dy; g_pageAdj[i].scale = sc;
         }
         //  And the groups added after them (auto-hunt).
-        for (int i = kGrpPreBot; i < kGrpCount; ++i) {
+        for (int i = kGrpPreBot; i < kGrpFile; ++i) {
             float dx = 0.0f, dy = 0.0f, sc = 1.0f, al = 1.0f;
             if (r + 3 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; al = in[r++]; }
             if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
@@ -4473,10 +4503,21 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
         }
         //  What the player took off. Older files stop before it: nothing hidden.
         bool *const hidden[5] = { g_hidGrp, g_hidSkill, g_hidPot, g_hidPage, g_hidCorner };
-        const int   count[5]  = { kGrpCount, RANTOUCH_MAX_SKILL_CIRCLES, kPotMax, kPageMax, kCornerMax };
+        const int   count[5]  = { kGrpFile, RANTOUCH_MAX_SKILL_CIRCLES, kPotMax, kPageMax, kCornerMax };
         for (int a = 0; a < 5; ++a)
             for (int i = 0; i < count[a]; ++i)
                 hidden[a][i] = (r < n) ? (in[r++] > 0.5f) : false;
+        //  The talk button, last in the file. Older files stop before it.
+        for (int i = kGrpFile; i < kGrpCount; ++i) {
+            float dx = 0.0f, dy = 0.0f, sc = 1.0f, al = 1.0f;
+            if (r + 3 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; al = in[r++]; }
+            if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
+            if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
+            if (!(sc >= 0.6f && sc <= 1.6f)) sc = 1.0f;
+            if (!(al >= 0.2f && al <= 1.0f)) al = 1.0f;
+            g_adj[i].dx = dx; g_adj[i].dy = dy; g_adj[i].scale = sc; g_adj[i].alpha = al;
+            g_hidGrp[i] = false;
+        }
         for (int g = 0; g < kGrpCount; ++g)
             if (!canHideGroup(g) || g == kGrpSkill || g == kGrpPotion || g == kGrpCorner) g_hidGrp[g] = false;
     }
