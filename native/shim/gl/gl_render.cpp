@@ -4001,147 +4001,7 @@ static std::vector<CbItem> g_cbItems;
 //  (type, diffuse 3, ambient 3, position 4, direction 3, attenuation 3).
 static std::vector<float> g_cbRaw;
 
-extern "C" void RanGLR_SetSampler(DWORD minFilter, DWORD magFilter, DWORD mipFilter,
-                                  DWORD addressU, DWORD addressV, DWORD maxAnisotropy);
-//  Everything a replay changes, put back afterwards so the draw that caused the
-//  flush runs exactly as it was set up.
-struct CbSaved {
-    int depthTest; GLenum depthFunc; int depthMask;
-    bool poOn; float poFactor, poUnits;
-    int blendEnabled; GLenum blendSrc, blendDst, blendEq;
-    bool cullWanted; GLenum frontFace;
-    DWORD samp[6];
-    DWORD stage[6]; float texFactor[4];
-    int fogMode; float fogColor[3], fogStart, fogEnd, fogDensity;
-    float cameraPos[3], globalAmbient[3];
-    int lightingOn; DWORD dsATest, dsARef, dsZ, dsZW, dsBlend; int gammaOn;
-    int palSlotsRaw, vertexBlend, specularOn, stage1Mode, texGen0;
-    float viewProj[16], world[16], worldM[256];
-    float matDiffuse[3], matAmbient[3], matEmissive[3], matAlpha;
-    int lightCount; int lightType[8];
-    float lightDiffuse[24], lightAmbient[24], lightPos[32], lightDir[24], lightAtten[24];
-    //  For a held effect pass: stage 1, texture-coordinate generation, specular.
-    unsigned stage1Cube, stage1Tex2D; float viewMatrix[16], texMat0[16];
-    float matSpecular[3], matPower, lightSpecular[24]; DWORD dsSrc, dsDst;
-};
-
-static void cbSave(CbSaved &s) {
-    s.depthTest = g_gl.depthTest; s.depthFunc = g_gl.depthFunc; s.depthMask = g_gl.depthMask;
-    s.poOn = g_poOn; s.poFactor = g_poFactor; s.poUnits = g_poUnits;
-    s.blendEnabled = g_gl.blendEnabled; s.blendSrc = g_gl.blendSrc; s.blendDst = g_gl.blendDst; s.blendEq = g_gl.blendEq;
-    s.cullWanted = g_cullWanted; s.frontFace = g_frontFace;
-    s.samp[0] = g_sampMin; s.samp[1] = g_sampMag; s.samp[2] = g_sampMip;
-    s.samp[3] = g_sampAddrU; s.samp[4] = g_sampAddrV; s.samp[5] = g_sampAniso;
-    s.stage[0] = g_colorOp; s.stage[1] = g_colorArg1; s.stage[2] = g_colorArg2;
-    s.stage[3] = g_alphaOp; s.stage[4] = g_alphaArg1; s.stage[5] = g_alphaArg2;
-    memcpy(s.texFactor, g_texFactor, sizeof(s.texFactor));
-    s.fogMode = g_fogMode; memcpy(s.fogColor, g_fogColor, sizeof(s.fogColor));
-    s.fogStart = g_fogStart; s.fogEnd = g_fogEnd; s.fogDensity = g_fogDensity;
-    memcpy(s.cameraPos, g_cameraPos, sizeof(s.cameraPos));
-    memcpy(s.globalAmbient, g_globalAmbient, sizeof(s.globalAmbient));
-    s.lightingOn = g_lightingOn; s.dsATest = g_dsATest; s.dsARef = g_dsARef; s.dsZ = g_dsZ; s.dsZW = g_dsZW;
-    s.dsBlend = g_dsBlend; s.gammaOn = g_gammaOn;
-    s.palSlotsRaw = g_palSlotsRaw; s.vertexBlend = g_vertexBlend; s.specularOn = g_specularOn;
-    s.stage1Mode = g_stage1Mode; s.texGen0 = g_texGen0;
-    memcpy(s.viewProj, g_viewProj, sizeof(s.viewProj)); memcpy(s.world, g_world, sizeof(s.world));
-    memcpy(s.worldM, g_worldM, sizeof(s.worldM));
-    memcpy(s.matDiffuse, g_matDiffuse, sizeof(s.matDiffuse)); memcpy(s.matAmbient, g_matAmbient, sizeof(s.matAmbient));
-    memcpy(s.matEmissive, g_matEmissive, sizeof(s.matEmissive)); s.matAlpha = g_matAlpha;
-    s.lightCount = g_lightCount; memcpy(s.lightType, g_lightType, sizeof(s.lightType));
-    memcpy(s.lightDiffuse, g_lightDiffuse, sizeof(s.lightDiffuse)); memcpy(s.lightAmbient, g_lightAmbient, sizeof(s.lightAmbient));
-    memcpy(s.lightPos, g_lightPos, sizeof(s.lightPos)); memcpy(s.lightDir, g_lightDir, sizeof(s.lightDir));
-    memcpy(s.lightAtten, g_lightAtten, sizeof(s.lightAtten));
-    s.stage1Cube = g_stage1Cube; s.stage1Tex2D = g_stage1Tex2D;
-    memcpy(s.viewMatrix, g_viewMatrix, sizeof(s.viewMatrix)); memcpy(s.texMat0, g_texMat0, sizeof(s.texMat0));
-    memcpy(s.matSpecular, g_matSpecular, sizeof(s.matSpecular)); s.matPower = g_matPower;
-    memcpy(s.lightSpecular, g_lightSpecular, sizeof(s.lightSpecular)); s.dsSrc = g_dsSrc; s.dsDst = g_dsDst;
-}
-
-static void cbRestore(const CbSaved &s) {
-    if (s.depthTest >= 0) setDepth(s.depthTest == 1, s.depthFunc, s.depthMask == 1);
-    setPolygonOffset(s.poOn ? s.poFactor : 0.0f, s.poOn ? s.poUnits : 0.0f);
-    if (s.blendEnabled >= 0) setBlend(s.blendEnabled == 1, s.blendSrc, s.blendDst, s.blendEq ? s.blendEq : GL_FUNC_ADD);
-    g_cullWanted = s.cullWanted; g_frontFace = s.frontFace;
-    RanGLR_SetSampler(s.samp[0], s.samp[1], s.samp[2], s.samp[3], s.samp[4], s.samp[5]);
-    g_colorOp = s.stage[0]; g_colorArg1 = s.stage[1]; g_colorArg2 = s.stage[2];
-    g_alphaOp = s.stage[3]; g_alphaArg1 = s.stage[4]; g_alphaArg2 = s.stage[5];
-    memcpy(g_texFactor, s.texFactor, sizeof(s.texFactor));
-    g_fogMode = s.fogMode; memcpy(g_fogColor, s.fogColor, sizeof(s.fogColor));
-    g_fogStart = s.fogStart; g_fogEnd = s.fogEnd; g_fogDensity = s.fogDensity;
-    memcpy(g_cameraPos, s.cameraPos, sizeof(s.cameraPos));
-    memcpy(g_globalAmbient, s.globalAmbient, sizeof(s.globalAmbient));
-    g_lightingOn = s.lightingOn; g_dsATest = s.dsATest; g_dsARef = s.dsARef; g_dsZ = s.dsZ; g_dsZW = s.dsZW;
-    g_dsBlend = s.dsBlend; g_gammaOn = s.gammaOn;
-    g_palSlotsRaw = s.palSlotsRaw; g_vertexBlend = s.vertexBlend; g_specularOn = s.specularOn;
-    g_stage1Mode = s.stage1Mode; g_texGen0 = s.texGen0;
-    memcpy(g_viewProj, s.viewProj, sizeof(s.viewProj)); memcpy(g_world, s.world, sizeof(s.world));
-    memcpy(g_worldM, s.worldM, sizeof(s.worldM));
-    memcpy(g_matDiffuse, s.matDiffuse, sizeof(s.matDiffuse)); memcpy(g_matAmbient, s.matAmbient, sizeof(s.matAmbient));
-    memcpy(g_matEmissive, s.matEmissive, sizeof(s.matEmissive)); g_matAlpha = s.matAlpha;
-    g_lightCount = s.lightCount; memcpy(g_lightType, s.lightType, sizeof(s.lightType));
-    memcpy(g_lightDiffuse, s.lightDiffuse, sizeof(s.lightDiffuse)); memcpy(g_lightAmbient, s.lightAmbient, sizeof(s.lightAmbient));
-    memcpy(g_lightPos, s.lightPos, sizeof(s.lightPos)); memcpy(g_lightDir, s.lightDir, sizeof(s.lightDir));
-    memcpy(g_lightAtten, s.lightAtten, sizeof(s.lightAtten));
-    //  Stage 1 through its setter, which rebinds units 1 and 2 if they moved.
-    RanGLR_SetStage1(s.stage1Mode, s.stage1Cube, s.stage1Tex2D, s.viewMatrix);
-    g_stage1Mode = s.stage1Mode;
-    memcpy(g_viewMatrix, s.viewMatrix, sizeof(s.viewMatrix)); memcpy(g_texMat0, s.texMat0, sizeof(s.texMat0));
-    memcpy(g_matSpecular, s.matSpecular, sizeof(s.matSpecular)); g_matPower = s.matPower;
-    memcpy(g_lightSpecular, s.lightSpecular, sizeof(s.lightSpecular)); g_dsSrc = s.dsSrc; g_dsDst = s.dsDst;
-}
-
-
 static void cbFlush();
-
-//  A held pass over a costume piece that cannot share an instanced draw - a
-//  piece effect re-drawing the mesh (Specular2, Level, MultiTex, a blended
-//  layer), a blended piece. Without this every such pass flushed the batch, and
-//  on the Tab S9, where the crowd's costumes carry effects, that was ~112
-//  flushes a frame of one piece each: slower than no batch at all (2026-10-20).
-//  Held with its whole state and drawn after the batch's groups, in the order
-//  they came: each still lands on its own piece, which is drawn by then, and the
-//  depth test treats it exactly as before.
-struct CbDeferred {
-    CbSaved st;
-    float mvp[16]; bool hasMvp;
-    DWORD primType; UINT primCount, stride; DWORD fvf; unsigned glTexture;
-    UINT indexBits, icount, vcount; unsigned glVB; UINT vbOff; unsigned glIB; UINT ibOff;
-};
-static std::vector<CbDeferred> g_cbDeferred;
-static unsigned long g_cbDeferredCount = 0;     //  per report
-static std::map<std::string, unsigned long> g_cbFlushCause;   //  per report
-
-//  Set by the D3D layer for the RanGLR_DrawVBO that follows (1 = dynamic or
-//  unknown). Back to 1 after every such draw.
-static int g_drawDynamic = 1;
-extern "C" void RanGLR_NoteDrawDynamic(int dynamic) { g_drawDynamic = dynamic ? 1 : 0; }
-
-static bool cbTryDefer(DWORD primType, UINT primCount, UINT icount, UINT indexBits, UINT vcount,
-                       UINT stride, DWORD fvf, unsigned glTexture, const float *mvp,
-                       unsigned glVB, UINT vbOff, unsigned glIB, UINT ibOff) {
-    if (!g_cbWanted || g_cbReplaying) return false;
-    //  Only a piece's own static buffers - the costume and rigid pieces (a
-    //  weapon, an attachment): a dynamic buffer (particles, trails) is refilled
-    //  before a held draw would read it. Measured on the Tab S9: the rigid
-    //  pieces alone were 50 of the 58 flushes a frame left after the effect
-    //  passes were held.
-    if (!glVB || !glIB || !indexBits || g_drawDynamic) return false;
-    if ((fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW) return false;
-    if (g_rtActive || g_fillMode || g_cpuSkin || g_nullDraw || g_drawLimit >= 0 || g_drawLog > 0 ||
-        g_diagDraws > 0 || g_ghostProbe > 0) return false;
-    const unsigned f = RanGL_FrameIndex();
-    if (f != g_cbFrame) { if (!g_cbItems.empty() || !g_cbDeferred.empty()) cbFlush(); g_cbFrame = f; }
-    g_cbDeferred.push_back(CbDeferred());
-    CbDeferred &d = g_cbDeferred.back();
-    cbSave(d.st);
-    d.hasMvp = mvp != NULL;
-    if (mvp) memcpy(d.mvp, mvp, sizeof(d.mvp));
-    d.primType = primType; d.primCount = primCount; d.stride = stride; d.fvf = fvf; d.glTexture = glTexture;
-    d.indexBits = indexBits; d.icount = icount; d.vcount = vcount;
-    d.glVB = glVB; d.vbOff = vbOff; d.glIB = glIB; d.ibOff = ibOff;
-    ++g_cbDeferredCount;
-    return true;
-}
 
 static bool cbTryRecord(DWORD primType, UINT primCount, UINT icount, UINT indexBits, UINT vcount,
                         UINT stride, DWORD fvf, unsigned glTexture,
@@ -4157,7 +4017,7 @@ static bool cbTryRecord(DWORD primType, UINT primCount, UINT icount, UINT indexB
     if (g_lightCount < 0 || g_lightCount > 8) return false;
     //  A frame that ended inside a scope: what was recorded belongs to it.
     const unsigned f = RanGL_FrameIndex();
-    if (f != g_cbFrame) { if (!g_cbItems.empty() || !g_cbDeferred.empty()) cbFlush(); g_cbFrame = f; }
+    if (f != g_cbFrame) { if (!g_cbItems.empty()) cbFlush(); g_cbFrame = f; }
 
     CbItem it;
     memset(&it, 0, sizeof(it));
@@ -4265,20 +4125,7 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
         if (cbTryRecord(primType, primCount, icount, indexBits, vcount, stride, fvf, glTexture,
                         glVB, vbByteOffset, glIB, ibByteOffset))
             return;
-        if (cbTryDefer(primType, primCount, icount, indexBits, vcount, stride, fvf, glTexture, mvp,
-                       glVB, vbByteOffset, glIB, ibByteOffset))
-            return;
-        if (!g_cbItems.empty() || !g_cbDeferred.empty()) {
-            //  Which draws end a batch, by section and kind, for the report.
-            {
-                const char *sec = (g_sectionTop > 0 && g_sectionTop <= 16) ? g_sectionStack[g_sectionTop - 1] : "?";
-                char key[160];
-                snprintf(key, sizeof(key), "%s fvf=%04lx %s%s%s", sec ? sec : "?", (unsigned long)fvf,
-                         glVB ? "vbo" : "up", (glIB || indices) ? "+idx" : "", g_rtActive ? " rt" : "");
-                ++g_cbFlushCause[key];
-            }
-            cbFlush();
-        }
+        if (!g_cbItems.empty()) cbFlush();
     }
 
     ++g_drawCalls;
@@ -5221,14 +5068,87 @@ extern "C" void RanGLR_DrawVBO(DWORD primType, UINT primCount, unsigned glVB, UI
     drawInternal(primType, primCount, NULL, stride, fvf, glTexture, mvp,
                  NULL, indexBits, indexCount, vertexCount,
                  glVB, vbByteOffset, glIB, ibByteOffset);
-    g_drawDynamic = 1;
 }
 
 //  ---- The character batch: flushing --------------------------------------
 extern "C" void RanGLR_SetSampler(DWORD minFilter, DWORD magFilter, DWORD mipFilter,
                                   DWORD addressU, DWORD addressV, DWORD maxAnisotropy);
 
+//  Everything a replay changes, put back afterwards so the draw that caused the
+//  flush runs exactly as it was set up.
 namespace {
+struct CbSaved {
+    int depthTest; GLenum depthFunc; int depthMask;
+    bool poOn; float poFactor, poUnits;
+    int blendEnabled; GLenum blendSrc, blendDst, blendEq;
+    bool cullWanted; GLenum frontFace;
+    DWORD samp[6];
+    DWORD stage[6]; float texFactor[4];
+    int fogMode; float fogColor[3], fogStart, fogEnd, fogDensity;
+    float cameraPos[3], globalAmbient[3];
+    int lightingOn; DWORD dsATest, dsARef, dsZ, dsZW, dsBlend; int gammaOn;
+    int palSlotsRaw, vertexBlend, specularOn, stage1Mode, texGen0;
+    float viewProj[16], world[16], worldM[256];
+    float matDiffuse[3], matAmbient[3], matEmissive[3], matAlpha;
+    int lightCount; int lightType[8];
+    float lightDiffuse[24], lightAmbient[24], lightPos[32], lightDir[24], lightAtten[24];
+};
+
+void cbSave(CbSaved &s) {
+    s.depthTest = g_gl.depthTest; s.depthFunc = g_gl.depthFunc; s.depthMask = g_gl.depthMask;
+    s.poOn = g_poOn; s.poFactor = g_poFactor; s.poUnits = g_poUnits;
+    s.blendEnabled = g_gl.blendEnabled; s.blendSrc = g_gl.blendSrc; s.blendDst = g_gl.blendDst; s.blendEq = g_gl.blendEq;
+    s.cullWanted = g_cullWanted; s.frontFace = g_frontFace;
+    s.samp[0] = g_sampMin; s.samp[1] = g_sampMag; s.samp[2] = g_sampMip;
+    s.samp[3] = g_sampAddrU; s.samp[4] = g_sampAddrV; s.samp[5] = g_sampAniso;
+    s.stage[0] = g_colorOp; s.stage[1] = g_colorArg1; s.stage[2] = g_colorArg2;
+    s.stage[3] = g_alphaOp; s.stage[4] = g_alphaArg1; s.stage[5] = g_alphaArg2;
+    memcpy(s.texFactor, g_texFactor, sizeof(s.texFactor));
+    s.fogMode = g_fogMode; memcpy(s.fogColor, g_fogColor, sizeof(s.fogColor));
+    s.fogStart = g_fogStart; s.fogEnd = g_fogEnd; s.fogDensity = g_fogDensity;
+    memcpy(s.cameraPos, g_cameraPos, sizeof(s.cameraPos));
+    memcpy(s.globalAmbient, g_globalAmbient, sizeof(s.globalAmbient));
+    s.lightingOn = g_lightingOn; s.dsATest = g_dsATest; s.dsARef = g_dsARef; s.dsZ = g_dsZ; s.dsZW = g_dsZW;
+    s.dsBlend = g_dsBlend; s.gammaOn = g_gammaOn;
+    s.palSlotsRaw = g_palSlotsRaw; s.vertexBlend = g_vertexBlend; s.specularOn = g_specularOn;
+    s.stage1Mode = g_stage1Mode; s.texGen0 = g_texGen0;
+    memcpy(s.viewProj, g_viewProj, sizeof(s.viewProj)); memcpy(s.world, g_world, sizeof(s.world));
+    memcpy(s.worldM, g_worldM, sizeof(s.worldM));
+    memcpy(s.matDiffuse, g_matDiffuse, sizeof(s.matDiffuse)); memcpy(s.matAmbient, g_matAmbient, sizeof(s.matAmbient));
+    memcpy(s.matEmissive, g_matEmissive, sizeof(s.matEmissive)); s.matAlpha = g_matAlpha;
+    s.lightCount = g_lightCount; memcpy(s.lightType, g_lightType, sizeof(s.lightType));
+    memcpy(s.lightDiffuse, g_lightDiffuse, sizeof(s.lightDiffuse)); memcpy(s.lightAmbient, g_lightAmbient, sizeof(s.lightAmbient));
+    memcpy(s.lightPos, g_lightPos, sizeof(s.lightPos)); memcpy(s.lightDir, g_lightDir, sizeof(s.lightDir));
+    memcpy(s.lightAtten, g_lightAtten, sizeof(s.lightAtten));
+}
+
+void cbRestore(const CbSaved &s) {
+    if (s.depthTest >= 0) setDepth(s.depthTest == 1, s.depthFunc, s.depthMask == 1);
+    setPolygonOffset(s.poOn ? s.poFactor : 0.0f, s.poOn ? s.poUnits : 0.0f);
+    if (s.blendEnabled >= 0) setBlend(s.blendEnabled == 1, s.blendSrc, s.blendDst, s.blendEq ? s.blendEq : GL_FUNC_ADD);
+    g_cullWanted = s.cullWanted; g_frontFace = s.frontFace;
+    RanGLR_SetSampler(s.samp[0], s.samp[1], s.samp[2], s.samp[3], s.samp[4], s.samp[5]);
+    g_colorOp = s.stage[0]; g_colorArg1 = s.stage[1]; g_colorArg2 = s.stage[2];
+    g_alphaOp = s.stage[3]; g_alphaArg1 = s.stage[4]; g_alphaArg2 = s.stage[5];
+    memcpy(g_texFactor, s.texFactor, sizeof(s.texFactor));
+    g_fogMode = s.fogMode; memcpy(g_fogColor, s.fogColor, sizeof(s.fogColor));
+    g_fogStart = s.fogStart; g_fogEnd = s.fogEnd; g_fogDensity = s.fogDensity;
+    memcpy(g_cameraPos, s.cameraPos, sizeof(s.cameraPos));
+    memcpy(g_globalAmbient, s.globalAmbient, sizeof(s.globalAmbient));
+    g_lightingOn = s.lightingOn; g_dsATest = s.dsATest; g_dsARef = s.dsARef; g_dsZ = s.dsZ; g_dsZW = s.dsZW;
+    g_dsBlend = s.dsBlend; g_gammaOn = s.gammaOn;
+    g_palSlotsRaw = s.palSlotsRaw; g_vertexBlend = s.vertexBlend; g_specularOn = s.specularOn;
+    g_stage1Mode = s.stage1Mode; g_texGen0 = s.texGen0;
+    memcpy(g_viewProj, s.viewProj, sizeof(s.viewProj)); memcpy(g_world, s.world, sizeof(s.world));
+    memcpy(g_worldM, s.worldM, sizeof(s.worldM));
+    memcpy(g_matDiffuse, s.matDiffuse, sizeof(s.matDiffuse)); memcpy(g_matAmbient, s.matAmbient, sizeof(s.matAmbient));
+    memcpy(g_matEmissive, s.matEmissive, sizeof(s.matEmissive)); g_matAlpha = s.matAlpha;
+    g_lightCount = s.lightCount; memcpy(g_lightType, s.lightType, sizeof(s.lightType));
+    memcpy(g_lightDiffuse, s.lightDiffuse, sizeof(s.lightDiffuse)); memcpy(g_lightAmbient, s.lightAmbient, sizeof(s.lightAmbient));
+    memcpy(g_lightPos, s.lightPos, sizeof(s.lightPos)); memcpy(g_lightDir, s.lightDir, sizeof(s.lightDir));
+    memcpy(g_lightAtten, s.lightAtten, sizeof(s.lightAtten));
+}
+
 //  The group's shared state, as the draws were recorded.
 void cbApplyKey(const CbKey &k) {
     setDepth(k.depthTest == 1, k.depthFunc, k.depthMask == 1);
@@ -5290,7 +5210,7 @@ void cbDrawItemOldWay(const CbItem &it) {
 }   //  namespace
 
 static void cbFlush() {
-    if (g_cbItems.empty() && g_cbDeferred.empty()) return;
+    if (g_cbItems.empty()) return;
     ++g_cbFlushes;
     static CbSaved s_saved;
     cbSave(s_saved);
@@ -5411,18 +5331,9 @@ static void cbFlush() {
         }
     }
     g_cbInstCount = 0;
-    //  Then the held passes, in the order they came, each under its own state.
-    for (size_t i = 0; i < g_cbDeferred.size(); ++i) {
-        const CbDeferred &d = g_cbDeferred[i];
-        cbRestore(d.st);
-        drawInternal(d.primType, d.primCount, NULL, d.stride, d.fvf, d.glTexture,
-                     d.hasMvp ? d.mvp : NULL, NULL,
-                     d.indexBits, d.icount, d.vcount, d.glVB, d.vbOff, d.glIB, d.ibOff);
-    }
     g_cbReplaying = false;
     g_cbItems.clear();
     g_cbRaw.clear();
-    g_cbDeferred.clear();
     cbRestore(s_saved);
 }
 
@@ -5434,7 +5345,7 @@ extern "C" void RanGLR_CharBatchBegin(void) {
 }
 extern "C" void RanGLR_CharBatchEnd(void) {
     if (g_cbDepth <= 0) return;
-    if (--g_cbDepth == 0 && (!g_cbItems.empty() || !g_cbDeferred.empty())) cbFlush();
+    if (--g_cbDepth == 0 && !g_cbItems.empty()) cbFlush();
 }
 
 //  Buffer objects for the client's vertex and index buffers.
@@ -6764,17 +6675,9 @@ extern "C" void RanGLR_LogStats(void) {
     logPasses();
     logDrawGroups();
     if (g_cbRecorded || g_cbWanted) {
-        LOGI("charbatch per 300 frames: %lu piece draws recorded, sent as %lu draws in %lu flushes; %lu passes held",
-             g_cbRecorded, g_cbGroups, g_cbFlushes, g_cbDeferredCount);
-        g_cbRecorded = g_cbGroups = g_cbFlushes = g_cbDeferredCount = 0;
-        //  The ten commonest reasons a batch was cut short.
-        std::vector<std::pair<unsigned long, std::string> > v;
-        for (std::map<std::string, unsigned long>::iterator it = g_cbFlushCause.begin(); it != g_cbFlushCause.end(); ++it)
-            v.push_back(std::make_pair(it->second, it->first));
-        std::sort(v.begin(), v.end());
-        for (size_t i = v.size(), n = 0; i-- > 0 && n < 10; ++n)
-            LOGI("charbatch flush cause per 300 frames: %6lu  %s", v[i].first, v[i].second.c_str());
-        g_cbFlushCause.clear();
+        LOGI("charbatch per 300 frames: %lu piece draws recorded, sent as %lu draws in %lu flushes",
+             g_cbRecorded, g_cbGroups, g_cbFlushes);
+        g_cbRecorded = g_cbGroups = g_cbFlushes = 0;
     }
     if (g_clearLog) {
         for (std::map<std::string, unsigned long>::iterator it = g_clearKinds.begin(); it != g_clearKinds.end(); ++it)

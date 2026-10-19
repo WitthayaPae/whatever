@@ -180,9 +180,6 @@ void RanGLR_DrawVBO(DWORD primType, UINT primCount, unsigned glVB, UINT vbByteOf
                     UINT stride, DWORD fvf, unsigned glTexture, const float *mvp,
                     unsigned glIB, UINT ibByteOffset, UINT indexBits,
                     UINT indexCount, UINT vertexCount);
-//  Whether the next RanGLR_DrawVBO reads a dynamic (refilled) buffer. The
-//  character batch only holds draws from static ones.
-void RanGLR_NoteDrawDynamic(int dynamic);
 void RanGLR_SetMaterialAlpha(float a);
 void RanGLR_SetSampler(DWORD minFilter, DWORD magFilter, DWORD mipFilter,
                        DWORD addressU, DWORD addressV, DWORD maxAnisotropy);
