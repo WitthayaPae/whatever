@@ -282,8 +282,6 @@ inline void    RanGLT_glDeleteSync(GLsync s)             { RanGLT_Call(&::glDele
                                              RanGLT_Call(&::glDrawArrays, __VA_ARGS__); } while (0)
 #define glDrawElements(...)            do { if (g_ranPassOn) RanPass_Work(0, 0); \
                                              RanGLT_Call(&::glDrawElements, __VA_ARGS__); } while (0)
-#define glDrawElementsInstanced(...)   do { if (g_ranPassOn) RanPass_Work(0, 0); \
-                                             RanGLT_Call(&::glDrawElementsInstanced, __VA_ARGS__); } while (0)
 #define glEnableVertexAttribArray(...) RanGLT_Call(&::glEnableVertexAttribArray, __VA_ARGS__)
 #define glFramebufferRenderbuffer(...) RanGLT_Call(&::glFramebufferRenderbuffer, __VA_ARGS__)
 #define glFramebufferTexture2D(...)    RanGLT_Call(&::glFramebufferTexture2D, __VA_ARGS__)
