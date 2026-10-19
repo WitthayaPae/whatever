@@ -73,6 +73,41 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-20 — Renderer phase 2 v1: character batch (instanced pieces), opt-in "charbatch"
+
+Plan: `DEV EP9/RENDERER_PLAN.md`. SOURCE 1e2f753 (scope in Render_MobItem), MOBILE 7958786 (shim).
+
+- **What it does:** inside `RanGLR_CharBatchBegin/End` (player loop, monster loop), each
+  skinned costume piece draw that qualifies (opaque or alpha-tested, GPU buffers,
+  indexed blend, to the screen, no specular / stage 1 / texgen) is recorded. At the end, or
+  before any other draw, every piece is sent once with `glDrawElementsInstanced`. Bone
+  palette, world, material and lights come per instance from an RGBA32F texture
+  (`RAN_INST` variant, bit 20).
+- **LDPlayer measurements (500 fighting fakes, 40 full + 80 cheap + impostors, interleaved x2):**
+
+  | | batch off | batch on |
+  |---|---|---|
+  | fps | 25.1 | 25.0 |
+  | draws/frame | 2,007 | 1,190 |
+  | GL calls/frame | 11,001 | 6,436 |
+  | `part:skinned` | 8.6 ms | ~2.6 ms |
+
+  - Recorded: ~1,090 piece draws/frame became ~235 draws in ~9 flushes.
+  - Monsters only (Little Hime pack): ~36 piece draws became 3.
+  - fps did not change: the emulator's GL transport scales with data volume, not call count.
+- **Pictures checked at 1:1 on LDPlayer:** monsters and the 500 crowd look the same as with
+  the batch off.
+- **NOT measured on the Tab S9 / iPhone yet.** That is where call count is the cost (iPhone
+  ~44k GL calls/frame). Default stays off until then.
+- **Known limits (v1):**
+  - flushes split at every effect draw (~9/frame);
+  - the player's own character and impostor capture are outside the scope;
+  - single-piece groups draw the old way.
+- Also found: GameMaster's own option is "show all players" (`dwMobilePlayerDraw` 0), so the
+  crowd tiers never ran for that character. All 500 at full detail = 11.9 fps.
+
+---
+
 ## 2026-10-20 — Six HUD/menu fixes, user-tested on LDPlayer: "it's all work" (NOT patched yet)
 
 User: "do it but did not patch yet just install in ldPlayer so I can test it". SOURCE 3a572b8.
