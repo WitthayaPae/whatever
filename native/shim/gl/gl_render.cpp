@@ -115,6 +115,29 @@ const char *kVS =
     "uniform float uFogStart;\n"
     "uniform float uFogEnd;\n"
     "uniform float uFogDensity;\n"
+    //  The character batch (RanGLR_CharBatch*): one instanced draw for every
+    //  character wearing the same piece. What differs per character - the bone
+    //  palette, the world matrix, the material and the lights - is read from a
+    //  float texture, uInstStride texels per instance from uInstBase. Matrices
+    //  are affine and packed as three texels: (row.xyz, translation component).
+    "#ifdef RAN_INST\n"
+    "uniform highp sampler2D uInstTex;\n"
+    "uniform int uInstBase;\n"
+    "uniform int uInstStride;\n"
+    "uniform int uInstPal;\n"
+    "flat out float vMatAlpha;\n"
+    "highp vec4 instT(int i) {\n"
+    "    int t = uInstBase + gl_InstanceID * uInstStride + i;\n"
+    "    return texelFetch(uInstTex, ivec2(t & 1023, t >> 10), 0);\n"
+    "}\n"
+    "mat4 instM(int i) {\n"
+    "    highp vec4 a = instT(i), b = instT(i + 1), c = instT(i + 2);\n"
+    "    return mat4(vec4(a.xyz, 0.0), vec4(b.xyz, 0.0), vec4(c.xyz, 0.0), vec4(a.w, b.w, c.w, 1.0));\n"
+    "}\n"
+    "#define PALM(i) instM(3 * (i))\n"
+    "#else\n"
+    "#define PALM(i) uWorldM[i]\n"
+    "#endif\n"
     "out float vFog;\n"
     "out vec3 vLit;\n"
     "out vec3 vSpec;\n"
@@ -124,6 +147,24 @@ const char *kVS =
     "out vec3 vWorldPos;\n"
     "out vec3 vNormal;\n"
     "void main() {\n"
+    //  Per-instance material, world and light count (the batch), else the
+    //  uniforms - one set of names for the code below either way.
+    "#ifdef RAN_INST\n"
+    "    int instB = 3 * uInstPal;\n"
+    "    mat4 instWorld = instM(instB);\n"
+    "    highp vec4 instMd = instT(instB + 3);\n"
+    "    vec3 matDiffuse = instMd.rgb;\n"
+    "    vMatAlpha = instMd.a;\n"
+    "    vec3 matAmbient = instT(instB + 4).rgb;\n"
+    "    vec3 matEmissive = instT(instB + 5).rgb;\n"
+    "    int lightCount = int(instT(instB + 6).x + 0.5);\n"
+    "#else\n"
+    "    mat4 instWorld = uWorld;\n"
+    "    vec3 matDiffuse = uMatDiffuse;\n"
+    "    vec3 matAmbient = uMatAmbient;\n"
+    "    vec3 matEmissive = uMatEmissive;\n"
+    "    int lightCount = uLightCount;\n"
+    "#endif\n"
     "    if (uPreTransformed == 1) {\n"
     "        // screen pixels -> clip space, with D3D's downward Y flipped\n"
     "        float x = (aPos.x / uViewport.x) * 2.0 - 1.0;\n"
@@ -145,17 +186,18 @@ const char *kVS =
     "        ivec4 bi = ivec4(aBoneIdx + 0.5);\n"
     "        vec4 p4 = vec4(aPos.xyz, 1.0);\n"
     "        vec4 n4 = vec4(aNormal, 0.0);\n"
-    "        vec3 pos = aBlend.x * (uWorldM[bi.x] * p4).xyz\n"
-    "                 + aBlend.y * (uWorldM[bi.y] * p4).xyz\n"
-    "                 + aBlend.z * (uWorldM[bi.z] * p4).xyz\n"
-    "                 +      w3  * (uWorldM[bi.w] * p4).xyz;\n"
-    "        vec3 nrm = aBlend.x * (uWorldM[bi.x] * n4).xyz\n"
-    "                 + aBlend.y * (uWorldM[bi.y] * n4).xyz\n"
-    "                 + aBlend.z * (uWorldM[bi.z] * n4).xyz\n"
-    "                 +      w3  * (uWorldM[bi.w] * n4).xyz;\n"
+    "        mat4 m0 = PALM(bi.x), m1 = PALM(bi.y), m2 = PALM(bi.z), m3 = PALM(bi.w);\n"
+    "        vec3 pos = aBlend.x * (m0 * p4).xyz\n"
+    "                 + aBlend.y * (m1 * p4).xyz\n"
+    "                 + aBlend.z * (m2 * p4).xyz\n"
+    "                 +      w3  * (m3 * p4).xyz;\n"
+    "        vec3 nrm = aBlend.x * (m0 * n4).xyz\n"
+    "                 + aBlend.y * (m1 * n4).xyz\n"
+    "                 + aBlend.z * (m2 * n4).xyz\n"
+    "                 +      w3  * (m3 * n4).xyz;\n"
     "        gl_Position = uViewProj * vec4(pos, 1.0);\n"
     "        vWorldPos = pos;\n"
-    "        vNormal = mat3(uWorld) * nrm;\n"
+    "        vNormal = mat3(instWorld) * nrm;\n"
     "    } else if (uVertexBlend > 0) {\n"
     "        //  Positional blending, for meshes that do not carry slots: the\n"
     "        //  vertex has uVertexBlend weights and the matrix after them takes\n"
@@ -211,22 +253,39 @@ const char *kVS =
     "    vSpec = vec3(0.0);\n"
     "    if (uLighting == 1) {\n"
     "        vec3 n = normalize(vNormal);\n"
-    "        vec3 lit = uMatEmissive + uMatAmbient * uGlobalAmbient;\n"
+    "        vec3 lit = matEmissive + matAmbient * uGlobalAmbient;\n"
     "        vec3 spec = vec3(0.0);\n"
     "        vec3 V = normalize(uCameraPosF - vWorldPos);\n"
     "        for (int i = 0; i < 8; ++i) {\n"
-    "            if (i >= uLightCount) break;\n"
+    "            if (i >= lightCount) break;\n"
+    "#ifdef RAN_INST\n"
+    "            int lb = instB + 7 + 5 * i;\n"
+    "            highp vec4 l0 = instT(lb), l1 = instT(lb + 1), l2 = instT(lb + 2), l3 = instT(lb + 3), l4 = instT(lb + 4);\n"
+    "            int lType = int(l0.x + 0.5);\n"
+    "            vec3 lDiffuse = l0.yzw;\n"
+    "            vec3 lAmbient = l1.xyz;\n"
+    "            vec4 lPos = l2;\n"
+    "            vec3 lDir = l3.xyz;\n"
+    "            vec3 lAtten = vec3(l1.w, l3.w, l4.x);\n"
+    "#else\n"
+    "            int lType = uLightType[i];\n"
+    "            vec3 lDiffuse = uLightDiffuse[i];\n"
+    "            vec3 lAmbient = uLightAmbient[i];\n"
+    "            vec4 lPos = uLightPos[i];\n"
+    "            vec3 lDir = uLightDir[i];\n"
+    "            vec3 lAtten = uLightAtten[i];\n"
+    "#endif\n"
     "            vec3 L;\n"
     "            float atten = 1.0;\n"
-    "            if (uLightType[i] == 3) {\n"          // directional
-    "                L = -normalize(uLightDir[i]);\n"
+    "            if (lType == 3) {\n"          // directional
+    "                L = -normalize(lDir);\n"
     "            } else {\n"                            // point / spot
-    "                vec3 d = uLightPos[i].xyz - vWorldPos;\n"
+    "                vec3 d = lPos.xyz - vWorldPos;\n"
     "                float dist = length(d);\n"
-    "                if (dist > uLightPos[i].w) continue;\n"
+    "                if (dist > lPos.w) continue;\n"
     "                L = d / max(dist, 0.0001);\n"
-    "                atten = 1.0 / max(uLightAtten[i].x + uLightAtten[i].y * dist +\n"
-    "                                  uLightAtten[i].z * dist * dist, 0.0001);\n"
+    "                atten = 1.0 / max(lAtten.x + lAtten.y * dist +\n"
+    "                                  lAtten.z * dist * dist, 0.0001);\n"
     "                atten = clamp(atten, 0.0, 1.0);\n"
     "            }\n"
     "            float ndotl = max(dot(n, L), 0.0);\n"
@@ -234,8 +293,8 @@ const char *kVS =
     //  one (D3DMCS_COLOR1, the default) and from the material only when it does
     //  not. The vertex colour is already multiplied in by the texture stage, so
     //  applying the material as well would count it twice.
-    "            vec3 md = (uHasVertexColor == 1) ? vec3(1.0) : uMatDiffuse;\n"
-    "            lit += atten * (uLightDiffuse[i] * md * ndotl + uLightAmbient[i]);\n"
+    "            vec3 md = (uHasVertexColor == 1) ? vec3(1.0) : matDiffuse;\n"
+    "            lit += atten * (lDiffuse * md * ndotl + lAmbient);\n"
     "            if (uSpecularOn == 1 && ndotl > 0.0) {\n"
     "                vec3 H = normalize(L + V);\n"                  // Blinn half-vector
     "                float sp = pow(max(dot(n, H), 0.0), max(uMatPower, 1.0));\n"
@@ -277,7 +336,13 @@ const char *kFS =
     "uniform highp int   uSpecularOn;\n"
     "#endif\n"
     "uniform vec3        uMatSpecular;\n"
+    "#ifdef RAN_INST\n"
+    "flat in float vMatAlpha;\n"        //  per instance (the character batch)
+    "#define RAN_MATALPHA vMatAlpha\n"
+    "#else\n"
     "uniform float       uMatAlpha;\n"
+    "#define RAN_MATALPHA uMatAlpha\n"
+    "#endif\n"
     "uniform highp vec3  uCameraPosF;\n"
     "#ifndef uFogMode\n"
     "uniform highp int   uFogMode;\n"
@@ -454,7 +519,7 @@ const char *kFS =
     "    if (uPlain == 1) { oColor = tex * vColor; return; }\n"
     "    //  With lighting on, the pipeline's diffuse alpha is the material's;\n"
     "    //  the vertex colour only carries it for unlit geometry.\n"
-    "    vec4 diffuse = vec4(vColor.rgb, uLighting == 1 ? uMatAlpha : vColor.a);\n"
+    "    vec4 diffuse = vec4(vColor.rgb, uLighting == 1 ? RAN_MATALPHA : vColor.a);\n"
     "    vec4 a1 = argValue(uColorArg1, tex, diffuse);\n"
     "    vec4 a2 = argValue(uColorArg2, tex, diffuse);\n"
     "    vec3 rgb;\n"
@@ -725,6 +790,8 @@ GLint  uWorld = -1, uCameraPos = -1, uCameraPosF = -1,
        uFogMode = -1, uFogColor = -1, uFogStart = -1, uFogEnd = -1, uFogDensity = -1;
 extern "C" void RanDiag_Backtrace(char *out, size_t cap);
 GLint  uMatAlpha = -1;
+//  The character batch's instance data (RAN_INST variants only).
+GLint  uInstTex = -1, uInstBase = -1, uInstStride = -1, uInstPal = -1;
 //  D3DRS_TEXTUREFACTOR as four floats. White is the D3D default, and is what a
 //  stage selecting TFACTOR gets until the engine sets one.
 float  g_texFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -1099,6 +1166,9 @@ int g_sectionDrawCount = 0;
 //  their depth writes and paint nothing. Draws into render targets are left
 //  alone. The picture is meaningless while it is on.
 bool g_fillMode = false;
+//  "charbatch": the character batch (RanGLR_CharBatchBegin/End, below
+//  drawInternal). Opt-in while it is being proven against the old path.
+bool g_cbWanted = false;
 bool g_fillEver = false;                //  once on, uFill is sent on every draw so it can go back to 0
 char g_fillSection[48] = { 0 };
 double g_fillSum = 0.0;                 //  fragments over the frames read back
@@ -1354,6 +1424,7 @@ bool g_foldStages = false;
 extern "C" void RanGLR_RefreshDiagnostics(void) {
     struct { const char *name; bool *flag; const char *what; } diag[] = {
         { "nulldraw",  &g_nullDraw,    "every GL call a draw makes" },
+        { "charbatch", &g_cbWanted,    "NOT batching character pieces into instanced draws (on while present)" },
         { "nouniform", &g_skipUniform, "uniform uploads" },
         { "notex",     &g_skipTex,     "texture binds and sampler state" },
         { "noattr",    &g_skipAttr,    "vertex attribute setup" },
@@ -1631,6 +1702,12 @@ void fetchUniformLocations(GLuint prog) {
     uFogStart       = glGetUniformLocation(prog, "uFogStart");
     uFogEnd         = glGetUniformLocation(prog, "uFogEnd");
     uFogDensity     = glGetUniformLocation(prog, "uFogDensity");
+    uInstTex        = glGetUniformLocation(prog, "uInstTex");
+    uInstBase       = glGetUniformLocation(prog, "uInstBase");
+    uInstStride     = glGetUniformLocation(prog, "uInstStride");
+    uInstPal        = glGetUniformLocation(prog, "uInstPal");
+    //  The instance data lives on unit 4 (0 stage 0, 1 cube, 2 stage 1, 3 gamma).
+    if (uInstTex >= 0) glUniform1i(uInstTex, 4);
 }
 //  A shader for the state, instead of a shader for every state.
 //
@@ -1659,6 +1736,7 @@ GLint *const kLocationVars[] = {
     &uMatDiffuse, &uHasVertexColor, &uMatAmbient, &uMatEmissive, &uLightType,
     &uLightDiffuse, &uLightAmbient, &uLightPos, &uLightDir, &uLightAtten,
     &uFogMode, &uFogColor, &uFogStart, &uFogEnd, &uFogDensity,
+    &uInstTex, &uInstBase, &uInstStride, &uInstPal,
 };
 const size_t kLocationCount = sizeof(kLocationVars) / sizeof(kLocationVars[0]);
 
@@ -1754,6 +1832,8 @@ std::string variantPreamble(unsigned key) {
                  k.v[0], k.v[1], k.v[2], k.v[3], k.v[4], k.v[5]);
         stage = sb;
     }
+    //  Bit 20: the character batch's instanced draw (kInstVariantBit).
+    if (key & 0x100000u) stage += "#define RAN_INST 1\n";
     snprintf(buf, sizeof(buf),
              "#define RAN_UVP %s\n"
              "#define uPreTransformed %d\n"
@@ -3864,6 +3944,130 @@ static void logDrawGroups() {
     g_dgFrames = 0;
 }
 
+//  ---- The character batch (RENDERER_PLAN.md, phase 2) ----------------------
+//
+//  Every skinned costume piece was its own draw: ~1,150 a frame in a 500-player
+//  crowd with the tiers on, falling into only ~120 different (mesh, range,
+//  texture, state) keys (drawgroups, LDPlayer, 2026-10-20). Inside a batch
+//  scope (RanGLR_CharBatchBegin/End, around the client's character loops) such
+//  a draw is not sent: it is recorded with its key and with what differs per
+//  character - bone palette, world matrix, material, lights. At the end of the
+//  scope, or before anything else draws, each key goes out once as an instanced
+//  draw, the per-character values read from a float texture (the RAN_INST
+//  shader variant). The same shader maths; only where the numbers come from.
+//
+//  Recorded: opaque or alpha-tested, GPU-buffer, indexed-blend (LASTBETA_UBYTE4)
+//  draws to the screen, without specular, stage 1 or texture-coordinate
+//  generation. Anything else inside the scope first flushes what is recorded, so
+//  the order the old path gives is kept wherever it can matter.
+static const unsigned kInstVariantBit = 0x100000u;
+static int  g_cbDepth = 0;
+static bool g_cbReplaying = false;
+static unsigned g_cbFrame = 0xFFFFFFFFu;
+static int  g_cbInstCount = 0, g_cbInstBase = 0, g_cbInstStride = 0, g_cbInstPal = 0;
+static unsigned long g_cbRecorded = 0, g_cbGroups = 0, g_cbFlushes = 0;   //  per report
+//  The instance data: one RGBA32F texture per frame of three in flight, so a
+//  frame never writes rows the GPU may still be reading for an earlier one.
+//  1024 x 256 texels = ~6,000 instances a frame at a typical 43 texels each.
+static const int kCbTexW = 1024, kCbTexH = 256;
+static GLuint g_cbTex[3] = { 0, 0, 0 };
+static int    g_cbTexSlot = 0;
+static unsigned g_cbTexFrame = 0xFFFFFFFFu;
+static int    g_cbCursor = 0;        //  next free texel in this frame's texture
+static bool   g_cbInstFailed = false;   //  the instanced variant could not be used
+extern DWORD g_sampMin, g_sampMag, g_sampMip, g_sampAddrU, g_sampAddrV, g_sampAniso;
+
+//  Everything a recorded draw needs that must be the same for the whole group.
+//  Zero-filled before it is set, so it can be compared and hashed as bytes.
+struct CbKey {
+    DWORD primType; UINT primCount; unsigned glVB; UINT vbOff; UINT stride; DWORD fvf;
+    unsigned glIB; UINT ibOff; UINT indexBits; UINT icount; UINT vcount; unsigned glTexture;
+    int depthTest; unsigned depthFunc; int depthMask;
+    int poOn; float poFactor, poUnits;
+    int cullWanted; unsigned frontFace;
+    DWORD samp[6];
+    DWORD stage[6];
+    float texFactor[4];
+    int fogMode; float fogColor[3], fogStart, fogEnd, fogDensity;
+    float cameraPos[3], globalAmbient[3];
+    int lightingOn; DWORD dsATest, dsARef, dsZ, dsZW; int gammaOn;
+    int palSlots; int vertexBlend;
+    float viewProj[16];
+};
+struct CbItem { CbKey key; unsigned long long hash; size_t inst; int lights; };
+static std::vector<CbItem> g_cbItems;
+//  Per item, packed as recorded: palette (palSlots x 16), world (16),
+//  diffuse (3) + alpha, ambient (3), emissive (3), then per light 17 floats
+//  (type, diffuse 3, ambient 3, position 4, direction 3, attenuation 3).
+static std::vector<float> g_cbRaw;
+
+static void cbFlush();
+
+static bool cbTryRecord(DWORD primType, UINT primCount, UINT icount, UINT indexBits, UINT vcount,
+                        UINT stride, DWORD fvf, unsigned glTexture,
+                        unsigned glVB, UINT vbOff, unsigned glIB, UINT ibOff) {
+    if (!g_cbWanted || g_cbReplaying) return false;
+    if (!glVB || !glIB || !indexBits) return false;
+    if ((fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZB4 || !(fvf & D3DFVF_LASTBETA_UBYTE4)) return false;
+    if (g_rtActive || g_dsBlend || g_gl.blendEnabled == 1) return false;
+    if (g_specularOn || g_stage1Mode || g_texGen0) return false;
+    if (g_fsProbe || g_plainFS || g_fillMode || g_cpuSkin || g_skipBlend || g_skipUniform ||
+        g_skipTex || g_skipAttr || g_nullDraw || g_drawLimit >= 0 || g_drawLog > 0 ||
+        g_diagDraws > 0 || g_ghostProbe > 0) return false;
+    if (g_lightCount < 0 || g_lightCount > 8) return false;
+    //  A frame that ended inside a scope: what was recorded belongs to it.
+    const unsigned f = RanGL_FrameIndex();
+    if (f != g_cbFrame) { if (!g_cbItems.empty()) cbFlush(); g_cbFrame = f; }
+
+    CbItem it;
+    memset(&it, 0, sizeof(it));
+    CbKey &k = it.key;
+    k.primType = primType; k.primCount = primCount; k.glVB = glVB; k.vbOff = vbOff; k.stride = stride;
+    k.fvf = fvf; k.glIB = glIB; k.ibOff = ibOff; k.indexBits = indexBits; k.icount = icount;
+    k.vcount = vcount; k.glTexture = glTexture;
+    k.depthTest = g_gl.depthTest; k.depthFunc = g_gl.depthFunc; k.depthMask = g_gl.depthMask;
+    k.poOn = g_poOn ? 1 : 0; k.poFactor = g_poFactor; k.poUnits = g_poUnits;
+    k.cullWanted = g_cullWanted ? 1 : 0; k.frontFace = g_frontFace;
+    k.samp[0] = g_sampMin; k.samp[1] = g_sampMag; k.samp[2] = g_sampMip;
+    k.samp[3] = g_sampAddrU; k.samp[4] = g_sampAddrV; k.samp[5] = g_sampAniso;
+    k.stage[0] = g_colorOp; k.stage[1] = g_colorArg1; k.stage[2] = g_colorArg2;
+    k.stage[3] = g_alphaOp; k.stage[4] = g_alphaArg1; k.stage[5] = g_alphaArg2;
+    memcpy(k.texFactor, g_texFactor, sizeof(k.texFactor));
+    k.fogMode = g_fogMode; memcpy(k.fogColor, g_fogColor, sizeof(k.fogColor));
+    k.fogStart = g_fogStart; k.fogEnd = g_fogEnd; k.fogDensity = g_fogDensity;
+    memcpy(k.cameraPos, g_cameraPos, sizeof(k.cameraPos));
+    memcpy(k.globalAmbient, g_globalAmbient, sizeof(k.globalAmbient));
+    k.lightingOn = g_lightingOn; k.dsATest = g_dsATest; k.dsARef = g_dsARef; k.dsZ = g_dsZ; k.dsZW = g_dsZW;
+    k.gammaOn = g_gammaOn;
+    k.palSlots = g_palSlotsRaw < 1 ? 1 : (g_palSlotsRaw > 16 ? 16 : g_palSlotsRaw);
+    k.vertexBlend = g_vertexBlend;
+    memcpy(k.viewProj, g_viewProj, sizeof(k.viewProj));
+    unsigned long long h = 1469598103934665603ull;
+    const unsigned char *kb = (const unsigned char *)&k;
+    for (size_t i = 0; i < sizeof(CbKey); ++i) { h ^= kb[i]; h *= 1099511628211ull; }
+    it.hash = h;
+
+    it.inst = g_cbRaw.size();
+    it.lights = g_lightCount;
+    g_cbRaw.insert(g_cbRaw.end(), g_worldM, g_worldM + 16 * k.palSlots);
+    g_cbRaw.insert(g_cbRaw.end(), g_world, g_world + 16);
+    g_cbRaw.insert(g_cbRaw.end(), g_matDiffuse, g_matDiffuse + 3);
+    g_cbRaw.push_back(g_matAlpha);
+    g_cbRaw.insert(g_cbRaw.end(), g_matAmbient, g_matAmbient + 3);
+    g_cbRaw.insert(g_cbRaw.end(), g_matEmissive, g_matEmissive + 3);
+    for (int i = 0; i < g_lightCount; ++i) {
+        g_cbRaw.push_back((float)g_lightType[i]);
+        g_cbRaw.insert(g_cbRaw.end(), g_lightDiffuse + i * 3, g_lightDiffuse + i * 3 + 3);
+        g_cbRaw.insert(g_cbRaw.end(), g_lightAmbient + i * 3, g_lightAmbient + i * 3 + 3);
+        g_cbRaw.insert(g_cbRaw.end(), g_lightPos + i * 4, g_lightPos + i * 4 + 4);
+        g_cbRaw.insert(g_cbRaw.end(), g_lightDir + i * 3, g_lightDir + i * 3 + 3);
+        g_cbRaw.insert(g_cbRaw.end(), g_lightAtten + i * 3, g_lightAtten + i * 3 + 3);
+    }
+    g_cbItems.push_back(it);
+    ++g_cbRecorded;
+    return true;
+}
+
 static void drawInternal(DWORD primType, UINT primCount, const void *verts,
                          UINT stride, DWORD fvf, unsigned glTexture,
                          const float *mvp, const void *indices, UINT indexBits,
@@ -3913,6 +4117,15 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
         } else {
             vcount = implied;
         }
+    }
+
+    //  The character batch: recorded now and drawn with the rest of its group,
+    //  or - anything that cannot be - after what is already recorded.
+    if (g_cbDepth > 0 && !g_cbReplaying) {
+        if (cbTryRecord(primType, primCount, icount, indexBits, vcount, stride, fvf, glTexture,
+                        glVB, vbByteOffset, glIB, ibByteOffset))
+            return;
+        if (!g_cbItems.empty()) cbFlush();
     }
 
     ++g_drawCalls;
@@ -4650,7 +4863,8 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
                           ((g_fsProbe & 8) == 0 && g_dsATest) ? 1 : 0,
                           (g_gammaOn && g_gammaLut) ? 1 : 0,
                           glTexture ? 1 : 0, indexedBlend ? 1 : 0, blendCountNow)
-               | (g_stageId << 15));
+               | (g_stageId << 15)
+               | ((g_cbReplaying && g_cbInstCount > 0 && indexedBlend) ? kInstVariantBit : 0u));
     g_palBucket = indexedBlend ? 5 : (blendCountNow <= 0 ? 0 : (blendCountNow > 3 ? 4 : blendCountNow));
     ++g_palDraws[g_palBucket];
     if (indexedBlend) {
@@ -4766,7 +4980,23 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     RanGLR_NoteSectionDraw(vcount, icount ? icount : vcount, g_dsBlend != 0);
     if (g_drawGroups) noteDrawGroup(glVB, glIB, ibByteOffset, icount, vbByteOffset, glTexture);
 
-    if (glIB && indexBits) {
+    if (g_cbReplaying && g_cbInstCount > 0 && !(glIB && indexBits && g_curVariant && (g_variantKey & kInstVariantBit))) {
+        //  The instanced variant is not what is bound (it failed to build): draw
+        //  nothing here, and the flush draws the group the old way instead.
+        g_cbInstFailed = true;
+    } else if (glIB && indexBits && g_cbReplaying && g_cbInstCount > 0) {
+        //  The character batch: every character wearing this piece, at once.
+        setUniform1i(uInstBase, g_cbInstBase);
+        setUniform1i(uInstStride, g_cbInstStride);
+        setUniform1i(uInstPal, g_cbInstPal);
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, g_cbTex[g_cbTexSlot]);
+        glActiveTexture(GL_TEXTURE0);
+        bindElements(glIB);
+        glDrawElementsInstanced(mode, icount, indexBits == 16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
+                                (const void *)(intptr_t)ibByteOffset, g_cbInstCount);
+        ++g_callsDraw;
+    } else if (glIB && indexBits) {
         bindElements(glIB);   // part of the bound VAO's state, and cached with it
         glDrawElements(mode, icount, indexBits == 16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
                        (const void *)(intptr_t)ibByteOffset);
@@ -4838,6 +5068,284 @@ extern "C" void RanGLR_DrawVBO(DWORD primType, UINT primCount, unsigned glVB, UI
     drawInternal(primType, primCount, NULL, stride, fvf, glTexture, mvp,
                  NULL, indexBits, indexCount, vertexCount,
                  glVB, vbByteOffset, glIB, ibByteOffset);
+}
+
+//  ---- The character batch: flushing --------------------------------------
+extern "C" void RanGLR_SetSampler(DWORD minFilter, DWORD magFilter, DWORD mipFilter,
+                                  DWORD addressU, DWORD addressV, DWORD maxAnisotropy);
+
+//  Everything a replay changes, put back afterwards so the draw that caused the
+//  flush runs exactly as it was set up.
+namespace {
+struct CbSaved {
+    int depthTest; GLenum depthFunc; int depthMask;
+    bool poOn; float poFactor, poUnits;
+    int blendEnabled; GLenum blendSrc, blendDst, blendEq;
+    bool cullWanted; GLenum frontFace;
+    DWORD samp[6];
+    DWORD stage[6]; float texFactor[4];
+    int fogMode; float fogColor[3], fogStart, fogEnd, fogDensity;
+    float cameraPos[3], globalAmbient[3];
+    int lightingOn; DWORD dsATest, dsARef, dsZ, dsZW, dsBlend; int gammaOn;
+    int palSlotsRaw, vertexBlend, specularOn, stage1Mode, texGen0;
+    float viewProj[16], world[16], worldM[256];
+    float matDiffuse[3], matAmbient[3], matEmissive[3], matAlpha;
+    int lightCount; int lightType[8];
+    float lightDiffuse[24], lightAmbient[24], lightPos[32], lightDir[24], lightAtten[24];
+};
+
+void cbSave(CbSaved &s) {
+    s.depthTest = g_gl.depthTest; s.depthFunc = g_gl.depthFunc; s.depthMask = g_gl.depthMask;
+    s.poOn = g_poOn; s.poFactor = g_poFactor; s.poUnits = g_poUnits;
+    s.blendEnabled = g_gl.blendEnabled; s.blendSrc = g_gl.blendSrc; s.blendDst = g_gl.blendDst; s.blendEq = g_gl.blendEq;
+    s.cullWanted = g_cullWanted; s.frontFace = g_frontFace;
+    s.samp[0] = g_sampMin; s.samp[1] = g_sampMag; s.samp[2] = g_sampMip;
+    s.samp[3] = g_sampAddrU; s.samp[4] = g_sampAddrV; s.samp[5] = g_sampAniso;
+    s.stage[0] = g_colorOp; s.stage[1] = g_colorArg1; s.stage[2] = g_colorArg2;
+    s.stage[3] = g_alphaOp; s.stage[4] = g_alphaArg1; s.stage[5] = g_alphaArg2;
+    memcpy(s.texFactor, g_texFactor, sizeof(s.texFactor));
+    s.fogMode = g_fogMode; memcpy(s.fogColor, g_fogColor, sizeof(s.fogColor));
+    s.fogStart = g_fogStart; s.fogEnd = g_fogEnd; s.fogDensity = g_fogDensity;
+    memcpy(s.cameraPos, g_cameraPos, sizeof(s.cameraPos));
+    memcpy(s.globalAmbient, g_globalAmbient, sizeof(s.globalAmbient));
+    s.lightingOn = g_lightingOn; s.dsATest = g_dsATest; s.dsARef = g_dsARef; s.dsZ = g_dsZ; s.dsZW = g_dsZW;
+    s.dsBlend = g_dsBlend; s.gammaOn = g_gammaOn;
+    s.palSlotsRaw = g_palSlotsRaw; s.vertexBlend = g_vertexBlend; s.specularOn = g_specularOn;
+    s.stage1Mode = g_stage1Mode; s.texGen0 = g_texGen0;
+    memcpy(s.viewProj, g_viewProj, sizeof(s.viewProj)); memcpy(s.world, g_world, sizeof(s.world));
+    memcpy(s.worldM, g_worldM, sizeof(s.worldM));
+    memcpy(s.matDiffuse, g_matDiffuse, sizeof(s.matDiffuse)); memcpy(s.matAmbient, g_matAmbient, sizeof(s.matAmbient));
+    memcpy(s.matEmissive, g_matEmissive, sizeof(s.matEmissive)); s.matAlpha = g_matAlpha;
+    s.lightCount = g_lightCount; memcpy(s.lightType, g_lightType, sizeof(s.lightType));
+    memcpy(s.lightDiffuse, g_lightDiffuse, sizeof(s.lightDiffuse)); memcpy(s.lightAmbient, g_lightAmbient, sizeof(s.lightAmbient));
+    memcpy(s.lightPos, g_lightPos, sizeof(s.lightPos)); memcpy(s.lightDir, g_lightDir, sizeof(s.lightDir));
+    memcpy(s.lightAtten, g_lightAtten, sizeof(s.lightAtten));
+}
+
+void cbRestore(const CbSaved &s) {
+    if (s.depthTest >= 0) setDepth(s.depthTest == 1, s.depthFunc, s.depthMask == 1);
+    setPolygonOffset(s.poOn ? s.poFactor : 0.0f, s.poOn ? s.poUnits : 0.0f);
+    if (s.blendEnabled >= 0) setBlend(s.blendEnabled == 1, s.blendSrc, s.blendDst, s.blendEq ? s.blendEq : GL_FUNC_ADD);
+    g_cullWanted = s.cullWanted; g_frontFace = s.frontFace;
+    RanGLR_SetSampler(s.samp[0], s.samp[1], s.samp[2], s.samp[3], s.samp[4], s.samp[5]);
+    g_colorOp = s.stage[0]; g_colorArg1 = s.stage[1]; g_colorArg2 = s.stage[2];
+    g_alphaOp = s.stage[3]; g_alphaArg1 = s.stage[4]; g_alphaArg2 = s.stage[5];
+    memcpy(g_texFactor, s.texFactor, sizeof(s.texFactor));
+    g_fogMode = s.fogMode; memcpy(g_fogColor, s.fogColor, sizeof(s.fogColor));
+    g_fogStart = s.fogStart; g_fogEnd = s.fogEnd; g_fogDensity = s.fogDensity;
+    memcpy(g_cameraPos, s.cameraPos, sizeof(s.cameraPos));
+    memcpy(g_globalAmbient, s.globalAmbient, sizeof(s.globalAmbient));
+    g_lightingOn = s.lightingOn; g_dsATest = s.dsATest; g_dsARef = s.dsARef; g_dsZ = s.dsZ; g_dsZW = s.dsZW;
+    g_dsBlend = s.dsBlend; g_gammaOn = s.gammaOn;
+    g_palSlotsRaw = s.palSlotsRaw; g_vertexBlend = s.vertexBlend; g_specularOn = s.specularOn;
+    g_stage1Mode = s.stage1Mode; g_texGen0 = s.texGen0;
+    memcpy(g_viewProj, s.viewProj, sizeof(s.viewProj)); memcpy(g_world, s.world, sizeof(s.world));
+    memcpy(g_worldM, s.worldM, sizeof(s.worldM));
+    memcpy(g_matDiffuse, s.matDiffuse, sizeof(s.matDiffuse)); memcpy(g_matAmbient, s.matAmbient, sizeof(s.matAmbient));
+    memcpy(g_matEmissive, s.matEmissive, sizeof(s.matEmissive)); g_matAlpha = s.matAlpha;
+    g_lightCount = s.lightCount; memcpy(g_lightType, s.lightType, sizeof(s.lightType));
+    memcpy(g_lightDiffuse, s.lightDiffuse, sizeof(s.lightDiffuse)); memcpy(g_lightAmbient, s.lightAmbient, sizeof(s.lightAmbient));
+    memcpy(g_lightPos, s.lightPos, sizeof(s.lightPos)); memcpy(g_lightDir, s.lightDir, sizeof(s.lightDir));
+    memcpy(g_lightAtten, s.lightAtten, sizeof(s.lightAtten));
+}
+
+//  The group's shared state, as the draws were recorded.
+void cbApplyKey(const CbKey &k) {
+    setDepth(k.depthTest == 1, k.depthFunc, k.depthMask == 1);
+    setPolygonOffset(k.poOn ? k.poFactor : 0.0f, k.poOn ? k.poUnits : 0.0f);
+    setBlend(false, GL_ONE, GL_ZERO);
+    g_cullWanted = k.cullWanted != 0; g_frontFace = k.frontFace;
+    RanGLR_SetSampler(k.samp[0], k.samp[1], k.samp[2], k.samp[3], k.samp[4], k.samp[5]);
+    g_colorOp = k.stage[0]; g_colorArg1 = k.stage[1]; g_colorArg2 = k.stage[2];
+    g_alphaOp = k.stage[3]; g_alphaArg1 = k.stage[4]; g_alphaArg2 = k.stage[5];
+    memcpy(g_texFactor, k.texFactor, sizeof(k.texFactor));
+    g_fogMode = k.fogMode; memcpy(g_fogColor, k.fogColor, sizeof(k.fogColor));
+    g_fogStart = k.fogStart; g_fogEnd = k.fogEnd; g_fogDensity = k.fogDensity;
+    memcpy(g_cameraPos, k.cameraPos, sizeof(k.cameraPos));
+    memcpy(g_globalAmbient, k.globalAmbient, sizeof(k.globalAmbient));
+    g_lightingOn = k.lightingOn; g_dsATest = k.dsATest; g_dsARef = k.dsARef; g_dsZ = k.dsZ; g_dsZW = k.dsZW;
+    g_dsBlend = 0; g_gammaOn = k.gammaOn;
+    g_palSlotsRaw = k.palSlots; g_vertexBlend = k.vertexBlend;
+    g_specularOn = 0; g_stage1Mode = 0; g_texGen0 = 0;
+    memcpy(g_viewProj, k.viewProj, sizeof(k.viewProj));
+}
+
+//  One instance's own values back into the globals, for a draw made the old way.
+void cbApplyInstance(const CbItem &it) {
+    const float *r = &g_cbRaw[it.inst];
+    const int P = it.key.palSlots;
+    memcpy(g_worldM, r, sizeof(float) * 16 * P); r += 16 * P;
+    memcpy(g_world, r, sizeof(float) * 16); r += 16;
+    memcpy(g_matDiffuse, r, sizeof(float) * 3); r += 3;
+    g_matAlpha = *r++;
+    memcpy(g_matAmbient, r, sizeof(float) * 3); r += 3;
+    memcpy(g_matEmissive, r, sizeof(float) * 3); r += 3;
+    g_lightCount = it.lights;
+    for (int i = 0; i < it.lights; ++i) {
+        g_lightType[i] = (int)(r[0] + 0.5f);
+        memcpy(g_lightDiffuse + i * 3, r + 1, sizeof(float) * 3);
+        memcpy(g_lightAmbient + i * 3, r + 4, sizeof(float) * 3);
+        memcpy(g_lightPos + i * 4, r + 7, sizeof(float) * 4);
+        memcpy(g_lightDir + i * 3, r + 11, sizeof(float) * 3);
+        memcpy(g_lightAtten + i * 3, r + 14, sizeof(float) * 3);
+        r += 17;
+    }
+}
+
+//  An affine matrix as three texels: (row.xyz, translation component).
+inline void cbPackMatrix(float *t, const float *m) {
+    t[0] = m[0]; t[1] = m[1]; t[2]  = m[2];  t[3]  = m[12];
+    t[4] = m[4]; t[5] = m[5]; t[6]  = m[6];  t[7]  = m[13];
+    t[8] = m[8]; t[9] = m[9]; t[10] = m[10]; t[11] = m[14];
+}
+
+void cbDrawItemOldWay(const CbItem &it) {
+    cbApplyKey(it.key);
+    cbApplyInstance(it);
+    g_cbInstCount = 0;
+    const CbKey &k = it.key;
+    drawInternal(k.primType, k.primCount, NULL, k.stride, k.fvf, k.glTexture, NULL, NULL,
+                 k.indexBits, k.icount, k.vcount, k.glVB, k.vbOff, k.glIB, k.ibOff);
+}
+}   //  namespace
+
+static void cbFlush() {
+    if (g_cbItems.empty()) return;
+    ++g_cbFlushes;
+    static CbSaved s_saved;
+    cbSave(s_saved);
+    g_cbReplaying = true;
+
+    //  Groups in the order their first draw arrived.
+    static std::unordered_map<unsigned long long, int> s_first;
+    static std::vector<int> s_next, s_head, s_count, s_maxLights;
+    s_first.clear(); s_head.clear(); s_count.clear(); s_maxLights.clear();
+    s_next.assign(g_cbItems.size(), -1);
+    static std::vector<int> s_tail;
+    s_tail.clear();
+    for (int i = 0; i < (int)g_cbItems.size(); ++i) {
+        const CbItem &it = g_cbItems[i];
+        int g = -1;
+        std::unordered_map<unsigned long long, int>::iterator f = s_first.find(it.hash);
+        if (f != s_first.end() && memcmp(&g_cbItems[s_head[f->second]].key, &it.key, sizeof(CbKey)) == 0)
+            g = f->second;
+        if (g < 0) {
+            g = (int)s_head.size();
+            s_head.push_back(i); s_tail.push_back(i); s_count.push_back(1); s_maxLights.push_back(it.lights);
+            if (f == s_first.end()) s_first[it.hash] = g;   //  a colliding key just stays unmerged
+        } else {
+            s_next[s_tail[g]] = i; s_tail[g] = i; ++s_count[g];
+            if (it.lights > s_maxLights[g]) s_maxLights[g] = it.lights;
+        }
+    }
+    g_cbGroups += (unsigned long)s_head.size();
+
+    //  This frame's texture, and where this flush starts in it (a whole row, so
+    //  the upload is whole rows).
+    const unsigned frame = RanGL_FrameIndex();
+    if (frame != g_cbTexFrame) { g_cbTexFrame = frame; g_cbTexSlot = (g_cbTexSlot + 1) % 3; g_cbCursor = 0; }
+    if (!g_cbTex[g_cbTexSlot]) {
+        GLuint t = 0;
+        glGenTextures(1, &t);
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, t);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, kCbTexW, kCbTexH, 0, GL_RGBA, GL_FLOAT, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glActiveTexture(GL_TEXTURE0);
+        g_cbTex[g_cbTexSlot] = t;
+    }
+    const int rowStart = (g_cbCursor + kCbTexW - 1) / kCbTexW;
+    int cursor = rowStart * kCbTexW;
+
+    //  Lay every group out; a group that does not fit any more goes the old way.
+    static std::vector<int> s_base, s_stride;
+    s_base.assign(s_head.size(), -1); s_stride.assign(s_head.size(), 0);
+    for (size_t g = 0; g < s_head.size(); ++g) {
+        if (s_count[g] < 2) continue;      //  alone: nothing to share
+        const int P = g_cbItems[s_head[g]].key.palSlots;
+        const int stride = 3 * P + 7 + 5 * s_maxLights[g];
+        if (cursor + stride * s_count[g] > kCbTexW * kCbTexH) continue;
+        s_base[g] = cursor; s_stride[g] = stride;
+        cursor += stride * s_count[g];
+    }
+    const int rowEnd = (cursor + kCbTexW - 1) / kCbTexW;
+    if (rowEnd > rowStart) {
+        static std::vector<float> s_tex;
+        s_tex.assign((size_t)(rowEnd - rowStart) * kCbTexW * 4, 0.0f);
+        for (size_t g = 0; g < s_head.size(); ++g) {
+            if (s_base[g] < 0) continue;
+            const int P = g_cbItems[s_head[g]].key.palSlots;
+            int n = 0;
+            for (int i = s_head[g]; i >= 0; i = s_next[i], ++n) {
+                const CbItem &it = g_cbItems[i];
+                float *t = &s_tex[((size_t)(s_base[g] - rowStart * kCbTexW) + (size_t)n * s_stride[g]) * 4];
+                const float *r = &g_cbRaw[it.inst];
+                for (int p = 0; p < P; ++p) cbPackMatrix(t + p * 12, r + p * 16);
+                t += P * 12; r += P * 16;
+                cbPackMatrix(t, r); t += 12; r += 16;           //  world
+                t[0] = r[0]; t[1] = r[1]; t[2] = r[2]; t[3] = r[3];       //  diffuse, alpha
+                t[4] = r[4]; t[5] = r[5]; t[6] = r[6];                    //  ambient
+                t[8] = r[7]; t[9] = r[8]; t[10] = r[9];                   //  emissive
+                t[12] = (float)it.lights;                                 //  header
+                t += 16; r += 10;
+                for (int l = 0; l < it.lights; ++l, r += 17, t += 20) {
+                    t[0]  = r[0];  t[1]  = r[1];  t[2]  = r[2];  t[3]  = r[3];    //  type, diffuse
+                    t[4]  = r[4];  t[5]  = r[5];  t[6]  = r[6];  t[7]  = r[14];   //  ambient, atten.x
+                    t[8]  = r[7];  t[9]  = r[8];  t[10] = r[9];  t[11] = r[10];   //  position
+                    t[12] = r[11]; t[13] = r[12]; t[14] = r[13]; t[15] = r[15];   //  direction, atten.y
+                    t[16] = r[16];                                                //  atten.z
+                }
+            }
+        }
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, g_cbTex[g_cbTexSlot]);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, rowStart, kCbTexW, rowEnd - rowStart, GL_RGBA, GL_FLOAT, &s_tex[0]);
+        glActiveTexture(GL_TEXTURE0);
+        g_cbCursor = rowEnd * kCbTexW;
+    }
+
+    for (size_t g = 0; g < s_head.size(); ++g) {
+        const CbItem &first = g_cbItems[s_head[g]];
+        if (s_base[g] < 0) {
+            for (int i = s_head[g]; i >= 0; i = s_next[i]) cbDrawItemOldWay(g_cbItems[i]);
+            continue;
+        }
+        cbApplyKey(first.key);
+        cbApplyInstance(first);
+        g_cbInstCount = s_count[g];
+        g_cbInstBase = s_base[g];
+        g_cbInstStride = s_stride[g];
+        g_cbInstPal = first.key.palSlots;
+        g_cbInstFailed = false;
+        const CbKey &k = first.key;
+        drawInternal(k.primType, k.primCount, NULL, k.stride, k.fvf, k.glTexture, NULL, NULL,
+                     k.indexBits, k.icount, k.vcount, k.glVB, k.vbOff, k.glIB, k.ibOff);
+        if (g_cbInstFailed) {
+            static bool s_said = false;
+            if (!s_said) { s_said = true; LOGE("charbatch: instanced variant unavailable, drawing pieces one by one"); }
+            for (int i = s_head[g]; i >= 0; i = s_next[i]) cbDrawItemOldWay(g_cbItems[i]);
+        }
+    }
+    g_cbInstCount = 0;
+    g_cbReplaying = false;
+    g_cbItems.clear();
+    g_cbRaw.clear();
+    cbRestore(s_saved);
+}
+
+//  The client's scope: its character loops. Nested scopes count; the last end
+//  sends what is recorded.
+extern "C" void RanGLR_CharBatchBegin(void) {
+    if (!g_inited) return;
+    ++g_cbDepth;
+}
+extern "C" void RanGLR_CharBatchEnd(void) {
+    if (g_cbDepth <= 0) return;
+    if (--g_cbDepth == 0 && !g_cbItems.empty()) cbFlush();
 }
 
 //  Buffer objects for the client's vertex and index buffers.
@@ -6166,6 +6674,11 @@ extern "C" void RanGLR_LogStats(void) {
     LOGI("ES3.0 base-only layouts per 300 frames: %lu", g_baseOnlyHits);
     logPasses();
     logDrawGroups();
+    if (g_cbRecorded || g_cbWanted) {
+        LOGI("charbatch per 300 frames: %lu piece draws recorded, sent as %lu draws in %lu flushes",
+             g_cbRecorded, g_cbGroups, g_cbFlushes);
+        g_cbRecorded = g_cbGroups = g_cbFlushes = 0;
+    }
     if (g_clearLog) {
         for (std::map<std::string, unsigned long>::iterator it = g_clearKinds.begin(); it != g_clearKinds.end(); ++it)
             if (it->second) { LOGI("clearlog per 300 frames: %6lu  %s", it->second, it->first.c_str()); it->second = 0; }
