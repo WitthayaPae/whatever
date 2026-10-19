@@ -73,7 +73,7 @@ the patch ships a needless APK bump).
 
 ---
 
-## 2026-10-20 — Six HUD/menu fixes for the user to test on LDPlayer (NOT patched, NOT tested by me in world)
+## 2026-10-20 — Six HUD/menu fixes, user-tested on LDPlayer: "it's all work" (NOT patched yet)
 
 User: "do it but did not patch yet just install in ldPlayer so I can test it". SOURCE 3a572b8.
 
