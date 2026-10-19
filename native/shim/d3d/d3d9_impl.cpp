@@ -2538,6 +2538,7 @@ public:
         UINT base = baseSrc;
         const unsigned glVB = vb->GlBufferFor(base, &base);
         if (glVB) {
+            RanGLR_NoteDrawDynamic((vb->m_usage & D3DUSAGE_DYNAMIC) ? 1 : 0);
             RanGLR_DrawVBO(Type, PrimitiveCount, glVB, base, m_stream0Stride,
                            m_fvf ? m_fvf : vb->m_fvf, boundGlTexture(), mvp,
                            0, 0, 0, 0, 0);
@@ -2583,6 +2584,7 @@ public:
                 RanGLR_DiagVerts(vb->m_data.data() + vbSrc);
                 RanGLR_DiagIndices(ib->m_data.data() + ibBase, idxBits);
             }
+            RanGLR_NoteDrawDynamic(((vb->m_usage | ib->m_usage) & D3DUSAGE_DYNAMIC) ? 1 : 0);
             RanGLR_DrawVBO(Type, PrimitiveCount, glVB, vbBase, m_stream0Stride,
                            m_fvf ? m_fvf : vb->m_fvf, boundGlTexture(), mvp,
                            glIB, ibBase, idxBits, idxCount, MinVertexIndex + NumVertices);
