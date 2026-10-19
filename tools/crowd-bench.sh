@@ -63,8 +63,12 @@ setflag loadtest "$N"
 setflag loadfx 10
 sleep 20
 record "$SECS"
-setflag loadtest 0
 clearflag loadfx
+setflag loadtest 0
+#  The game reads loadtest once a second and only the last value counts: a
+#  following run that writes 500 within that second spawns 500 more on top of
+#  the first (1,000 fakes ran LDPlayer out of memory on 2026-10-20).
+sleep 3
 
 #  FRAME 28.4 fps | 35.2 ms = update 4.1 + render 30.0 + present 1.1 [of render: swap .., submit .., engine cpu ..]
 #  FRAME draws: 3100 per frame, 6 us each
