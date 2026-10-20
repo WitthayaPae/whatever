@@ -6,10 +6,15 @@
 //
 //   node drop-delta.js <CLIENT/data dir> <report dir> <work dir> [--write] [--nosplit]
 //                      [--only=lv02.genitem,lv05.genitem,...] [--set-stone=0.75]
+//                      [--match-resist]
 //
 // --only: change just these tables. --set-stone: instead of the deltas, set the
 // stone drop of each table to this many per 100 kills and leave weapon and armor
 // alone (user, 2026-10-20: "for mob level 1-39 make the stone drop ~0.7 - 0.8").
+// --match-resist: set the resistance stones (spec 196: Iron, Silver, Crystal,
+// Bone Powder, Sodium and their Special forms) of each table to what its upgrade
+// stones (spec 191) give, adding the line where a table has none (user,
+// 2026-10-20: "they should have similar to the upgrade stone").
 //
 // Same tables, same server maths and same checks as drop-field-even.js (which
 // this is copied from): field table = lv*, osaka*, Infinitystairs*, gmd_* used by
@@ -38,9 +43,11 @@ const ONLY = onlyArg ? new Set(onlyArg.slice(7).split(',').map((x) => x.trim().t
 const stoneArg = argv0.find((a) => a.startsWith('--set-stone='));
 const SET_STONE = stoneArg ? parseFloat(stoneArg.slice(12)) : null;
 if (stoneArg && !(SET_STONE >= 0)) throw new Error('--set-stone needs a number');
-const SET = SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
+const MATCH_RESIST = argv0.includes('--match-resist');
+const SET = MATCH_RESIST ? { Resist: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
 const DELTA = { Weapon: 0.4, Armor: 0.4, Stone: 0.2 };
-const CATS = ['Weapon', 'Armor', 'Acc', 'Stone', 'Potion', 'Book'];
+const CATS = ['Weapon', 'Armor', 'Acc', 'Stone', 'Resist', 'Potion', 'Book'];
+const RESIST_SPEC = 196;
 const POTION_FLOOR = 52.49;
 const STONE_SPEC = 191, MAX_LINES = 30, FULL = 99.99;
 
@@ -101,6 +108,7 @@ for (const r of readCsv(path.join(repDir, 'spec_groups.csv'))) {
   const id = +r['spec id'];
   specInfo.set(id, { items: +r.items, max: +r['req level max'] });
   if (id === STONE_SPEC) { specCat.set(id, 'Stone'); continue; }
+  if (id === RESIST_SPEC) { specCat.set(id, 'Resist'); continue; }
   const cs = new Set(r.types.split(' | ').map(typeCat));
   const c = cs.size === 1 ? [...cs][0] : 'Mixed';
   specCat.set(id, c === 'Head' ? 'Other' : c);
@@ -220,7 +228,12 @@ function build(t, gen, want, before, note) {
   }
   for (const c of Object.keys(SET)) {
     let mine = L.filter((l) => l.cat === c);
-    // a table the game made without this kind of drop keeps it that way
+    // resistance stones are added where a table has none; anything else a table
+    // the game made without keeps it that way
+    if (!mine.length && c === 'Resist' && want[c] > 0) {
+      const nl = { i: -1, id: RESIST_SPEC, pct: 1, cat: 'Resist', dead: false, from: 'added resist stones' };
+      L.push(nl); mine = [nl]; note.add('Resist line added');
+    }
     if (!mine.length) { note.add('no ' + c + ' line'); continue; }
     if (gen === t.gen && Math.abs(want[c] - before[c]) < 1e-9) continue;
     // what the mixed groups already give of this category counts toward the target
@@ -251,7 +264,7 @@ for (const t of T) {
   if (!(t.rolls > 0) || !(t.gen > 0)) { skipped.push([t.name, t.level, 'never fires']); continue; }
   const before = perCat(t, t.spec, t.gen);
   const want = {}, base = {};
-  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
+  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = MATCH_RESIST ? before.Stone : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
   const note = new Set();
 
   let gen = t.gen, L = build(t, gen, want, before, note);
@@ -313,7 +326,7 @@ for (const t of T) {
     if (Math.abs(d) > 0.02) { if (!NOSPLIT) throw new Error(`${t.name}: ${c} ${after[c]} not ${want[c]}`); off.push(`${c} off by ${d.toFixed(2)}`); }
   }
   for (const o of off) note.add(o);
-  if (SET_STONE === null) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
+  if (SET_STONE === null && !MATCH_RESIST) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
   const out = encode(lines.join(t.eol) + t.eol);
   if (plain(out).toString('latin1').replace(/ +$/, '') !== lines.join(t.eol) + t.eol) throw new Error('round trip failed: ' + t.name);
   const file = path.join(workDir, 'files', t.name);

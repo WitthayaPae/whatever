@@ -96,6 +96,13 @@ the patch ships a needless APK bump).
   (Iron, Silver, Crystal, Bone Powder, Sodium and Special versions: production materials typed as
   grinding). Real upgrade stones are spec 191 only (Rust Scrub Brush, Polish, Red Gem, Fine Polish).
   Earlier "stone" figures of 1.49-1.60 on some tables included those materials.
+- **Step 3 (same day):** spec 196 is not materials - same item type as the upgrade stones; most
+  likely the elemental resistance stones (not yet read per item). Iron, Silver, Crystal, Bone Powder,
+  Sodium + Special forms. User: "they should have similar to the upgrade stone" -> each of the 101
+  field tables now gives spec 196 exactly what it gives spec 191 (`drop-delta.js --match-resist`;
+  7 tables got the line added, 75 split under 2%; lv160S and the gmd/Infinitystairs tables went DOWN
+  to match). Only the grinding column moved (+ lv14 potion -0.01). Step 2 file kept as
+  `backups/drop_minus_20261020/GLogicServer.rcc.step2_stone39`.
 
 ## 2026-10-20 — Pick-up hand button, name balloons, nearby-players list (on LDPlayer for the user's test; NOT patched)
 
