@@ -71,6 +71,19 @@ const char *kVS =
     "uniform int  uPreTransformed;\n"
     "#endif\n"
     "uniform mat4 uWorldM[16];\n"
+    //  Merged characters (RanGLR_SetBoneBase, "charmerge"): every bone of every
+    //  merged character this frame is in one float texture, four texels a
+    //  matrix and 1024 texels a row, posed at the origin. A vertex's palette
+    //  slots count from uBoneBase, and uWorld places the character. -1 is the
+    //  ordinary sixteen-matrix palette above.
+    "uniform highp int uBoneBase;\n"
+    "uniform highp sampler2D uBoneTex;\n"
+    "mat4 boneMat(int i) {\n"
+    "    int t = (uBoneBase + i) * 4;\n"
+    "    ivec2 c = ivec2(t % 1024, t / 1024);\n"
+    "    return mat4(texelFetch(uBoneTex, c, 0), texelFetch(uBoneTex, c + ivec2(1, 0), 0),\n"
+    "                texelFetch(uBoneTex, c + ivec2(2, 0), 0), texelFetch(uBoneTex, c + ivec2(3, 0), 0));\n"
+    "}\n"
     "uniform mat4 uViewProj;\n"
     "#ifndef uVertexBlend\n"
     "uniform int  uVertexBlend;\n"
@@ -145,14 +158,21 @@ const char *kVS =
     "        ivec4 bi = ivec4(aBoneIdx + 0.5);\n"
     "        vec4 p4 = vec4(aPos.xyz, 1.0);\n"
     "        vec4 n4 = vec4(aNormal, 0.0);\n"
-    "        vec3 pos = aBlend.x * (uWorldM[bi.x] * p4).xyz\n"
-    "                 + aBlend.y * (uWorldM[bi.y] * p4).xyz\n"
-    "                 + aBlend.z * (uWorldM[bi.z] * p4).xyz\n"
-    "                 +      w3  * (uWorldM[bi.w] * p4).xyz;\n"
-    "        vec3 nrm = aBlend.x * (uWorldM[bi.x] * n4).xyz\n"
-    "                 + aBlend.y * (uWorldM[bi.y] * n4).xyz\n"
-    "                 + aBlend.z * (uWorldM[bi.z] * n4).xyz\n"
-    "                 +      w3  * (uWorldM[bi.w] * n4).xyz;\n"
+    "        mat4 m0, m1, m2, m3;\n"
+    "        if (uBoneBase >= 0) {\n"
+    "            m0 = boneMat(bi.x); m1 = boneMat(bi.y); m2 = boneMat(bi.z); m3 = boneMat(bi.w);\n"
+    "        } else {\n"
+    "            m0 = uWorldM[bi.x]; m1 = uWorldM[bi.y]; m2 = uWorldM[bi.z]; m3 = uWorldM[bi.w];\n"
+    "        }\n"
+    "        vec3 pos = aBlend.x * (m0 * p4).xyz\n"
+    "                 + aBlend.y * (m1 * p4).xyz\n"
+    "                 + aBlend.z * (m2 * p4).xyz\n"
+    "                 +      w3  * (m3 * p4).xyz;\n"
+    "        vec3 nrm = aBlend.x * (m0 * n4).xyz\n"
+    "                 + aBlend.y * (m1 * n4).xyz\n"
+    "                 + aBlend.z * (m2 * n4).xyz\n"
+    "                 +      w3  * (m3 * n4).xyz;\n"
+    "        if (uBoneBase >= 0) pos = (uWorld * vec4(pos, 1.0)).xyz;\n"
     "        gl_Position = uViewProj * vec4(pos, 1.0);\n"
     "        vWorldPos = pos;\n"
     "        vNormal = mat3(uWorld) * nrm;\n"
@@ -750,6 +770,17 @@ float  g_texMat0[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
 unsigned g_stage1Cube = 0;
 float  g_viewMatrix[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
 GLint  uFlipY = -1, uWorldM = -1, uViewProj = -1, uVertexBlend = -1, uIndexedBlend = -1;
+//  Merged characters: see uBoneBase in the vertex shader. g_boneBase is the
+//  draw's offset into the bone texture, -1 when it draws with the palette.
+GLint  uBoneBase = -1, uBoneTex = -1;
+int    g_boneBase = -1;
+//  Three textures in turn, so a frame's upload never writes one the GPU may
+//  still be reading for the frame before.
+GLuint g_boneTex[3] = { 0, 0, 0 };
+int    g_boneTexRows[3] = { 0, 0, 0 };
+int    g_boneTexCur = 0;
+std::vector<float> g_boneStage;
+unsigned long g_boneMats = 0, g_boneUploads = 0;
 GLint  uTexStage1 = -1;
 GLint  uPanelH = -1;
 GLint  uUiOrigin = -1;
@@ -1575,6 +1606,8 @@ void fetchUniformLocations(GLuint prog) {
     uViewProj       = glGetUniformLocation(prog, "uViewProj");
     uVertexBlend    = glGetUniformLocation(prog, "uVertexBlend");
     uIndexedBlend   = glGetUniformLocation(prog, "uIndexedBlend");
+    uBoneBase       = glGetUniformLocation(prog, "uBoneBase");
+    uBoneTex        = glGetUniformLocation(prog, "uBoneTex");
     uTex            = glGetUniformLocation(prog, "uTex");
     uUseTexture     = glGetUniformLocation(prog, "uUseTexture");
     uAlphaTest      = glGetUniformLocation(prog, "uAlphaTest");
@@ -1609,6 +1642,8 @@ void fetchUniformLocations(GLuint prog) {
     glUseProgram(prog);
     glUniform1i(uTexCube, 1);
     if (uTexStage1 >= 0) glUniform1i(uTexStage1, 2);
+    //  The bone texture of the merged characters lives on unit 4.
+    if (uBoneTex >= 0) glUniform1i(uBoneTex, 4);
 
     uWorld          = glGetUniformLocation(prog, "uWorld");
     uCameraPos      = glGetUniformLocation(prog, "uCameraPos");
@@ -1651,7 +1686,7 @@ namespace {
 //  and out without the rest of the file knowing there is more than one program.
 GLint *const kLocationVars[] = {
     &uMVP, &uViewport, &uPreTransformed, &uFlipY, &uMatAlpha, &uWorldM, &uViewProj,
-    &uVertexBlend, &uIndexedBlend, &uTex, &uUseTexture, &uAlphaTest, &uAlphaRef,
+    &uVertexBlend, &uIndexedBlend, &uBoneBase, &uBoneTex, &uTex, &uUseTexture, &uAlphaTest, &uAlphaRef,
     &uColorOp, &uColorArg1, &uColorArg2, &uAlphaOp, &uAlphaArg1, &uAlphaArg2,
     &uTexFactor, &uTexCube, &uStage1, &uTexGen0, &uTexMat0, &uTexSize, &uUiSharpen, &uPanelH, &uUiOrigin, &uTexHD, &uGammaOn, &uPlain, &uFill,
     &uGammaLut, &uSpecularOn, &uMatSpecular, &uMatPower, &uLightSpecular, &uView,
@@ -1828,6 +1863,7 @@ bool buildVariant(unsigned key, Variant &v) {
     useProgram(v.prog);
     if (uTexCube >= 0) glUniform1i(uTexCube, 1);
     if (uTexStage1 >= 0) glUniform1i(uTexStage1, 2);
+    if (uBoneTex >= 0) glUniform1i(uBoneTex, 4);
     return true;
 }
 
@@ -1947,6 +1983,9 @@ extern "C" int RanGLR_Init(void) {
     ++g_vaoGeneration;
     //  Any per-FVF VAOs belonged to the previous context.
     g_fvfVaos.clear();
+    //  So did the merged characters' bone textures.
+    for (int i = 0; i < 3; ++i) { g_boneTex[i] = 0; g_boneTexRows[i] = 0; }
+    g_boneBase = -1;
     glGenBuffers(1, &g_vbo);
     glGenBuffers(1, &g_ibo);
 
@@ -2807,6 +2846,56 @@ extern "C" void RanGLR_SetFog(int enabled, int mode, const float *color,
     g_fogDensity = density;
 }
 
+//  ---- merged characters ("charmerge", DxSkinChar.cpp)
+//
+//  Every merged character's bones for the frame go into one float texture in a
+//  single upload, instead of a sixteen-matrix uniform palette before each of
+//  its draws. Begin, Add per character (returns its offset), Upload once, then
+//  SetBoneBase around each character's draws.
+extern "C" void RanGLR_BonesBegin(void) { g_boneStage.clear(); }
+
+extern "C" int RanGLR_BonesAdd(const float *mats, int count) {
+    if (!mats || count <= 0) return -1;
+    const int base = (int)(g_boneStage.size() / 16);
+    g_boneStage.insert(g_boneStage.end(), mats, mats + (size_t)count * 16);
+    return base;
+}
+
+extern "C" void RanGLR_BonesUpload(void) {
+    if (g_boneStage.empty()) return;
+    const int mats = (int)(g_boneStage.size() / 16);
+    const int rows = (mats * 4 + 1023) / 1024;
+    g_boneStage.resize((size_t)rows * 1024 * 4, 0.0f);
+    g_boneTexCur = (g_boneTexCur + 1) % 3;
+    GLuint &tex = g_boneTex[g_boneTexCur];
+    int &cap = g_boneTexRows[g_boneTexCur];
+    glActiveTexture(GL_TEXTURE4);
+    if (!tex) glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    if (rows > cap) {
+        cap = (rows + 63) / 64 * 64;
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 1024, cap, 0, GL_RGBA, GL_FLOAT, (const void *)0);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, rows, GL_RGBA, GL_FLOAT, g_boneStage.data());
+    glActiveTexture(GL_TEXTURE0);
+    ++g_callsTexture;
+    g_boneMats += (unsigned long)mats;
+    ++g_boneUploads;
+}
+
+extern "C" void RanGLR_SetBoneBase(int base) { g_boneBase = base; }
+
+//  Bone matrices and uploads since the last call, then reset. Measurement only.
+extern "C" void RanGLR_TakeBoneStats(unsigned long *mats, unsigned long *uploads) {
+    if (mats) *mats = g_boneMats;
+    if (uploads) *uploads = g_boneUploads;
+    g_boneMats = g_boneUploads = 0;
+}
+
 //  D3DRS_VERTEXBLEND plus the world matrix palette, as the device last set them.
 extern "C" void RanGLR_SetVertexBlend(int weightCount, const float *worldMatrices16x4,
                                       const float *viewProj16) {
@@ -3054,7 +3143,9 @@ void applyProgramUniforms() {
             if (slots < 1) slots = 1;
             if (slots > 16) slots = 16;
         }
-        if (!g_skipPaletteUni) {
+        //  A merged character reads its bones from the bone texture instead.
+        setUniform1i(uBoneBase, g_boneBase);
+        if (!g_skipPaletteUni && g_boneBase < 0) {
             g_palUploadNow = true;
             setUniformMatrix(uWorldM, g_worldM, slots);
             g_palUploadNow = false;

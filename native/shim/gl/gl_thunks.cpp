@@ -79,6 +79,8 @@ unsigned RanGLT_PixelBytes(GLsizei w, GLsizei h, GLenum format, GLenum type) {
         case GL_UNSIGNED_SHORT_5_6_5:
         case GL_UNSIGNED_SHORT_4_4_4_4:
         case GL_UNSIGNED_SHORT_5_5_5_1: bpp = 2; break;
+        //  The merged characters' bone texture (RanGLR_BonesUpload).
+        case GL_FLOAT: bpp = comps * 4; break;
         default: return 0;
     }
     const unsigned a = (unsigned)(g_unpackAlign > 0 ? g_unpackAlign : 1);
