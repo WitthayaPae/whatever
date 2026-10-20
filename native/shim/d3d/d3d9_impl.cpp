@@ -621,7 +621,11 @@ public:
                 const int w0 = boxHalf ? (int)(s0->m_width > 1 ? s0->m_width / 2 : 1) : (int)s0->m_width;
                 const int h0 = boxHalf ? (int)(s0->m_height > 1 ? s0->m_height / 2 : 1) : (int)s0->m_height;
                 int levels = (int)nLev;
-                const bool makeMips = nLev == 1 || boxHalf;
+                //  A one-level sheet the GPU keeps compressed: its mips cannot be
+                //  made here, and the plain path draws it without mips. A one-level
+                //  array draws it the same way (applyArraySampler: no mip filter).
+                const bool dxtOne = nLev == 1 && !boxHalf && !RanGLR_ArrayCanMakeMips((int)m_format);
+                const bool makeMips = (nLev == 1 || boxHalf) && !dxtOne;
                 if (makeMips) {
                     levels = 1;
                     for (int mw = w0, mh = h0; mw > 1 || mh > 1; ++levels) {

@@ -98,6 +98,14 @@ const char *kVS =
     "flat out int vMergeFlags;\n"
     "flat out highp float vMergeLayer;\n"
     "flat out vec4 vMergeTint;\n"
+    //  uMerge 2: an effect pass over the merged character (DxEffCharLevel's
+    //  specular layer). aUV2.x / 128 is the vertex's draw group, and uMergeMat
+    //  holds two vec4 a group: stage 0 array unit + layer, stage 1 array unit +
+    //  layer (layer < 0: the group takes no part and is clipped away), then the
+    //  group's TFACTOR. A cube on stage 1 (the specular layer) is sampled as
+    //  usual; the stage 1 entry is read only by stage1Tex.
+    "flat out int vMergeUnit2;\n"
+    "flat out highp float vMergeLayer2;\n"
     "#ifndef uVertexBlend\n"
     "uniform int  uVertexBlend;\n"
     "#endif\n"
@@ -245,14 +253,22 @@ const char *kVS =
     "    vec3 mDiff = uMatDiffuse, mAmb = uMatAmbient, mEmi = uMatEmissive, gAmb = uGlobalAmbient;\n"
     "    int mFlags = 0;\n"
     "    vMergeUnit = 0; vMergeFlags = 0; vMergeLayer = 0.0; vMergeTint = vec4(1.0);\n"
+    "    vMergeUnit2 = 0; vMergeLayer2 = 0.0;\n"
     "    if (uMerge == 1) {\n"
     "        int code = int(aUV2.x + 0.5);\n"
     "        int mi = (code & 15) * 4;\n"
     "        mDiff = uMergeMat[mi].rgb; mAmb = uMergeMat[mi + 1].rgb; mEmi = uMergeMat[mi + 2].rgb;\n"
     "        mFlags = int(uMergeMat[mi + 1].a + 0.5);\n"
     "        if ((mFlags & 8) != 0) gAmb = uMergeMat[mi + 3].rgb;\n"
-    "        vMergeUnit = code >> 4; vMergeFlags = mFlags; vMergeLayer = aUV2.y;\n"
+    "        vMergeUnit = (code >> 4) & 7; vMergeFlags = mFlags; vMergeLayer = aUV2.y;\n"
     "        vMergeTint = vec4(uMergeMat[mi + 3].rgb, uMergeMat[mi].a);\n"
+    "    } else if (uMerge == 2) {\n"
+    "        int g = (int(aUV2.x + 0.5) >> 7) * 2;\n"
+    "        vec4 e0 = uMergeMat[g];\n"
+    "        vMergeUnit = int(e0.x + 0.5); vMergeLayer = e0.y;\n"
+    "        vMergeUnit2 = int(e0.z + 0.5); vMergeLayer2 = e0.w;\n"
+    "        vMergeTint = uMergeMat[g + 1];\n"
+    "        if (e0.y < 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
     "    }\n"
     "    if (uLighting == 1) {\n"
     "        vec3 n = normalize(vNormal);\n"
@@ -357,6 +373,8 @@ const char *kFS =
     "flat in int vMergeFlags;\n"
     "flat in highp float vMergeLayer;\n"
     "flat in vec4 vMergeTint;\n"
+    "flat in int vMergeUnit2;\n"
+    "flat in highp float vMergeLayer2;\n"
     "#ifndef uUseTexture\n"
     "uniform int   uUseTexture;\n"
     "#endif\n"
@@ -412,18 +430,22 @@ const char *kFS =
     "\n"
     //  The vertex's own array: explicit gradients, so the choice of sampler
     //  inside a branch does not change the mip the hardware would pick.
-    "vec4 mergeTex(highp vec2 uv) {\n"
+    "vec4 mergeTexAt(int unit, highp float layer, highp vec2 uv) {\n"
     "    highp vec2 gx = dFdx(uv), gy = dFdy(uv);\n"
-    "    highp vec3 c = vec3(uv, vMergeLayer);\n"
-    "    if (vMergeUnit == 0) return textureGrad(uMergeArr0, c, gx, gy);\n"
-    "    if (vMergeUnit == 1) return textureGrad(uMergeArr1, c, gx, gy);\n"
-    "    if (vMergeUnit == 2) return textureGrad(uMergeArr2, c, gx, gy);\n"
-    "    if (vMergeUnit == 3) return textureGrad(uMergeArr3, c, gx, gy);\n"
-    "    if (vMergeUnit == 4) return textureGrad(uMergeArr4, c, gx, gy);\n"
+    "    highp vec3 c = vec3(uv, layer);\n"
+    "    if (unit == 0) return textureGrad(uMergeArr0, c, gx, gy);\n"
+    "    if (unit == 1) return textureGrad(uMergeArr1, c, gx, gy);\n"
+    "    if (unit == 2) return textureGrad(uMergeArr2, c, gx, gy);\n"
+    "    if (unit == 3) return textureGrad(uMergeArr3, c, gx, gy);\n"
+    "    if (unit == 4) return textureGrad(uMergeArr4, c, gx, gy);\n"
     "    return textureGrad(uMergeArr5, c, gx, gy);\n"
     "}\n"
+    "vec4 mergeTex(highp vec2 uv) { return mergeTexAt(vMergeUnit, vMergeLayer, uv); }\n"
+    //  The TFACTOR a draw reads: per group in an effect pass, else the state's.
+    "vec4 texFactor() { return uMerge == 2 ? vMergeTint : uTexFactor; }\n"
     "\n"
     "vec4 stage1Tex(RAN_UVP vec2 c) {\n"
+    "    if (uMerge == 2) return mergeTexAt(vMergeUnit2, vMergeLayer2, c);\n"
     "    return uTexStage1Layer >= 0.0 ? texture(uTexStage1Arr, vec3(c, uTexStage1Layer)) : texture(uTexStage1, c);\n"
     "}\n"
     "\n"
@@ -431,7 +453,7 @@ const char *kFS =
     "    int sel = arg & 7;\n"          // low bits pick the source
     "    vec4 v = diffuse;\n"                      // 0 DIFFUSE, and CURRENT at stage 0
     "    if      (sel == 2) v = tex;\n"            // D3DTA_TEXTURE
-    "    else if (sel == 3) v = uTexFactor;\n"     // D3DTA_TFACTOR
+    "    else if (sel == 3) v = texFactor();\n"     // D3DTA_TFACTOR
     //  D3DTA_SPECULAR: the vertex specular the lighting produced - zero when
     //  D3DRS_SPECULARENABLE is off, as in D3D. DxEffCharReflection2 selects it
     //  as its colour; read as DIFFUSE it was the lit white material, drawn
@@ -536,7 +558,7 @@ const char *kFS =
     "    }\n"
     "    vec4 tex = (uUseTexture == 1) ? (uTexLayer >= 0.0 ? texture(uTexArr, vec3(uvS, uTexLayer))\n"
     "                                                    : texture(uTex, uvS)) : vec4(1.0);\n"
-    "    if (uMerge == 1) tex = mergeTex(vUV);\n"
+    "    if (uMerge != 0) tex = mergeTex(vUV);\n"
     "    if (uFill == 1) { oColor = vec4(1.0 / 255.0, 0.0, 0.0, 0.0); return; }\n"
     "    if (uPlain == 1) { oColor = tex * vColor; return; }\n"
     "    //  With lighting on, the pipeline's diffuse alpha is the material's;\n"
@@ -591,12 +613,12 @@ const char *kFS =
     "    } else if (uStage1 == 9) {\n"
     //  MODULATE2X(TEXTURE, TFACTOR) on stage 1, set 0: replaces the colour
     //  (DxEffCharLevel ambient glow). TFACTOR, not DIFFUSE: no lighting.
-    "        rgb = clamp(2.0 * stage1Tex(vUV).rgb * uTexFactor.rgb, 0.0, 1.0);\n"
+    "        rgb = clamp(2.0 * stage1Tex(vUV).rgb * texFactor().rgb, 0.0, 1.0);\n"
     "    } else if (uStage1 == 2) {\n"
     "        //  MODULATE(TFACTOR, CURRENT): a flat tint over the stage 0 result,\n"
     "        //  with no texture on the stage at all. This is how the ambient\n"
     "        //  character effect colours a piece.\n"
-    "        rgb *= uTexFactor.rgb;\n"
+    "        rgb *= texFactor().rgb;\n"
     "    }\n"
     "\n"
     "    vec4 b1 = argValue(uAlphaArg1, tex, diffuse);\n"
@@ -849,7 +871,7 @@ GLint  uBoneBase = -1, uBoneTex = -1;
 GLint  uTexLayer = -1, uTexArr = -1, uTexStage1Layer = -1, uTexStage1Arr = -1;
 GLint  uMerge = -1, uMergeMat = -1, uMergeL0 = -1, uMergeArr[6] = { -1, -1, -1, -1, -1, -1 };
 //  The merged character being drawn, if any (RanGLR_SetMerge).
-int    g_merge = 0, g_mergeMats = 0, g_mergeArrN = 0;
+int    g_merge = 0, g_mergeMats = 0, g_mergeArrN = 0;   //  g_mergeMats: vec4 count / 4
 float  g_mergeMat[64 * 4];
 float  g_mergeL0[9];
 GLuint g_mergeArr[6];
@@ -6126,7 +6148,9 @@ extern "C" void RanGLR_SetMerge(int nMats, const float *mats, int nArr, const un
     if (nMats <= 0 || !mats) { g_merge = 0; return; }
     if (nMats > 16) nMats = 16;
     if (nArr > 6) nArr = 6;
-    g_merge = 1;
+    //  directLight9 NULL: an effect pass (uMerge 2), mats being the group
+    //  table - two vec4 a group, so nMats here is groups / 2.
+    g_merge = directLight9 ? 1 : 2;
     g_mergeMats = nMats;
     memcpy(g_mergeMat, mats, sizeof(float) * 16 * (size_t)nMats);
     g_mergeArrN = nArr;
