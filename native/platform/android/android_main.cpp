@@ -1037,6 +1037,97 @@ extern "C" void RanPlat_PumpEvents(void) {
     g_pumpBlocking = false;
 }
 
+//  Touches during the boot, answered on a thread of their own (2026-10-21).
+//
+//  RanApp_Boot loads for 10-30 s on the thread that owns the input queue, and
+//  the ran_fopen pump only runs when a file is opened. Long stretches open
+//  nothing - decoding GLogic in memory, walking a zip's entries, FindNextFile
+//  over a directory - and a tap in one of them went unanswered for 8 s:
+//  "Input dispatching timed out ... Waited 8001ms for MotionEvent", the
+//  "not responding" dialog, and the player closing the game. That was 37 of
+//  the 80 player crash reports of 2026-10-19/20.
+//
+//  So for the boot the queue moves to this thread's looper, which finishes
+//  every event as handled - what the pump does anyway (onInputEvent swallows
+//  everything while the loop is blocked; nothing is listening yet). After the
+//  boot it goes back to the app looper exactly as the glue attaches it.
+namespace {
+struct BootInputDrain {
+    pthread_t        thread;
+    ALooper         *looper = NULL;
+    AInputQueue     *queue  = NULL;
+    volatile bool    stop   = false;
+    bool             running = false;
+    pthread_mutex_t  mtx  = PTHREAD_MUTEX_INITIALIZER;
+    pthread_cond_t   cond = PTHREAD_COND_INITIALIZER;
+    bool             ready = false;
+    int              finished = 0;
+};
+BootInputDrain g_bootDrain;
+
+int bootDrainOnInput(int, int, void *data) {
+    BootInputDrain *d = (BootInputDrain *)data;
+    AInputEvent *event = NULL;
+    while (AInputQueue_getEvent(d->queue, &event) >= 0) {
+        if (AInputQueue_preDispatchEvent(d->queue, event)) continue;
+        AInputQueue_finishEvent(d->queue, event, 1);
+        ++d->finished;
+    }
+    return 1;
+}
+
+void *bootDrainMain(void *p) {
+    BootInputDrain *d = (BootInputDrain *)p;
+    ALooper *looper = ALooper_prepare(0);
+    ALooper_acquire(looper);
+    AInputQueue_attachLooper(d->queue, looper, 1, bootDrainOnInput, d);
+    pthread_mutex_lock(&d->mtx);
+    d->looper = looper;
+    d->ready  = true;
+    pthread_cond_signal(&d->cond);
+    pthread_mutex_unlock(&d->mtx);
+    while (!d->stop) ALooper_pollOnce(-1, NULL, NULL, NULL);
+    AInputQueue_detachLooper(d->queue);
+    ALooper_release(looper);
+    return NULL;
+}
+
+void bootDrainBegin(android_app *app) {
+    BootInputDrain *d = &g_bootDrain;
+    if (!app->inputQueue || d->running) return;
+    d->queue = app->inputQueue;
+    d->stop = false;
+    d->ready = false;
+    d->finished = 0;
+    AInputQueue_detachLooper(d->queue);
+    if (pthread_create(&d->thread, NULL, bootDrainMain, d) != 0) {
+        //  No thread: put it back, the boot runs as it always did.
+        AInputQueue_attachLooper(d->queue, app->looper, LOOPER_ID_INPUT, NULL,
+                                 &app->inputPollSource);
+        LOGE("boot input drain: no thread - touches wait for the loop");
+        return;
+    }
+    pthread_mutex_lock(&d->mtx);
+    while (!d->ready) pthread_cond_wait(&d->cond, &d->mtx);
+    pthread_mutex_unlock(&d->mtx);
+    d->running = true;
+}
+
+void bootDrainEnd(android_app *app) {
+    BootInputDrain *d = &g_bootDrain;
+    if (!d->running) return;
+    d->stop = true;
+    ALooper_wake(d->looper);
+    pthread_join(d->thread, NULL);
+    d->running = false;
+    //  The same attach the glue makes on APP_CMD_INPUT_CHANGED, so a later
+    //  change detaches this one as usual.
+    AInputQueue_attachLooper(d->queue, app->looper, LOOPER_ID_INPUT, NULL,
+                             &app->inputPollSource);
+    LOGI("boot input drain: %d event(s) answered during the boot", d->finished);
+}
+} // namespace
+
 //  Background grace (2026-10-05). In the background the connection stays up -
 //  the network thread answers the server's heartbeat while the frame loop is
 //  parked - so a player can top up or answer a message and come straight back.
@@ -1121,7 +1212,9 @@ extern "C" void android_main(android_app *app) {
             //  this the window is black for the whole of it.
             RanSplash_Begin(root);
 
+            bootDrainBegin(app);
             const int bootOk = RanApp_Boot(root, state.width, state.height);
+            bootDrainEnd(app);
             RanSplash_End();
             if (bootOk) {
                 state.booted = true;
