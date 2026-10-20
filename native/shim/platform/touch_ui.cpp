@@ -372,7 +372,7 @@ bool g_nearEdge = false;
 //  The balloons, placed by the client each frame at the end of each near
 //  player's name plate (surface pixels). id is the player's.
 struct Balloon { float x, y, r; unsigned id; };
-const int kBalloonMax = 8;
+const int kBalloonMax = 16;
 Balloon  g_balloon[kBalloonMax];
 int      g_balloonN = 0;
 int      g_balloonPtr = -1;
