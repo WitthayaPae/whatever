@@ -168,6 +168,26 @@ inline void RanGLT_glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y,
     RanGLT_PostData(data, bytes, [=](const void *p) {
         ::glTexSubImage2D(target, level, x, y, w, h, format, type, p); });
 }
+//  Texture arrays (gl_render.cpp, "texarray"): one layer of one level at a time.
+inline void RanGLT_glTexSubImage3D(GLenum target, GLint level, GLint x, GLint y, GLint z,
+                                   GLsizei w, GLsizei h, GLsizei d, GLenum format, GLenum type,
+                                   const void *data) {
+    if (RanGLT_Direct()) { ::glTexSubImage3D(target, level, x, y, z, w, h, d, format, type, data); return; }
+    const unsigned bytes = d == 1 ? RanGLT_PixelBytes(w, h, format, type) : 0;
+    if (!bytes) {
+        RanGLT_RunSync([&]() { ::glTexSubImage3D(target, level, x, y, z, w, h, d, format, type, data); });
+        return;
+    }
+    RanGLT_PostData(data, bytes, [=](const void *p) {
+        ::glTexSubImage3D(target, level, x, y, z, w, h, d, format, type, p); });
+}
+inline void RanGLT_glCompressedTexSubImage3D(GLenum target, GLint level, GLint x, GLint y, GLint z,
+                                             GLsizei w, GLsizei h, GLsizei d, GLenum format,
+                                             GLsizei size, const void *data) {
+    if (RanGLT_Direct()) { ::glCompressedTexSubImage3D(target, level, x, y, z, w, h, d, format, size, data); return; }
+    RanGLT_PostData(data, (unsigned)size, [=](const void *p) {
+        ::glCompressedTexSubImage3D(target, level, x, y, z, w, h, d, format, size, p); });
+}
 inline void RanGLT_glCompressedTexImage2D(GLenum target, GLint level, GLenum internal, GLsizei w,
                                           GLsizei h, GLint border, GLsizei size, const void *data) {
     if (RanGLT_Direct()) { ::glCompressedTexImage2D(target, level, internal, w, h, border, size, data); return; }
@@ -229,6 +249,8 @@ inline void    RanGLT_glDeleteSync(GLsync s)             { RanGLT_Call(&::glDele
 #define glPixelStorei(...)             RanGLT_glPixelStorei(__VA_ARGS__)
 #define glTexImage2D(...)              RanGLT_glTexImage2D(__VA_ARGS__)
 #define glTexSubImage2D(...)           RanGLT_glTexSubImage2D(__VA_ARGS__)
+#define glTexSubImage3D(...)           RanGLT_glTexSubImage3D(__VA_ARGS__)
+#define glCompressedTexSubImage3D(...) RanGLT_glCompressedTexSubImage3D(__VA_ARGS__)
 #define glCompressedTexImage2D(...)    RanGLT_glCompressedTexImage2D(__VA_ARGS__)
 #define glCheckFramebufferStatus(...)  RanGLT_glCheckFramebufferStatus(__VA_ARGS__)
 #define glCreateProgram(...)           RanGLT_glCreateProgram(__VA_ARGS__)
@@ -293,6 +315,7 @@ inline void    RanGLT_glDeleteSync(GLsync s)             { RanGLT_Call(&::glDele
 #define glScissor(...)                 RanGLT_Call(&::glScissor, __VA_ARGS__)
 #define glTexParameterf(...)           RanGLT_Call(&::glTexParameterf, __VA_ARGS__)
 #define glTexParameteri(...)           RanGLT_Call(&::glTexParameteri, __VA_ARGS__)
+#define glTexStorage3D(...)            RanGLT_Call(&::glTexStorage3D, __VA_ARGS__)
 #define glUniform1f(...)               RanGLT_Call(&::glUniform1f, __VA_ARGS__)
 #define glUniform1i(...)               RanGLT_Call(&::glUniform1i, __VA_ARGS__)
 #define glUniform2f(...)               RanGLT_Call(&::glUniform2f, __VA_ARGS__)

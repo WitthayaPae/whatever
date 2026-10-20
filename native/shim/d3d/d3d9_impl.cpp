@@ -23,6 +23,13 @@ extern "C" void RanD3D_NoteTexture(unsigned glTex, const char *name);
 extern "C" void RanGLR_ResetShadowBudget(void);
 extern "C" int RanGLR_CanHalveLevel(int d3dFormat);
 extern "C" long long RanGLR_TexGpuBytes(void);
+extern "C" unsigned RanGLR_ArrayAlloc(int width, int height, int levels, int d3dFormat);
+extern "C" void RanGLR_ArrayUploadLevel(unsigned id, int level, int width, int height,
+                                        int d3dFormat, const void *bits, unsigned dataSize);
+extern "C" void RanGLR_ArrayUploadWithMips(unsigned id, int width, int height,
+                                           int d3dFormat, const void *bits, unsigned dataSize);
+extern "C" int RanGLR_ArrayCanMakeMips(int d3dFormat);
+static inline bool RanD3D_IsArrayTexture(unsigned gl) { return (gl & 0xF0000000u) == 0xA0000000u; }
 extern "C" unsigned RanGLR_UploadTextureLevelHalf(unsigned existing, int level, int width, int height,
                                                   int d3dFormat, const void *bits, unsigned dataSize);
 //  The tap ring (touch_ui.cpp): drawn over the whole finished frame.
@@ -324,6 +331,7 @@ public:
     long long m_bornMs = 0;
     long long m_lastUseMs = 0;
     bool      m_evicted = false;
+    bool      m_evictedOnce = false;     //  never back into an array after a reload (texarray)
     //  Counted into g_live.texUndrawnCostume (loader thread adds, render
     //  thread removes on upload or eviction, either on destruction).
     std::atomic<bool> m_countedUndrawn{false};
@@ -433,6 +441,7 @@ public:
             m_surfaces[i]->m_freedAfterUpload = true;
         }
         m_evicted = true;
+        m_evictedOnce = true;
         m_dirty = true;
         ++g_live.texEvicted;
     }
@@ -507,8 +516,8 @@ public:
         //  A surface the client rewrote in part, on a texture GL already has:
         //  send just that rectangle and leave the mip chain alone. This is the
         //  font atlas's path, and it runs many times a frame.
-        if (m_dirty && !m_isRenderTarget && m_glTex && m_surfaces.size() == 1 &&
-            !isCompressed(m_format)) {
+        if (m_dirty && !m_isRenderTarget && m_glTex && !RanD3D_IsArrayTexture(m_glTex) &&
+            m_surfaces.size() == 1 && !isCompressed(m_format)) {
             RanSurface *s = m_surfaces[0];
             if (!s->m_bits.empty() && s->m_dirtyX1 > s->m_dirtyX0 && !s->dirtyIsWholeSurface()) {
                 const UINT bpp = bytesPerPixel(m_format);
@@ -579,9 +588,52 @@ public:
             //  as it first did.
             if (m_halfMode == 1 && m_surfaces.size() > 1) first = 1;
             else if (m_halfMode == 2) boxHalf = true;
+            //  "texarray": a costume texture drawn in 3D becomes one layer of a
+            //  shared texture array (gl_render.cpp), so a merged character can
+            //  draw all its parts at once. Same pixels, same mips, no copy.
+            bool inArray = false;
+            //  Rewritten after it went into an array: the same slot again.
+            if (m_glTex && RanD3D_IsArrayTexture(m_glTex)) {
+                for (size_t i = first; i < m_surfaces.size() && !m_surfaces[i]->m_bits.empty(); ++i) {
+                    RanSurface *s = m_surfaces[i];
+                    RanGLR_ArrayUploadLevel(m_glTex, (int)(i - first), (int)s->m_width, (int)s->m_height,
+                                            (int)m_format, s->m_bits.data(), (unsigned)s->m_bits.size());
+                }
+                inArray = true;
+            }
+            if (!m_glTex && !boxHalf && !m_glyphAtlas && !m_hdArt && !m_evictedOnce &&
+                !(m_usage & D3DUSAGE_RENDERTARGET) && !g_bindIsUi && !m_srcFile.empty() &&
+                isCostumeFile(m_srcFile)) {
+                size_t nLev = 0;
+                for (size_t i = first; i < m_surfaces.size() && !m_surfaces[i]->m_bits.empty(); ++i) ++nLev;
+                RanSurface *s0 = m_surfaces[first];
+                int levels = (int)nLev;
+                const bool makeMips = nLev == 1;
+                if (makeMips) {
+                    levels = 1;
+                    for (UINT mw = s0->m_width, mh = s0->m_height; mw > 1 || mh > 1; ++levels) {
+                        mw = mw > 1 ? mw / 2 : 1; mh = mh > 1 ? mh / 2 : 1;
+                    }
+                }
+                const unsigned id = (nLev && (!makeMips || RanGLR_ArrayCanMakeMips((int)m_format)))
+                                  ? RanGLR_ArrayAlloc((int)s0->m_width, (int)s0->m_height, levels, (int)m_format) : 0;
+                if (id) {
+                    if (makeMips)
+                        RanGLR_ArrayUploadWithMips(id, (int)s0->m_width, (int)s0->m_height, (int)m_format,
+                                                   s0->m_bits.data(), (unsigned)s0->m_bits.size());
+                    else
+                        for (size_t i = first; i < first + nLev; ++i) {
+                            RanSurface *s = m_surfaces[i];
+                            RanGLR_ArrayUploadLevel(id, (int)(i - first), (int)s->m_width, (int)s->m_height,
+                                                    (int)m_format, s->m_bits.data(), (unsigned)s->m_bits.size());
+                        }
+                    m_glTex = id;
+                    inArray = true;
+                }
+            }
             //  The whole chain, not just level 0: the shipped DDS files carry
             //  their mips and the map shimmers without them.
-            for (size_t i = first; i < m_surfaces.size(); ++i) {
+            for (size_t i = first; !inArray && i < m_surfaces.size(); ++i) {
                 RanSurface *s = m_surfaces[i];
                 if (s->m_bits.empty()) break;
                 if (boxHalf)
@@ -596,7 +648,7 @@ public:
                                                         (unsigned)s->m_bits.size());
             }
             if ((first || boxHalf) && !m_reloadedOnce) ++g_live.texHalved;
-            RanGLR_FinishTexture(m_glTex, (int)(m_surfaces.size() - first), (int)m_format);
+            if (!inArray) RanGLR_FinishTexture(m_glTex, (int)(m_surfaces.size() - first), (int)m_format);
             if (m_glyphAtlas) RanGLR_SampleAsWhiteAlpha(m_glTex);
             if (m_hdArt) RanGLR_MarkHdTexture(m_glTex);
             if (!m_srcPath.empty()) {

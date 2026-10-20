@@ -218,6 +218,18 @@ void RanGLR_UpdateTextureRect(unsigned tex, int x, int y, int w, int h,
 // (the single-level upload is gone; RanGLR_UploadTextureLevel takes its place)
 void     RanGLR_DeleteTexture(unsigned tex);
 
+//  Costume textures as layers of shared texture arrays ("texarray" diag).
+//  ArrayAlloc answers a virtual texture name, or 0 for "upload an ordinary
+//  texture"; the name is then bound, sampled and deleted like any other.
+unsigned RanGLR_ArrayAlloc(int width, int height, int levels, int d3dFormat);
+void     RanGLR_ArrayUploadLevel(unsigned id, int level, int width, int height,
+                                 int d3dFormat, const void *bits, unsigned dataSize);
+void     RanGLR_ArraysContextLost(void);
+//  Level 0 only, with every smaller level made from it (a texture with no mips).
+void     RanGLR_ArrayUploadWithMips(unsigned id, int width, int height,
+                                    int d3dFormat, const void *bits, unsigned dataSize);
+long long RanGLR_ArrayBytes(void);
+
 #ifdef __cplusplus
 }
 #endif

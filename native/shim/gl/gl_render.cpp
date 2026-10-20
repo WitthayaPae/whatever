@@ -85,6 +85,19 @@ const char *kVS =
     "                texelFetch(uBoneTex, c + ivec2(2, 0), 0), texelFetch(uBoneTex, c + ivec2(3, 0), 0));\n"
     "}\n"
     "uniform mat4 uViewProj;\n"
+    //  A whole merged character in one draw ("charmerge" 3): each vertex names
+    //  its material slot (+16 x the texture array it samples) in aUV2.x and its
+    //  layer in aUV2.y. A slot is four vec4: diffuse rgb + alpha, ambient rgb +
+    //  flags (1 alpha test, 2 light 0 is the direct light, 4 TFACTOR tint, 8
+    //  ambient tint), emissive, tint colour. uMergeL0 is the direct light:
+    //  diffuse, ambient, direction.
+    "uniform highp int uMerge;\n"
+    "uniform vec4 uMergeMat[64];\n"
+    "uniform vec3 uMergeL0[3];\n"
+    "flat out int vMergeUnit;\n"
+    "flat out int vMergeFlags;\n"
+    "flat out highp float vMergeLayer;\n"
+    "flat out vec4 vMergeTint;\n"
     "#ifndef uVertexBlend\n"
     "uniform int  uVertexBlend;\n"
     "#endif\n"
@@ -229,16 +242,34 @@ const char *kVS =
     "    }\n"
     "    vLit = vec3(1.0);\n"
     "    vSpec = vec3(0.0);\n"
+    "    vec3 mDiff = uMatDiffuse, mAmb = uMatAmbient, mEmi = uMatEmissive, gAmb = uGlobalAmbient;\n"
+    "    int mFlags = 0;\n"
+    "    vMergeUnit = 0; vMergeFlags = 0; vMergeLayer = 0.0; vMergeTint = vec4(1.0);\n"
+    "    if (uMerge == 1) {\n"
+    "        int code = int(aUV2.x + 0.5);\n"
+    "        int mi = (code & 15) * 4;\n"
+    "        mDiff = uMergeMat[mi].rgb; mAmb = uMergeMat[mi + 1].rgb; mEmi = uMergeMat[mi + 2].rgb;\n"
+    "        mFlags = int(uMergeMat[mi + 1].a + 0.5);\n"
+    "        if ((mFlags & 8) != 0) gAmb = uMergeMat[mi + 3].rgb;\n"
+    "        vMergeUnit = code >> 4; vMergeFlags = mFlags; vMergeLayer = aUV2.y;\n"
+    "        vMergeTint = vec4(uMergeMat[mi + 3].rgb, uMergeMat[mi].a);\n"
+    "    }\n"
     "    if (uLighting == 1) {\n"
     "        vec3 n = normalize(vNormal);\n"
-    "        vec3 lit = uMatEmissive + uMatAmbient * uGlobalAmbient;\n"
+    "        vec3 lit = mEmi + mAmb * gAmb;\n"
     "        vec3 spec = vec3(0.0);\n"
     "        vec3 V = normalize(uCameraPosF - vWorldPos);\n"
     "        for (int i = 0; i < 8; ++i) {\n"
     "            if (i >= uLightCount) break;\n"
     "            vec3 L;\n"
     "            float atten = 1.0;\n"
-    "            if (uLightType[i] == 3) {\n"          // directional
+    "            vec3 ld = uLightDiffuse[i], la = uLightAmbient[i];\n"
+    "            if (i == 0 && (mFlags & 10) != 0) {\n"
+    //  An ambient tint, or a part drawn after one put light 0 back: the plain
+    //  direct light, without its ambient for the tint itself.
+    "                L = -normalize(uMergeL0[2]);\n"
+    "                ld = uMergeL0[0]; la = (mFlags & 8) != 0 ? vec3(0.0) : uMergeL0[1];\n"
+    "            } else if (uLightType[i] == 3) {\n"          // directional
     "                L = -normalize(uLightDir[i]);\n"
     "            } else {\n"                            // point / spot
     "                vec3 d = uLightPos[i].xyz - vWorldPos;\n"
@@ -254,8 +285,8 @@ const char *kVS =
     //  one (D3DMCS_COLOR1, the default) and from the material only when it does
     //  not. The vertex colour is already multiplied in by the texture stage, so
     //  applying the material as well would count it twice.
-    "            vec3 md = (uHasVertexColor == 1) ? vec3(1.0) : uMatDiffuse;\n"
-    "            lit += atten * (uLightDiffuse[i] * md * ndotl + uLightAmbient[i]);\n"
+    "            vec3 md = (uHasVertexColor == 1) ? vec3(1.0) : mDiff;\n"
+    "            lit += atten * (ld * md * ndotl + la);\n"
     "            if (uSpecularOn == 1 && ndotl > 0.0) {\n"
     "                vec3 H = normalize(L + V);\n"                  // Blinn half-vector
     "                float sp = pow(max(dot(n, H), 0.0), max(uMatPower, 1.0));\n"
@@ -309,6 +340,23 @@ const char *kFS =
     "uniform sampler2D uGammaLut;\n"
     "in float vFog;\n"
     "uniform sampler2D uTex;\n"
+    //  A costume texture that lives as a layer of a texture array ("texarray"):
+    //  the layer, or -1 for an ordinary texture on uTex.
+    "uniform highp float uTexLayer;\n"
+    "uniform mediump sampler2DArray uTexArr;\n"
+    "uniform highp float uTexStage1Layer;\n"
+    "uniform mediump sampler2DArray uTexStage1Arr;\n"
+    "uniform highp int uMerge;\n"
+    "uniform mediump sampler2DArray uMergeArr0;\n"
+    "uniform mediump sampler2DArray uMergeArr1;\n"
+    "uniform mediump sampler2DArray uMergeArr2;\n"
+    "uniform mediump sampler2DArray uMergeArr3;\n"
+    "uniform mediump sampler2DArray uMergeArr4;\n"
+    "uniform mediump sampler2DArray uMergeArr5;\n"
+    "flat in int vMergeUnit;\n"
+    "flat in int vMergeFlags;\n"
+    "flat in highp float vMergeLayer;\n"
+    "flat in vec4 vMergeTint;\n"
     "#ifndef uUseTexture\n"
     "uniform int   uUseTexture;\n"
     "#endif\n"
@@ -361,6 +409,23 @@ const char *kFS =
     //  the refraction ripple samples the screen copy this way.
     "uniform int  uTexGen0;\n"
     "uniform mat4 uTexMat0;\n"
+    "\n"
+    //  The vertex's own array: explicit gradients, so the choice of sampler
+    //  inside a branch does not change the mip the hardware would pick.
+    "vec4 mergeTex(highp vec2 uv) {\n"
+    "    highp vec2 gx = dFdx(uv), gy = dFdy(uv);\n"
+    "    highp vec3 c = vec3(uv, vMergeLayer);\n"
+    "    if (vMergeUnit == 0) return textureGrad(uMergeArr0, c, gx, gy);\n"
+    "    if (vMergeUnit == 1) return textureGrad(uMergeArr1, c, gx, gy);\n"
+    "    if (vMergeUnit == 2) return textureGrad(uMergeArr2, c, gx, gy);\n"
+    "    if (vMergeUnit == 3) return textureGrad(uMergeArr3, c, gx, gy);\n"
+    "    if (vMergeUnit == 4) return textureGrad(uMergeArr4, c, gx, gy);\n"
+    "    return textureGrad(uMergeArr5, c, gx, gy);\n"
+    "}\n"
+    "\n"
+    "vec4 stage1Tex(RAN_UVP vec2 c) {\n"
+    "    return uTexStage1Layer >= 0.0 ? texture(uTexStage1Arr, vec3(c, uTexStage1Layer)) : texture(uTexStage1, c);\n"
+    "}\n"
     "\n"
     "vec4 argValue(int arg, vec4 tex, vec4 diffuse) {\n"
     "    int sel = arg & 7;\n"          // low bits pick the source
@@ -469,12 +534,14 @@ const char *kFS =
     "        float tz = (abs(t.z) < 0.0001) ? 0.0001 : t.z;\n"
     "        uvS = t.xy / tz;\n"
     "    }\n"
-    "    vec4 tex = (uUseTexture == 1) ? texture(uTex, uvS) : vec4(1.0);\n"
+    "    vec4 tex = (uUseTexture == 1) ? (uTexLayer >= 0.0 ? texture(uTexArr, vec3(uvS, uTexLayer))\n"
+    "                                                    : texture(uTex, uvS)) : vec4(1.0);\n"
+    "    if (uMerge == 1) tex = mergeTex(vUV);\n"
     "    if (uFill == 1) { oColor = vec4(1.0 / 255.0, 0.0, 0.0, 0.0); return; }\n"
     "    if (uPlain == 1) { oColor = tex * vColor; return; }\n"
     "    //  With lighting on, the pipeline's diffuse alpha is the material's;\n"
     "    //  the vertex colour only carries it for unlit geometry.\n"
-    "    vec4 diffuse = vec4(vColor.rgb, uLighting == 1 ? uMatAlpha : vColor.a);\n"
+    "    vec4 diffuse = vec4(vColor.rgb, uLighting == 1 ? (uMerge == 1 ? vMergeTint.a : uMatAlpha) : vColor.a);\n"
     "    vec4 a1 = argValue(uColorArg1, tex, diffuse);\n"
     "    vec4 a2 = argValue(uColorArg2, tex, diffuse);\n"
     "    vec3 rgb;\n"
@@ -509,7 +576,7 @@ const char *kFS =
     "        //  MODULATE2X(TEXTURE, CURRENT) with a 2D texture on stage 1 and\n"
     "        //  coordinate set 0. This is the shine on hair and on the coloured\n"
     "        //  parts of a character: without it they are flat paint.\n"
-    "        rgb *= 2.0 * texture(uTexStage1, vUV).rgb;\n"
+    "        rgb *= 2.0 * stage1Tex(vUV).rgb;\n"
     "    } else if (uStage1 == 8) {\n"
     //  A 2D texture on stage 1, MODULATE, addressed by the camera-space
     //  normal projected by its own z (D3DTSS_TCI_CAMERASPACENORMAL with
@@ -520,11 +587,11 @@ const char *kFS =
     "        float cz = (abs(cn.z) < 0.0001) ? 0.0001 : cn.z;\n"
     "        vec2 p = cn.xy / cz;\n"
     "        p = 1.0 - abs(mod(p, 2.0) - 1.0);\n"
-    "        rgb *= texture(uTexStage1, p).rgb;\n"
+    "        rgb *= stage1Tex(p).rgb;\n"
     "    } else if (uStage1 == 9) {\n"
     //  MODULATE2X(TEXTURE, TFACTOR) on stage 1, set 0: replaces the colour
     //  (DxEffCharLevel ambient glow). TFACTOR, not DIFFUSE: no lighting.
-    "        rgb = clamp(2.0 * texture(uTexStage1, vUV).rgb * uTexFactor.rgb, 0.0, 1.0);\n"
+    "        rgb = clamp(2.0 * stage1Tex(vUV).rgb * uTexFactor.rgb, 0.0, 1.0);\n"
     "    } else if (uStage1 == 2) {\n"
     "        //  MODULATE(TFACTOR, CURRENT): a flat tint over the stage 0 result,\n"
     "        //  with no texture on the stage at all. This is how the ambient\n"
@@ -551,8 +618,14 @@ const char *kFS =
     "    if (uStage1 == 4) alpha = texture(uTex, vUV2).a * diffuse.a;\n"
     "    //  Stage 1 as an alpha mask: MODULATE(TEXTURE, CURRENT) on alpha with\n"
     "    //  the colour passed through, read with coordinate set 1.\n"
-    "    if (uStage1 == 7) alpha *= texture(uTexStage1, vUV2).a;\n"
+    "    if (uStage1 == 7) alpha *= stage1Tex(vUV2).a;\n"
     "\n"
+    //  Merged: the TFACTOR tint of DxEffCharAmbient (MODULATE on stage 1), and
+    //  the alpha a hard-alpha part is tested with (MODULATE, texture x material).
+    "    if (uMerge == 1) {\n"
+    "        if ((vMergeFlags & 4) != 0) rgb *= vMergeTint.rgb;\n"
+    "        if ((vMergeFlags & 1) != 0) alpha = tex.a * diffuse.a;\n"
+    "    }\n"
     "    vec4 c = vec4(rgb, alpha);\n"
     "\n"
     "    if (uLighting == 1) {\n"
@@ -564,7 +637,7 @@ const char *kFS =
     "        if (uSpecularOn == 1) c.rgb += uMatSpecular * vSpec;\n"
     "    }\n"
     "\n"
-    "    if (uAlphaTest == 1 && c.a < uAlphaRef) discard;\n"
+    "    if ((uAlphaTest == 1 || (uMerge == 1 && (vMergeFlags & 1) != 0)) && c.a < uAlphaRef) discard;\n"
     "\n"
     "    if (uFogMode > 0) c.rgb = mix(uFogColor, c.rgb, vFog);\n"
     "    //  The display gamma ramp the client asked for. Applied here because\n"
@@ -773,6 +846,14 @@ GLint  uFlipY = -1, uWorldM = -1, uViewProj = -1, uVertexBlend = -1, uIndexedBle
 //  Merged characters: see uBoneBase in the vertex shader. g_boneBase is the
 //  draw's offset into the bone texture, -1 when it draws with the palette.
 GLint  uBoneBase = -1, uBoneTex = -1;
+GLint  uTexLayer = -1, uTexArr = -1, uTexStage1Layer = -1, uTexStage1Arr = -1;
+GLint  uMerge = -1, uMergeMat = -1, uMergeL0 = -1, uMergeArr[6] = { -1, -1, -1, -1, -1, -1 };
+//  The merged character being drawn, if any (RanGLR_SetMerge).
+int    g_merge = 0, g_mergeMats = 0, g_mergeArrN = 0;
+float  g_mergeMat[64 * 4];
+float  g_mergeL0[9];
+GLuint g_mergeArr[6];
+GLuint g_mergeBound[6] = { 0, 0, 0, 0, 0, 0 };
 int    g_boneBase = -1;
 //  Three textures in turn, so a frame's upload never writes one the GPU may
 //  still be reading for the frame before.
@@ -790,6 +871,14 @@ std::set<unsigned> g_hdTex;
 //  The 2D texture bound to stage 1, on its own unit so the cube map can keep
 //  unit 1 and stage 0 can keep unit 0.
 unsigned g_stage1Tex2D = 0;
+//  The layer when that texture lives in an array ("texarray"), else -1.
+float g_stage1Layer = -1.0f;
+//  Costume texture arrays ("texarray"), defined with the texture uploads: a
+//  virtual texture name is kArrTag plus a slot.
+const unsigned kArrTag = 0xA0000000u;
+inline bool isArrTex(unsigned t) { return (t & 0xF0000000u) == kArrTag; }
+float arrayBindStage0(unsigned id);     //  binds unit 5, answers the layer (-1 if none)
+float arrayBindStage1(unsigned id);     //  binds unit 6, the same
 //  Set from the FVF of the mesh being drawn: it carries palette slots or it
 //  does not, and the two blends are not interchangeable.
 int    g_indexedBlend = 0;
@@ -1608,6 +1697,17 @@ void fetchUniformLocations(GLuint prog) {
     uIndexedBlend   = glGetUniformLocation(prog, "uIndexedBlend");
     uBoneBase       = glGetUniformLocation(prog, "uBoneBase");
     uBoneTex        = glGetUniformLocation(prog, "uBoneTex");
+    uTexLayer       = glGetUniformLocation(prog, "uTexLayer");
+    uTexArr         = glGetUniformLocation(prog, "uTexArr");
+    uTexStage1Layer = glGetUniformLocation(prog, "uTexStage1Layer");
+    uTexStage1Arr   = glGetUniformLocation(prog, "uTexStage1Arr");
+    uMerge          = glGetUniformLocation(prog, "uMerge");
+    uMergeMat       = glGetUniformLocation(prog, "uMergeMat");
+    uMergeL0        = glGetUniformLocation(prog, "uMergeL0");
+    {
+        static const char *kArr[6] = { "uMergeArr0", "uMergeArr1", "uMergeArr2", "uMergeArr3", "uMergeArr4", "uMergeArr5" };
+        for (int a = 0; a < 6; ++a) uMergeArr[a] = glGetUniformLocation(prog, kArr[a]);
+    }
     uTex            = glGetUniformLocation(prog, "uTex");
     uUseTexture     = glGetUniformLocation(prog, "uUseTexture");
     uAlphaTest      = glGetUniformLocation(prog, "uAlphaTest");
@@ -1642,8 +1742,12 @@ void fetchUniformLocations(GLuint prog) {
     glUseProgram(prog);
     glUniform1i(uTexCube, 1);
     if (uTexStage1 >= 0) glUniform1i(uTexStage1, 2);
-    //  The bone texture of the merged characters lives on unit 4.
+    //  The bone texture of the merged characters lives on unit 4, and the
+    //  costume texture arrays on 5 (stage 0) and 6 (stage 1).
     if (uBoneTex >= 0) glUniform1i(uBoneTex, 4);
+    if (uTexArr >= 0) glUniform1i(uTexArr, 5);
+    if (uTexStage1Arr >= 0) glUniform1i(uTexStage1Arr, 6);
+    for (int a = 0; a < 6; ++a) if (uMergeArr[a] >= 0) glUniform1i(uMergeArr[a], 7 + a);
 
     uWorld          = glGetUniformLocation(prog, "uWorld");
     uCameraPos      = glGetUniformLocation(prog, "uCameraPos");
@@ -1686,7 +1790,8 @@ namespace {
 //  and out without the rest of the file knowing there is more than one program.
 GLint *const kLocationVars[] = {
     &uMVP, &uViewport, &uPreTransformed, &uFlipY, &uMatAlpha, &uWorldM, &uViewProj,
-    &uVertexBlend, &uIndexedBlend, &uBoneBase, &uBoneTex, &uTex, &uUseTexture, &uAlphaTest, &uAlphaRef,
+    &uVertexBlend, &uIndexedBlend, &uBoneBase, &uBoneTex, &uTexLayer, &uTexArr, &uTexStage1Layer, &uTexStage1Arr, &uMerge, &uMergeMat, &uMergeL0,
+    &uMergeArr[0], &uMergeArr[1], &uMergeArr[2], &uMergeArr[3], &uMergeArr[4], &uMergeArr[5], &uTex, &uUseTexture, &uAlphaTest, &uAlphaRef,
     &uColorOp, &uColorArg1, &uColorArg2, &uAlphaOp, &uAlphaArg1, &uAlphaArg2,
     &uTexFactor, &uTexCube, &uStage1, &uTexGen0, &uTexMat0, &uTexSize, &uUiSharpen, &uPanelH, &uUiOrigin, &uTexHD, &uGammaOn, &uPlain, &uFill,
     &uGammaLut, &uSpecularOn, &uMatSpecular, &uMatPower, &uLightSpecular, &uView,
@@ -1864,6 +1969,9 @@ bool buildVariant(unsigned key, Variant &v) {
     if (uTexCube >= 0) glUniform1i(uTexCube, 1);
     if (uTexStage1 >= 0) glUniform1i(uTexStage1, 2);
     if (uBoneTex >= 0) glUniform1i(uBoneTex, 4);
+    if (uTexArr >= 0) glUniform1i(uTexArr, 5);
+    if (uTexStage1Arr >= 0) glUniform1i(uTexStage1Arr, 6);
+    for (int a = 0; a < 6; ++a) if (uMergeArr[a] >= 0) glUniform1i(uMergeArr[a], 7 + a);
     return true;
 }
 
@@ -1986,6 +2094,9 @@ extern "C" int RanGLR_Init(void) {
     //  So did the merged characters' bone textures.
     for (int i = 0; i < 3; ++i) { g_boneTex[i] = 0; g_boneTexRows[i] = 0; }
     g_boneBase = -1;
+    RanGLR_ArraysContextLost();
+    for (int a = 0; a < 6; ++a) g_mergeBound[a] = 0;
+    g_merge = 0;
     glGenBuffers(1, &g_vbo);
     glGenBuffers(1, &g_ibo);
 
@@ -2539,6 +2650,7 @@ extern "C" unsigned RanGLR_CreateEmptyTexture(void) {
 }
 
 extern "C" void RanGLR_ForgetRenderTarget(unsigned glTex) {
+    if (isArrTex(glTex)) return;
     //  Off the context's thread this is left to RanGLR_DeleteTexture's queue,
     //  which forgets the target too when it gets to the texture.
     if (!RanGLR_OnRenderThread()) return;
@@ -2927,8 +3039,13 @@ extern "C" void RanGLR_SetStage1(int mode, unsigned glCubeTex, unsigned gl2DTex,
     else if (mode == 2 || mode == 4)            g_stage1Mode = mode;
     else                                        g_stage1Mode = 0;
 
-    if (gl2DTex && gl2DTex != g_stage1Tex2D) {
+    if (gl2DTex && isArrTex(gl2DTex)) {
+        //  A costume texture in an array (the "_m" gloss maps): unit 6.
+        g_stage1Layer = arrayBindStage1(gl2DTex);
         g_stage1Tex2D = gl2DTex;
+    } else if (gl2DTex && gl2DTex != g_stage1Tex2D) {
+        g_stage1Tex2D = gl2DTex;
+        g_stage1Layer = -1.0f;
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, gl2DTex);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -3064,6 +3181,7 @@ void applyProgramUniforms() {
         }
         memcpy(snap + sn, g_texFactor, sizeof(float) * 4); sn += 4;
         snap[sn++] = (float)g_stage1Mode;
+        snap[sn++] = g_stage1Layer;
         snap[sn++] = (float)g_texGen0;
         if (g_stage1Mode || g_texGen0) { memcpy(snap + sn, g_viewMatrix, sizeof(float) * 16); sn += 16; }
         if (g_texGen0) { memcpy(snap + sn, g_texMat0, sizeof(float) * 16); sn += 16; }
@@ -3125,6 +3243,7 @@ void applyProgramUniforms() {
     if (!stableSame) {
         setUniformVec4(uTexFactor, g_texFactor);
         setUniform1i(uStage1, (g_fsProbe & 2) ? 0 : g_stage1Mode);
+        setUniform1f(uTexStage1Layer, g_stage1Layer);
         if (g_stage1Mode || g_texGen0) setUniformMatrix(uView, g_viewMatrix, 1);
         setUniform1i(uTexGen0, g_texGen0);
         if (g_texGen0) setUniformMatrix(uTexMat0, g_texMat0, 1);
@@ -3145,6 +3264,20 @@ void applyProgramUniforms() {
         }
         //  A merged character reads its bones from the bone texture instead.
         setUniform1i(uBoneBase, g_boneBase);
+        //  ...and, drawn whole, its materials and textures per vertex.
+        setUniform1i(uMerge, g_merge);
+        if (g_merge) {
+            if (uMergeMat >= 0) { glUniform4fv(uMergeMat, g_mergeMats * 4, g_mergeMat); countUni(kUniUncached, 64ul * (unsigned long)g_mergeMats); }
+            if (uMergeL0 >= 0) { glUniform3fv(uMergeL0, 3, g_mergeL0); countUni(kUniUncached, 36); }
+            for (int a = 0; a < g_mergeArrN; ++a) {
+                if (g_mergeBound[a] == g_mergeArr[a]) continue;
+                glActiveTexture(GL_TEXTURE7 + a);
+                glBindTexture(GL_TEXTURE_2D_ARRAY, g_mergeArr[a]);
+                glActiveTexture(GL_TEXTURE0);
+                g_mergeBound[a] = g_mergeArr[a];
+                ++g_callsTexture;
+            }
+        }
         if (!g_skipPaletteUni && g_boneBase < 0) {
             g_palUploadNow = true;
             setUniformMatrix(uWorldM, g_worldM, slots);
@@ -4790,12 +4923,16 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     //  so there is no glActiveTexture here. Rebinding the same texture is pure
     //  overhead, and ApplySampler is itself a no-op for a texture that already
     //  carries the current sampler state.
-    const GLuint wanted = glTexture ? glTexture : g_whiteTex;
-    if (!g_skipTex) {
+    //  A costume texture living in an array samples there (uTexLayer); unit 0
+    //  keeps whatever it held, which this draw does not read.
+    const float arrLayer = (glTexture && isArrTex(glTexture)) ? arrayBindStage0(glTexture) : -1.0f;
+    const GLuint wanted = (glTexture && arrLayer < 0.0f && !isArrTex(glTexture)) ? glTexture : g_whiteTex;
+    if (!g_skipTex && arrLayer < 0.0f) {
         if (wanted != g_gl.texture2D) ++g_callsTexture;
         bindTex2D(wanted);
     }
-    if (glTexture && !g_skipTex) RanGLR_ApplySampler(glTexture);
+    if (glTexture && !g_skipTex && arrLayer < 0.0f && !isArrTex(glTexture)) RanGLR_ApplySampler(glTexture);
+    setUniform1f(uTexLayer, arrLayer);
     if (!g_skipUniform) {
     setUniform1i(uTex, 0);
     setUniform1i(uUseTexture, glTexture ? 1 : 0);
@@ -5619,6 +5756,448 @@ static void texSwizzle(bool bSwapRB, bool bForceOpaque) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, bForceOpaque ? GL_ONE : GL_ALPHA);
 }
 
+//  ---- costume textures as layers of texture arrays ("texarray")
+//
+//  A character is drawn from five to ten textures, one per costume part, and
+//  a texture change between draws is what keeps a merged character at one
+//  draw per texture (charmerge, DxSkinChar.cpp). Here a costume texture is not
+//  a texture object of its own but one layer of a shared 2D array, grouped by
+//  size, mip count and channel order. The engine still holds an ordinary
+//  texture name - a virtual one, kArrTag plus a slot - and every bind of it
+//  samples the array at that layer instead (uTexLayer), so nothing else has
+//  to know. The memory is the same: the pixels move, they are not copied.
+//
+//  Only RGBA8 data is taken: DXT where the GPU cannot sample it (decoded
+//  here, as the 2D path does - the Tab S9 and every iPhone), and the 32-bit
+//  formats. Anything else, and every texture while the switch is off, stays a
+//  texture of its own.
+namespace {
+struct ArrChunk {
+    GLuint tex;
+    int cap, used;
+    std::vector<unsigned char> live;
+    TexSampler samp;
+};
+struct ArrPool {
+    int w, h, levels, swz;          //  swz: 0 RGBA, 1 BGRA, 2 BGRx (forced opaque),
+                                    //  10/11/12 DXT1/3/5 kept compressed
+    std::vector<ArrChunk> chunks;
+};
+struct ArrSlot { int pool, chunk, layer; bool live; };
+std::vector<ArrPool> g_arrPools;
+std::vector<ArrSlot> g_arrSlots;
+std::vector<unsigned> g_arrFree;
+long long g_arrBytes = 0;
+int g_texArrays = -1;               //  -1 not decided yet
+GLuint g_unitArr[2] = { 0, 0 };     //  what units 5 and 6 hold
+
+bool texArraysOn() {
+    if (g_texArrays < 0) {
+        g_texArrays = RanPlat_DiagExists("texarray") ? 1 : 0;
+        LOGI("costume texture arrays: %s", g_texArrays ? "on" : "off");
+    }
+    return g_texArrays == 1;
+}
+
+const ArrSlot *arrSlot(unsigned t) {
+    const unsigned i = t & 0x0FFFFFFFu;
+    if (!isArrTex(t) || i >= g_arrSlots.size() || !g_arrSlots[i].live) return NULL;
+    return &g_arrSlots[i];
+}
+
+//  Binds an array on unit 5 or 6 and leaves unit 0 active, as everything else
+//  in this file expects.
+void bindArrUnit(int which, GLuint tex) {
+    if (g_unitArr[which] == tex) return;
+    glActiveTexture(which == 0 ? GL_TEXTURE5 : GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+    glActiveTexture(GL_TEXTURE0);
+    g_unitArr[which] = tex;
+    ++g_callsTexture;
+}
+
+size_t levelBytes(int w, int h, int levels) {
+    size_t b = 0;
+    for (int l = 0; l < levels; ++l) {
+        b += (size_t)w * (size_t)h * 4;
+        w = w > 1 ? w / 2 : 1; h = h > 1 ? h / 2 : 1;
+    }
+    return b;
+}
+}   // namespace
+
+extern "C" void RanGLR_ArraysContextLost(void) {
+    //  The arrays went with the context; the textures that lived in them are
+    //  re-uploaded by their owners, which ask for fresh slots.
+    g_arrPools.clear();
+    g_arrSlots.clear();
+    g_arrFree.clear();
+    g_arrBytes = 0;
+    g_unitArr[0] = g_unitArr[1] = 0;
+}
+
+extern "C" long long RanGLR_ArrayBytes(void) { return g_arrBytes; }
+
+//  A one-level texture of this format can go into an array only if its mips
+//  can be made on the CPU - not when the GPU keeps it compressed.
+extern "C" int RanGLR_ArrayCanMakeMips(int d3dFormat) {
+    return !(isDXT(d3dFormat) && haveS3TC());
+}
+
+//  A slot for a texture of this size, mip count and format, or 0 to say "make
+//  an ordinary texture".
+//  Whether this driver takes S3TC data in a 2D array. Asked once, the first
+//  time a compressed costume texture wants a slot: allocate a tiny one and
+//  see if GL complains.
+static int g_dxtArrays = -1;
+static bool dxtArraysOk() {
+    if (g_dxtArrays >= 0) return g_dxtArrays == 1;
+    GLuint t = 0;
+    glGenTextures(1, &t);
+    glActiveTexture(GL_TEXTURE5);
+    while (glGetError() != GL_NO_ERROR) {}
+    glBindTexture(GL_TEXTURE_2D_ARRAY, t);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, 4, 4, 1);
+    const GLenum e = glGetError();
+    glBindTexture(GL_TEXTURE_2D_ARRAY, g_unitArr[0]);
+    glActiveTexture(GL_TEXTURE0);
+    glDeleteTextures(1, &t);
+    g_dxtArrays = e == GL_NO_ERROR ? 1 : 0;
+    LOGI("compressed (DXT) texture arrays: %s (0x%04X)", g_dxtArrays ? "yes" : "no", (unsigned)e);
+    return g_dxtArrays == 1;
+}
+
+//  glCopyImageSubData: core in ES 3.2 (the Tab S9), absent in ES 3.0 (iOS).
+typedef void (GL_APIENTRY *PFN_COPYIMAGE)(GLuint, GLenum, GLint, GLint, GLint, GLint,
+                                          GLuint, GLenum, GLint, GLint, GLint, GLint,
+                                          GLsizei, GLsizei, GLsizei);
+static PFN_COPYIMAGE p_glCopyImageSubData = NULL;
+static int g_copyImageAsked = 0;
+
+static GLenum arrInternal(int swz) {
+    return swz == 10 ? GL_COMPRESSED_RGBA_S3TC_DXT1_EXT : swz == 11 ? GL_COMPRESSED_RGBA_S3TC_DXT3_EXT
+         : swz == 12 ? GL_COMPRESSED_RGBA_S3TC_DXT5_EXT : GL_RGBA8;
+}
+
+static void arrStorage(GLuint tex, const ArrPool &pool, int cap) {
+    const bool bgr = pool.swz == 1 || pool.swz == 2;
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, pool.levels, arrInternal(pool.swz), pool.w, pool.h, cap);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_SWIZZLE_R, bgr ? GL_BLUE : GL_RED);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_SWIZZLE_G, GL_GREEN);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_SWIZZLE_B, bgr ? GL_RED : GL_BLUE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_SWIZZLE_A, pool.swz == 2 ? GL_ONE : GL_ALPHA);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, pool.levels - 1);
+    glActiveTexture(GL_TEXTURE0);
+    g_unitArr[0] = tex;
+}
+
+static bool arrayGrow(ArrPool &pool, size_t ch, size_t one) {
+    if (!g_copyImageAsked) {
+        g_copyImageAsked = 1;
+        p_glCopyImageSubData = (PFN_COPYIMAGE)RanGL_ProcAddress("glCopyImageSubData");
+        if (!p_glCopyImageSubData) p_glCopyImageSubData = (PFN_COPYIMAGE)RanGL_ProcAddress("glCopyImageSubDataEXT");
+        if (!p_glCopyImageSubData) p_glCopyImageSubData = (PFN_COPYIMAGE)RanGL_ProcAddress("glCopyImageSubDataOES");
+        LOGI("texture array growth: %s", p_glCopyImageSubData ? "copy on the GPU" : "unavailable - new arrays instead");
+    }
+    if (!p_glCopyImageSubData) return false;
+    ArrChunk &k = pool.chunks[ch];
+    if (k.cap >= 256) return false;
+    //  A quarter more each time (at least four): the space bought ahead and
+    //  never used stays under a quarter of what the size holds, which matters
+    //  at 5.6 MB a layer for a 1024x1024 costume sheet.
+    int grow = k.cap / 4;
+    if (grow < 4) grow = 4;
+    int cap = k.cap + grow;
+    if (cap > 256) cap = 256;
+    GLuint nt = 0;
+    glGenTextures(1, &nt);
+    arrStorage(nt, pool, cap);
+    int lw = pool.w, lh = pool.h;
+    for (int l = 0; l < pool.levels; ++l) {
+        RanGLT_Call(p_glCopyImageSubData, k.tex, (GLenum)GL_TEXTURE_2D_ARRAY, (GLint)l, 0, 0, 0,
+                    nt, (GLenum)GL_TEXTURE_2D_ARRAY, (GLint)l, 0, 0, 0, (GLsizei)lw, (GLsizei)lh, (GLsizei)k.cap);
+        lw = lw > 1 ? lw / 2 : 1; lh = lh > 1 ? lh / 2 : 1;
+    }
+    GLuint old = k.tex;
+    if (g_unitArr[1] == old) g_unitArr[1] = 0;
+    glDeleteTextures(1, &old);
+    g_arrBytes += (long long)one * (cap - k.cap);
+    k.tex = nt;
+    k.live.resize((size_t)cap, 0);
+    k.cap = cap;
+    k.samp = TexSampler();
+    LOGI("texture array grown: %dx%d, %d levels, swizzle %d, now %d layers (%lld MB in arrays)",
+         pool.w, pool.h, pool.levels, pool.swz, cap, g_arrBytes >> 20);
+    return true;
+}
+
+static size_t dxtLevelBytes(int w, int h, int levels, int swz) {
+    size_t b = 0;
+    const size_t block = swz == 10 ? 8 : 16;
+    for (int l = 0; l < levels; ++l) {
+        b += (size_t)((w + 3) / 4 > 0 ? (w + 3) / 4 : 1) * (size_t)((h + 3) / 4 > 0 ? (h + 3) / 4 : 1) * block;
+        w = w > 1 ? w / 2 : 1; h = h > 1 ? h / 2 : 1;
+    }
+    return b;
+}
+
+extern "C" unsigned RanGLR_ArrayAlloc(int w, int h, int levels, int d3dFormat) {
+    if (!g_inited || !texArraysOn()) return 0;
+    //  Why a costume texture stayed a texture of its own, the first few times.
+    static int s_said = 0;
+    int why = 0;
+    int swz = -1;
+    if (w < 16 || h < 16 || levels < 1 || levels > 12) why = 1;
+    else if ((w & (w - 1)) || (h & (h - 1))) why = 2;
+    else if (isDXT(d3dFormat)) {
+        if (!haveS3TC()) swz = 0;                //  decoded, as the 2D path does
+        else if (dxtArraysOk()) swz = d3dFormat == FMT_DXT1 ? 10 : (d3dFormat == FMT_DXT5 || d3dFormat == FMT_DXT4) ? 12 : 11;
+        else why = 3;
+    }
+    else if (d3dFormat == D3DFMT_A8R8G8B8)       swz = 1;
+    else if (d3dFormat == D3DFMT_X8R8G8B8)       swz = 2;
+    else                                         why = 4;
+    if (why) {
+        if (s_said < 24) {
+            ++s_said;
+            LOGI("texture array refused (%s): %dx%d, %d levels, d3d format %d",
+                 why == 1 ? "size/levels" : why == 2 ? "not a power of two" :
+                 why == 3 ? "DXT the GPU samples itself" : "format", w, h, levels, d3dFormat);
+        }
+        return 0;
+    }
+
+    size_t p = 0;
+    for (; p < g_arrPools.size(); ++p) {
+        const ArrPool &q = g_arrPools[p];
+        if (q.w == w && q.h == h && q.levels == levels && q.swz == swz) break;
+    }
+    if (p == g_arrPools.size()) {
+        ArrPool q; q.w = w; q.h = h; q.levels = levels; q.swz = swz;
+        g_arrPools.push_back(q);
+    }
+    ArrPool &pool = g_arrPools[p];
+    const size_t one = swz >= 10 ? dxtLevelBytes(w, h, levels, swz) : levelBytes(w, h, levels);
+    size_t ch = 0;
+    for (; ch < pool.chunks.size(); ++ch)
+        if (pool.chunks[ch].used < pool.chunks[ch].cap) break;
+    //  Full: grow the last array by a quarter, copying what it holds on
+    //  the GPU, so one size of costume texture stays in ONE array - a merged
+    //  character can only sample a few at once. Where the copy is not
+    //  available a second array is started instead.
+    if (ch == pool.chunks.size() && !pool.chunks.empty() && arrayGrow(pool, pool.chunks.size() - 1, one))
+        ch = pool.chunks.size() - 1;
+    if (ch == pool.chunks.size()) {
+        //  Small to start: most sizes only ever hold a few textures.
+        int cap = 4;
+        ArrChunk k;
+        k.tex = 0; k.cap = cap; k.used = 0;
+        k.live.assign((size_t)cap, 0);
+        glGenTextures(1, &k.tex);
+        arrStorage(k.tex, pool, cap);
+        g_arrBytes += (long long)one * cap;
+        pool.chunks.push_back(k);
+        LOGI("texture array %u: %dx%d, %d levels, swizzle %d, %d layers (%lld MB in arrays)",
+             (unsigned)k.tex, w, h, levels, swz, cap, g_arrBytes >> 20);
+    }
+    ArrChunk &chunk = pool.chunks[ch];
+    int layer = 0;
+    while (layer < chunk.cap && chunk.live[(size_t)layer]) ++layer;
+    if (layer >= chunk.cap) return 0;
+    chunk.live[(size_t)layer] = 1;
+    ++chunk.used;
+
+    unsigned slot;
+    if (!g_arrFree.empty()) { slot = g_arrFree.back(); g_arrFree.pop_back(); }
+    else { slot = (unsigned)g_arrSlots.size(); g_arrSlots.push_back(ArrSlot()); }
+    ArrSlot &sl = g_arrSlots[slot];
+    sl.pool = (int)p; sl.chunk = (int)ch; sl.layer = layer; sl.live = true;
+    return kArrTag | slot;
+}
+
+//  One mip level of a slot, as the 2D path would have uploaded it.
+extern "C" void RanGLR_ArrayUploadLevel(unsigned id, int level, int width, int height,
+                                        int d3dFormat, const void *bits, unsigned dataSize) {
+    const ArrSlot *sl = arrSlot(id);
+    if (!sl || !bits) return;
+    const ArrPool &pool = g_arrPools[(size_t)sl->pool];
+    if (level < 0 || level >= pool.levels) return;
+    const GLuint tex = pool.chunks[(size_t)sl->chunk].tex;
+    if (pool.swz >= 10) {
+        //  Kept compressed: the blocks go up as they came off the disk.
+        if (!isDXT(d3dFormat)) return;
+        const GLenum internal = pool.swz == 10 ? GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
+                              : pool.swz == 11 ? GL_COMPRESSED_RGBA_S3TC_DXT3_EXT
+                              : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        bindArrUnit(0, tex);
+        glActiveTexture(GL_TEXTURE5);
+        glCompressedTexSubImage3D(GL_TEXTURE_2D_ARRAY, level, 0, 0, sl->layer, width, height, 1,
+                                  internal, (GLsizei)dataSize, bits);
+        glActiveTexture(GL_TEXTURE0);
+        return;
+    }
+    std::vector<GLubyte> rgba;
+    const void *src = bits;
+    if (isDXT(d3dFormat)) {
+        if (!decodeDXT(d3dFormat, width, height, (const GLubyte *)bits, dataSize, rgba)) return;
+        src = &rgba[0];
+    } else if (dataSize < (unsigned)width * (unsigned)height * 4u) {
+        return;
+    }
+    bindArrUnit(0, tex);
+    glActiveTexture(GL_TEXTURE5);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, level, 0, 0, sl->layer, width, height, 1,
+                    GL_RGBA, GL_UNSIGNED_BYTE, src);
+    glActiveTexture(GL_TEXTURE0);
+}
+
+//  A texture that ships without mips (most costume .png files): level 0 as
+//  given, every smaller level box-filtered here, as glGenerateMipmap does for
+//  the 2D path - an array cannot generate one layer's mips on its own.
+extern "C" void RanGLR_ArrayUploadWithMips(unsigned id, int width, int height,
+                                           int d3dFormat, const void *bits, unsigned dataSize) {
+    const ArrSlot *sl = arrSlot(id);
+    if (!sl || !bits) return;
+    const ArrPool &pool = g_arrPools[(size_t)sl->pool];
+    if (pool.swz >= 10) return;         //  compressed: never asked for (see RanGLR_ArrayNeedsCpuMips)
+    std::vector<GLubyte> cur;
+    if (isDXT(d3dFormat)) {
+        if (!decodeDXT(d3dFormat, width, height, (const GLubyte *)bits, dataSize, cur)) return;
+    } else {
+        if (dataSize < (unsigned)width * (unsigned)height * 4u) return;
+        cur.assign((const GLubyte *)bits, (const GLubyte *)bits + (size_t)width * height * 4);
+    }
+    int w = width, h = height;
+    for (int level = 0; level < pool.levels; ++level) {
+        //  Already RGBA (or the BGRA the swizzle reads): upload as A8B8G8R8,
+        //  which takes the bytes as they are.
+        RanGLR_ArrayUploadLevel(id, level, w, h, D3DFMT_A8B8G8R8, &cur[0], (unsigned)cur.size());
+        if (w == 1 && h == 1) break;
+        const int w2 = w > 1 ? w / 2 : 1, h2 = h > 1 ? h / 2 : 1;
+        std::vector<GLubyte> nxt((size_t)w2 * h2 * 4);
+        for (int y = 0; y < h2; ++y) {
+            const int y0 = y * 2, y1 = (y * 2 + 1 < h) ? y * 2 + 1 : y * 2;
+            for (int x = 0; x < w2; ++x) {
+                const int x0 = x * 2, x1 = (x * 2 + 1 < w) ? x * 2 + 1 : x * 2;
+                const GLubyte *a = &cur[((size_t)y0 * w + x0) * 4];
+                const GLubyte *b = &cur[((size_t)y0 * w + x1) * 4];
+                const GLubyte *cc = &cur[((size_t)y1 * w + x0) * 4];
+                const GLubyte *d = &cur[((size_t)y1 * w + x1) * 4];
+                GLubyte *o = &nxt[((size_t)y * w2 + x) * 4];
+                for (int k = 0; k < 4; ++k) o[k] = (GLubyte)((a[k] + b[k] + cc[k] + d[k] + 2) >> 2);
+            }
+        }
+        cur.swap(nxt);
+        w = w2; h = h2;
+    }
+}
+
+//  A whole merged character in one draw (see uMerge): nMats slots of 16 floats,
+//  up to six texture arrays (virtual texture names of any layer in each), and
+//  the direct light (diffuse, ambient, direction). nMats 0 turns it off.
+extern "C" void RanGLR_SetMerge(int nMats, const float *mats, int nArr, const unsigned *arrTex,
+                                const float *directLight9) {
+    if (nMats <= 0 || !mats) { g_merge = 0; return; }
+    if (nMats > 16) nMats = 16;
+    if (nArr > 6) nArr = 6;
+    g_merge = 1;
+    g_mergeMats = nMats;
+    memcpy(g_mergeMat, mats, sizeof(float) * 16 * (size_t)nMats);
+    g_mergeArrN = nArr;
+    for (int a = 0; a < nArr; ++a) {
+        const ArrSlot *sl = arrSlot(arrTex[a]);
+        g_mergeArr[a] = sl ? g_arrPools[(size_t)sl->pool].chunks[(size_t)sl->chunk].tex : 0;
+    }
+    if (directLight9) memcpy(g_mergeL0, directLight9, sizeof(g_mergeL0));
+}
+
+//  Which array and layer a virtual texture name is in, for the merged mesh:
+//  the array's GL name changes when it grows, the slot does not.
+extern "C" int RanGLR_ArraySlotInfo(unsigned id, unsigned *arrayKey, int *layer) {
+    const ArrSlot *sl = arrSlot(id);
+    if (!sl) return 0;
+    if (arrayKey) *arrayKey = (unsigned)((sl->pool << 8) | sl->chunk);
+    if (layer) *layer = sl->layer;
+    return 1;
+}
+
+static void arrayFree(unsigned id) {
+    const unsigned i = id & 0x0FFFFFFFu;
+    if (i >= g_arrSlots.size() || !g_arrSlots[i].live) return;
+    ArrSlot &sl = g_arrSlots[i];
+    ArrPool &pool = g_arrPools[(size_t)sl.pool];
+    ArrChunk &chunk = pool.chunks[(size_t)sl.chunk];
+    chunk.live[(size_t)sl.layer] = 0;
+    --chunk.used;
+    sl.live = false;
+    g_arrFree.push_back(i);
+}
+
+//  The sampler state of a draw, set on the array the slot lives in. Layers
+//  share it, so two costume textures sampled differently in a row cost the
+//  same calls a 2D texture's first draw does; in practice they agree.
+static void applyArraySampler(GLuint arrTex, TexSampler &have, int levels, int unit) {
+    TexSampler want;
+    want.minFilter = (GLint)minFilterFor(g_sampMin, g_sampMip, levels > 1);
+    want.magFilter = g_sampMag == 1 ? GL_NEAREST : GL_LINEAR;
+    want.wrapS = (GLint)wrapMode(g_sampAddrU);
+    want.wrapT = (GLint)wrapMode(g_sampAddrV);
+    const float maxAniso = maxAnisotropySupported();
+    if (maxAniso > 1.0f) {
+        want.aniso = (float)g_sampAniso;
+        if (g_sampMin != 3) want.aniso = 1.0f;
+        if (want.aniso > maxAniso) want.aniso = maxAniso;
+    }
+    if (have.minFilter == want.minFilter && have.magFilter == want.magFilter &&
+        have.wrapS == want.wrapS && have.wrapT == want.wrapT &&
+        (maxAniso <= 1.0f || have.aniso == want.aniso)) return;
+    bindArrUnit(unit, arrTex);
+    glActiveTexture(unit == 0 ? GL_TEXTURE5 : GL_TEXTURE6);
+    if (have.minFilter != want.minFilter) glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, want.minFilter);
+    if (have.magFilter != want.magFilter) glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, want.magFilter);
+    if (have.wrapS != want.wrapS) glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, want.wrapS);
+    if (have.wrapT != want.wrapT) glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, want.wrapT);
+    if (maxAniso > 1.0f && have.aniso != want.aniso)
+        glTexParameterf(GL_TEXTURE_2D_ARRAY, 0x84FE /*GL_TEXTURE_MAX_ANISOTROPY_EXT*/, want.aniso);
+    glActiveTexture(GL_TEXTURE0);
+    have = want;
+    g_callsTexture += 2;
+}
+
+namespace {
+//  Stage 0: bind the slot's array and say which layer; -1 for an ordinary texture.
+float arrayBindStage0(unsigned id) {
+    const ArrSlot *sl = arrSlot(id);
+    if (!sl) return -1.0f;
+    ArrPool &pool = g_arrPools[(size_t)sl->pool];
+    ArrChunk &chunk = pool.chunks[(size_t)sl->chunk];
+    bindArrUnit(0, chunk.tex);
+    applyArraySampler(chunk.tex, chunk.samp, pool.levels, 0);
+    return (float)sl->layer;
+}
+
+//  Stage 1 (the "_m" gloss maps of DxEffCharUserColor and the like): unit 6,
+//  always repeating, as the 2D stage 1 path sets it.
+float arrayBindStage1(unsigned id) {
+    const ArrSlot *sl = arrSlot(id);
+    if (!sl) return -1.0f;
+    ArrPool &pool = g_arrPools[(size_t)sl->pool];
+    ArrChunk &chunk = pool.chunks[(size_t)sl->chunk];
+    bindArrUnit(1, chunk.tex);
+    if (chunk.samp.wrapS != GL_REPEAT || chunk.samp.wrapT != GL_REPEAT) {
+        glActiveTexture(GL_TEXTURE6);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glActiveTexture(GL_TEXTURE0);
+        chunk.samp.wrapS = chunk.samp.wrapT = GL_REPEAT;
+    }
+    return (float)sl->layer;
+}
+}   // namespace
+
 extern "C" unsigned RanGLR_UploadTextureLevel(unsigned existing, int level, int width, int height,
                                               int d3dFormat, const void *bits, unsigned dataSize) {
     if (!g_inited || !bits || width <= 0 || height <= 0) return existing;
@@ -6121,6 +6700,7 @@ extern "C" void RanGLR_FinishCubeTexture(unsigned tex, int levels) {
 
 extern "C" void RanGLR_FinishTexture(unsigned tex, int levels, int d3dFormat) {
     if (!g_inited || !tex) return;
+    if (isArrTex(tex)) { ++g_texFullUploads; ++g_texUploadsEver; return; }
     ++g_texFullUploads;
     ++g_texUploadsEver;
     bindTex2D(tex);
@@ -6306,6 +6886,7 @@ static std::mutex          g_deadTexLock;
 static std::vector<GLuint> g_deadTex;
 
 static void deleteTextureNow(GLuint tex) {
+    if (isArrTex(tex)) { arrayFree(tex); return; }
     {
         auto it = g_texGpuLevels.find((GLuint)tex);
         if (it != g_texGpuLevels.end()) {
