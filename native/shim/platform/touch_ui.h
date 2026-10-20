@@ -285,4 +285,6 @@ extern "C" void RanTouch_SetBalloons(int n, const float *fx, const float *fy, co
                                      const unsigned *id);
 extern "C" int  RanTouch_ConsumeBalloon(unsigned *id);
 extern "C" void RanTouch_SetNearButton(int show);
+//  The nearby-players button's place: cx of the width, cy and r of the height.
+extern "C" void RanTouch_GetNearButton(float *cx, float *cy, float *r);
 extern "C" int  RanTouch_ConsumeNear(void);

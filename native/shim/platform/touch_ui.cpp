@@ -4651,6 +4651,18 @@ extern "C" void RanTouch_SetPickupArt(unsigned tex, int w, int h, int frames, in
     g_pickCols = cols > 0 ? cols : 1;
 }
 
+//  Where the nearby-players button is, as fractions of the surface (cx of the
+//  width, cy and r of the height), so the client can open its list beside it.
+extern "C" void RanTouch_GetNearButton(float *cx, float *cy, float *r) {
+    Vec2 c; float rr;
+    nearCircle(c, rr);
+    const float w = (g_width  > 0) ? (float)g_width  : 1.0f;
+    const float h = (g_height > 0) ? (float)g_height : 1.0f;
+    if (cx) *cx = c.x / w;
+    if (cy) *cy = c.y / h;
+    if (r)  *r  = rr / h;
+}
+
 extern "C" void RanTouch_SetNearButton(int show) {
     g_nearShow = (show != 0);
     if (!g_nearShow) { g_nearPtr = -1; g_nearDown = false; }

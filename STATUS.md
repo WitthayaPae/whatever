@@ -94,6 +94,14 @@ balloon at the end of a near player's name, and in a crowd a button that lists t
   `kGrpNear`, after the talk button; cannot be hidden) -> `CMobileNearList` (kit panel + CMobileList,
   10 nearest, name + level); a name opens that player's menu; a press outside closes it.
 - **Layout file:** 228 floats (+4 nearby-players group, +1 pick-up anchor); 223-float files load.
+- **Follow-up (user, same day):** the nearby-players button shows whenever anyone is near (not only
+  in a crowd; balloons still for 3 or fewer, a player whose name is not shown just gets none). The
+  list opens beside the button (left, or right when short of room), is dragged by its title bar
+  and then opens where it was left (`fMobileNearListPos` in option.ini). Every balloon is one size
+  (radius 11, was sized from the name box, which is two lines with a guild) and sits level with
+  the player-name line. Drag reads the UI's own pointer: the raw device also saw the button's own
+  tap and once saved a position with no drag (caught on LDPlayer, fixed, key renamed so the bad
+  value is ignored).
 - **Data to ship:** `Gui.rcc` (word MOBILE_NEARPLAYERS "ผู้เล่นใกล้เคียง" / "Nearby players" in
   gameword + gameword_en, repacked, verified) and `textures/gui/mobile_pickup.png`. Backups
   `backups/ui_nearplayers_20261020/`.
