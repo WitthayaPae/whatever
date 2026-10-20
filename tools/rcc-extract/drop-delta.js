@@ -6,7 +6,7 @@
 //
 //   node drop-delta.js <CLIENT/data dir> <report dir> <work dir> [--write] [--nosplit]
 //                      [--only=lv02.genitem,lv05.genitem,...] [--set-stone=0.75]
-//                      [--match-resist] [--match-spec=991,992]
+//                      [--match-resist] [--match-spec=991,992] [--match-to=Armor]
 //
 // --only: change just these tables. --set-stone: instead of the deltas, set the
 // stone drop of each table to this many per 100 kills and leave weapon and armor
@@ -19,6 +19,8 @@
 // stones, each spec giving what the table's stones give (user, 2026-10-20: event
 // items 512/57 spec 991 and 512/58 spec 992, "same drop rate as the stone
 // upgrade"). The report dir must come from data whose item.csv lists the specs.
+// --match-to=Armor: copy that category instead of the stones (user, 2026-10-20:
+// "make the drop rate event feather and shard same as Armor").
 //
 // Same tables, same server maths and same checks as drop-field-even.js (which
 // this is copied from): field table = lv*, osaka*, Infinitystairs*, gmd_* used by
@@ -52,6 +54,9 @@ const specArg = argv0.find((a) => a.startsWith('--match-spec='));
 const MATCH_SPEC = specArg ? specArg.slice(13).split(',').map((x) => parseInt(x, 10)) : null;
 if (MATCH_SPEC && MATCH_SPEC.some((x) => !(x > 0 && x < 999))) throw new Error('--match-spec needs spec ids');
 const evCat = (id) => 'Spec' + id;
+// --match-to: which category the --match-spec lines copy (default the upgrade stones)
+const toArg = argv0.find((a) => a.startsWith('--match-to='));
+const MATCH_TO = toArg ? toArg.slice(11) : 'Stone';
 const SET = MATCH_SPEC ? Object.fromEntries(MATCH_SPEC.map((id) => [evCat(id), true]))
   : MATCH_RESIST ? { Resist: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
 const DELTA = { Weapon: 0.4, Armor: 0.4, Stone: 0.2 };
@@ -281,7 +286,7 @@ for (const t of T) {
   if (!(t.rolls > 0) || !(t.gen > 0)) { skipped.push([t.name, t.level, 'never fires']); continue; }
   const before = perCat(t, t.spec, t.gen);
   const want = {}, base = {};
-  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = MATCH_SPEC || MATCH_RESIST ? before.Stone : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
+  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = MATCH_SPEC ? before[MATCH_TO] : MATCH_RESIST ? before.Stone : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
   const note = new Set();
 
   let gen = t.gen, L = build(t, gen, want, before, note);
