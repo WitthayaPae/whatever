@@ -73,6 +73,36 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-20 — Pick-up hand button, name balloons, nearby-players list (on LDPlayer for the user's test; NOT patched)
+
+User request: the pick-up button uses the PC cursor (`data/editor/select.ani`), sits outside the
+skill arc, shows only near an item, stays editable; the long press on a player is replaced by a
+balloon at the end of a near player's name, and in a crowd a button that lists them.
+
+- **Pick-up:** shown only while Space would pick something up (`GLCharacter::MobilePickFind` =
+  `FindNearItem` finds an item or money in 83 units, not stunned / on a vehicle); always in the HUD
+  editor. Round slot bezel + the 16 select.ani frames (1/6 s each, from the .ani rate chunk) as
+  `textures/gui/mobile_pickup.png` (512x512, 4x4 cells of 128, nearest 4x; client hands it over like
+  the HUD sheet). Default place: just outside the skill arc on its outer edge towards the screen
+  middle (`placePickup`, re-run when the arc moves); skill-slot size. Old layouts whose pick-up was
+  dragged keep the old anchor (under attack) so it stays put; reset moves it out.
+- **Balloons:** players within bodies + 25 + 50 (P2P reach + a few steps, like the talk button),
+  nearest first; up to 3 get the talk bubble at the right end of their plate (`CNameDisplayMan::
+  MobilePlayerPlate`); a tap = `GLCharacter::MobileOpenPlayerMenu` (P2PReaction, walks first).
+  The 450 ms hold no longer opens the menu.
+- **Crowd:** more than 3 near, or one without a shown name -> the nearby-players button (HUD group
+  `kGrpNear`, after the talk button; cannot be hidden) -> `CMobileNearList` (kit panel + CMobileList,
+  10 nearest, name + level); a name opens that player's menu; a press outside closes it.
+- **Layout file:** 228 floats (+4 nearby-players group, +1 pick-up anchor); 223-float files load.
+- **Data to ship:** `Gui.rcc` (word MOBILE_NEARPLAYERS "ผู้เล่นใกล้เคียง" / "Nearby players" in
+  gameword + gameword_en, repacked, verified) and `textures/gui/mobile_pickup.png`. Backups
+  `backups/ui_nearplayers_20261020/`.
+- **Verified on LDPlayer (emulator-5554, x86_64 RanTest.apk):** balloon on a near player, tap opens
+  the menu; 150 fakes -> button replaces balloons, list opens, a name opens its menu; hand button
+  outside the arc in the editor, dragged + saved + survives a restart, put back. **Not yet seen:**
+  the hand appearing beside a real ground item (no gold / no spare item on the test account to
+  drop) - user to check. iOS: shared code only, CI build on push; no iPhone run.
+
 ## 2026-10-20 — Renderer v2 stopped and reverted; costume-load crash fixed
 
 User decision after measurement + online research (`DEV EP9/RENDERER_PLAN.md`): all 500 players at
