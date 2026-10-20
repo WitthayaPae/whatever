@@ -73,6 +73,22 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-20 — Drop rates: "perfect" backup, then weapon/armor -0.4 and stone -0.2 (NOT uploaded)
+
+- The user named the rates as of this morning "the perfect backup": `backups/drop_perfect_20261020/`
+  (GLogicServer.rcc md5 62eb85ca..., GLogic.rcc 8c26d647..., report CSVs, README with the table).
+- Then, per 100 kills on every normal field table (lv*, osaka*, Infinitystairs*, gmd_*; 101 tables,
+  397 monsters): weapon and armor -0.4, upgrade stone -0.2. `tools/rcc-extract/drop-delta.js`
+  (copy of drop-field-even.js's maths). The stone line was a single 2% line in 89 tables, and the
+  0.7 rule makes [1.4, 2) unreachable for one line, so it is split into two equal lines under 2%
+  (user chose this, option A): stones are now also raised by a killer's drop bonus (cards,
+  events), and lv14 lost 0.37 potions / 100 kills for room. 7 weapon/armor lines split the same way.
+- Checked with the full drop report: only weapon, armor and stone moved (and lv14's potion);
+  band medians exactly -0.40 / -0.20. New `CLIENT/data/glogicserver/GLogicServer.rcc` md5
+  3b83bb45..., GLogic.rcc unchanged. Per-table list: `backups/drop_minus_20261020/changed_tables.csv`.
+- Live only after the user uploads GLogicServer.rcc to the server's data/glogicserver and restarts
+  ServerField.
+
 ## 2026-10-20 — Pick-up hand button, name balloons, nearby-players list (on LDPlayer for the user's test; NOT patched)
 
 User request: the pick-up button uses the PC cursor (`data/editor/select.ani`), sits outside the
