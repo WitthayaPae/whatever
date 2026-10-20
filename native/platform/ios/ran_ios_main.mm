@@ -372,7 +372,7 @@ static int  g_imeInsetPerMille = 0;
                     //  Who owns it. A crowd test died at 3,050 MB and the
                     //  footprint alone could not say whether that was textures,
                     //  buffers or the engine's own models and animation data.
-                    char own[400];
+                    char own[640];
                     RanD3D_LiveMemLine ( own, sizeof(own) );
                     RanPlat_Log ( RANLOG_INFO, "RanMem", "MEM owners: %s", own );
                     char held[600];

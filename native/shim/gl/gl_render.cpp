@@ -5793,7 +5793,9 @@ GLuint g_unitArr[2] = { 0, 0 };     //  what units 5 and 6 hold
 
 bool texArraysOn() {
     if (g_texArrays < 0) {
-        g_texArrays = RanPlat_DiagExists("texarray") ? 1 : 0;
+        //  On by default; "notexarray" (read once, at the first costume upload)
+        //  keeps every texture a texture of its own.
+        g_texArrays = RanPlat_DiagExists("notexarray") ? 0 : 1;
         LOGI("costume texture arrays: %s", g_texArrays ? "on" : "off");
     }
     return g_texArrays == 1;
@@ -6058,11 +6060,12 @@ extern "C" void RanGLR_ArrayUploadLevel(unsigned id, int level, int width, int h
 //  given, every smaller level box-filtered here, as glGenerateMipmap does for
 //  the 2D path - an array cannot generate one layer's mips on its own.
 extern "C" void RanGLR_ArrayUploadWithMips(unsigned id, int width, int height,
-                                           int d3dFormat, const void *bits, unsigned dataSize) {
+                                           int d3dFormat, const void *bits, unsigned dataSize,
+                                           int halve) {
     const ArrSlot *sl = arrSlot(id);
     if (!sl || !bits) return;
     const ArrPool &pool = g_arrPools[(size_t)sl->pool];
-    if (pool.swz >= 10) return;         //  compressed: never asked for (see RanGLR_ArrayNeedsCpuMips)
+    if (pool.swz >= 10) return;         //  compressed: never asked for (see RanGLR_ArrayCanMakeMips)
     std::vector<GLubyte> cur;
     if (isDXT(d3dFormat)) {
         if (!decodeDXT(d3dFormat, width, height, (const GLubyte *)bits, dataSize, cur)) return;
@@ -6071,6 +6074,26 @@ extern "C" void RanGLR_ArrayUploadWithMips(unsigned id, int width, int height,
         cur.assign((const GLubyte *)bits, (const GLubyte *)bits + (size_t)width * height * 4);
     }
     int w = width, h = height;
+    //  Another player's costume on a phone starts at half size (halfCostumesOn,
+    //  d3d9_impl.cpp): the same 2x2 box the 2D path uses.
+    if (halve && (w > 1 || h > 1)) {
+        const int w2 = w > 1 ? w / 2 : 1, h2 = h > 1 ? h / 2 : 1;
+        std::vector<GLubyte> half((size_t)w2 * h2 * 4);
+        for (int y = 0; y < h2; ++y) {
+            const int y0 = y * 2, y1 = (y * 2 + 1 < h) ? y * 2 + 1 : y * 2;
+            for (int x = 0; x < w2; ++x) {
+                const int x0 = x * 2, x1 = (x * 2 + 1 < w) ? x * 2 + 1 : x * 2;
+                const GLubyte *a = &cur[((size_t)y0 * w + x0) * 4];
+                const GLubyte *b = &cur[((size_t)y0 * w + x1) * 4];
+                const GLubyte *cc = &cur[((size_t)y1 * w + x0) * 4];
+                const GLubyte *d = &cur[((size_t)y1 * w + x1) * 4];
+                GLubyte *o = &half[((size_t)y * w2 + x) * 4];
+                for (int k = 0; k < 4; ++k) o[k] = (GLubyte)((a[k] + b[k] + cc[k] + d[k] + 2) >> 2);
+            }
+        }
+        cur.swap(half);
+        w = w2; h = h2;
+    }
     for (int level = 0; level < pool.levels; ++level) {
         //  Already RGBA (or the BGRA the swizzle reads): upload as A8B8G8R8,
         //  which takes the bytes as they are.

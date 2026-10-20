@@ -227,7 +227,8 @@ void     RanGLR_ArrayUploadLevel(unsigned id, int level, int width, int height,
 void     RanGLR_ArraysContextLost(void);
 //  Level 0 only, with every smaller level made from it (a texture with no mips).
 void     RanGLR_ArrayUploadWithMips(unsigned id, int width, int height,
-                                    int d3dFormat, const void *bits, unsigned dataSize);
+                                    int d3dFormat, const void *bits, unsigned dataSize,
+                                    int halve);
 long long RanGLR_ArrayBytes(void);
 
 #ifdef __cplusplus
