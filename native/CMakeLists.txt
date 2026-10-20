@@ -209,12 +209,6 @@ add_library(vorbis STATIC ${VORBIS_SRC})
 target_include_directories(vorbis PUBLIC ${TP}/vorbis-1.3.7/include PRIVATE ${TP}/vorbis-1.3.7/lib)
 target_link_libraries(vorbis PUBLIC ogg)
 
-#  meshoptimizer 0.22 (MIT): the simplifier only, for the far-character detail
-#  level the D3DX mesh builds per draw group (shim/d3d/d3dx_mesh.cpp).
-add_library(meshopt STATIC ${TP}/meshoptimizer-0.22/src/simplifier.cpp
-                           ${TP}/meshoptimizer-0.22/src/allocator.cpp)
-target_include_directories(meshopt PUBLIC ${TP}/meshoptimizer-0.22/src)
-
 # ---- shim runtime (Win32 emulation, D3D9-on-GLES, D3DX) ------------------------
 #
 #  On iOS the platform files are Objective-C++ (.mm) - ImageIO and UIKit have no
@@ -238,7 +232,6 @@ add_library(ranshim STATIC ${SHIM_SRC})
 target_compile_definitions(ranshim PRIVATE RAN_TIME_DRAWS)
 target_compile_options(ranshim PRIVATE ${RAN_ARC})
 target_include_directories(ranshim PUBLIC ${RAN_COMMON_INCLUDES} ${ENGINE_INCLUDES})
-target_link_libraries(ranshim PUBLIC meshopt)
 #  CXX only. The Objective-C++ files in the shim are platform code, not engine
 #  code: image_decode_ios.mm includes windows.h itself, in the order it wants,
 #  and the other three want nothing from the engine's precompiled header. Forcing
@@ -378,7 +371,7 @@ if(RAN_WRAPMEMCPY AND NOT RAN_IOS)
 endif()
 
 # third-party C libraries must not see the Win32 emulation defines
-foreach(t ranzlib minilzo lua50 ogg vorbis meshopt)
+foreach(t ranzlib minilzo lua50 ogg vorbis)
   target_compile_options(${t} PRIVATE -UWIN32 -U_WINDOWS -U_LIB)
 endforeach()
 

@@ -23,52 +23,10 @@
 #include <math.h>
 #include <vector>
 #include <set>
-#include "meshoptimizer.h"
 #define LOGW(...) RanPlat_Log(RANLOG_WARN, "RanXMesh", __VA_ARGS__)
 
 #define LOGI(...) RanPlat_Log(RANLOG_INFO,  "RanXMesh", __VA_ARGS__)
 #define LOGE(...) RanPlat_Log(RANLOG_ERROR, "RanXMesh", __VA_ARGS__)
-
-//  ---- far-character detail level ("charlod", DxSkinChar.cpp)
-//
-//  A skinned character mesh keeps a second, simplified index list per draw
-//  group, built the first time the mesh is drawn far away. The game sets the
-//  level around a far character's whole render (RanD3D_SetMeshLod), so the
-//  body and every pass that redraws the same mesh - enhance glow, colour
-//  shine, specular - draw from the reduced list. The vertices are untouched:
-//  same skinning, same UVs; only fewer triangles reference them. Group borders
-//  are locked so no crack opens where two groups meet.
-static int      g_meshLod = 0;
-static float    g_lodRatio = 0.5f, g_lodError = 0.02f;
-static unsigned g_lodGen = 1;
-static unsigned long g_lodDraws = 0, g_lodTrisFull = 0, g_lodTrisDrawn = 0, g_lodBuilds = 0;
-
-//  Returns the level it replaces, so a nested render (a rider on a vehicle)
-//  can put it back.
-extern "C" int RanD3D_SetMeshLod(int level) { const int old = g_meshLod; g_meshLod = level; return old; }
-
-//  ratio: target share of the triangles kept (0..1); error: the most a vertex
-//  may move, as a share of the mesh's size. A change rebuilds every list.
-extern "C" void RanD3D_SetMeshLodParams(float ratio, float error) {
-    if (ratio < 0.05f) ratio = 0.05f;
-    if (ratio > 1.0f) ratio = 1.0f;
-    if (error < 0.0f) error = 0.0f;
-    if (ratio == g_lodRatio && error == g_lodError) return;
-    g_lodRatio = ratio;
-    g_lodError = error;
-    ++g_lodGen;
-}
-
-//  Reduced draws, the triangles they would have drawn, the triangles drawn,
-//  and lists built, since the last call. Measurement only.
-extern "C" void RanD3D_TakeLodStats(unsigned long *draws, unsigned long *full,
-                                    unsigned long *drawn, unsigned long *builds) {
-    if (draws) *draws = g_lodDraws;
-    if (full) *full = g_lodTrisFull;
-    if (drawn) *drawn = g_lodTrisDrawn;
-    if (builds) *builds = g_lodBuilds;
-    g_lodDraws = g_lodTrisFull = g_lodTrisDrawn = g_lodBuilds = 0;
-}
 
 // The parsed node behind an ID3DXFileData, so LoadMeshFromXof can reach it.
 XNode *RanXFile_NodeOf(ID3DXFileData *data);
@@ -113,16 +71,9 @@ public:
     std::vector<WORD>  m_indices;
     std::vector<DWORD> m_attributes;              // one per face
     std::vector<D3DXATTRIBUTERANGE> m_attribTable;
-    //  The far detail level (see g_meshLod): its own index buffer, and per
-    //  attribute range where its indices start and how many there are.
-    IDirect3DIndexBuffer9  *m_lodIb;
-    std::vector<WORD>       m_lodIdx;
-    std::vector<DWORD>      m_lodStart, m_lodCount;
-    unsigned                m_lodGen;
 
     RanMesh(IDirect3DDevice9 *dev, DWORD numFaces, DWORD numVerts, DWORD options, DWORD fvf)
         : m_ref(1), m_device(dev), m_vb(NULL), m_ib(NULL), m_gpuDirty(true),
-          m_lodIb(NULL), m_lodGen(0),
           m_dirtyStreak(0), m_streamAlways(false),
           m_fvf(fvf), m_options(options),
           m_numVerts(numVerts), m_numFaces(numFaces) {
@@ -135,7 +86,6 @@ public:
     ~RanMesh() {
         if (m_vb) m_vb->Release();
         if (m_ib) m_ib->Release();
-        if (m_lodIb) m_lodIb->Release();
         if (m_device) m_device->Release();
     }
 
@@ -170,23 +120,6 @@ public:
         if (!found || !count) return D3D_OK;
 
         m_device->SetFVF(m_fvf);
-
-        //  A far character: the reduced list, from the same vertex buffer.
-        if (g_meshLod && lodEligible() && !m_streamAlways && !m_gpuDirty) {
-            if (m_lodGen != g_lodGen) buildLod();
-            size_t ti = 0;
-            for (; ti < m_attribTable.size(); ++ti)
-                if (m_attribTable[ti].AttribId == AttribId) break;
-            if (m_lodIb && ti < m_lodCount.size() && m_lodCount[ti] && ensureGpuBuffers()) {
-                ++g_lodDraws;
-                g_lodTrisFull += count;
-                g_lodTrisDrawn += m_lodCount[ti] / 3;
-                m_device->SetStreamSource(0, m_vb, 0, m_stride);
-                m_device->SetIndices(m_lodIb);
-                return m_device->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, 0, m_numVerts,
-                                                      m_lodStart[ti], m_lodCount[ti] / 3);
-            }
-        }
 
         //  From the mesh's own GPU buffers, not by streaming it again.
         //
@@ -387,13 +320,13 @@ public:
         *ppData = m_vertices.empty() ? NULL : &m_vertices[0];
         return D3D_OK;
     }
-    HRESULT __stdcall UnlockVertexBuffer() { m_gpuDirty = true; m_lodGen = 0; return D3D_OK; }
+    HRESULT __stdcall UnlockVertexBuffer() { m_gpuDirty = true; return D3D_OK; }
     HRESULT __stdcall LockIndexBuffer(DWORD, LPVOID *ppData) {
         if (!ppData) return D3DERR_INVALIDCALL;
         *ppData = m_indices.empty() ? NULL : &m_indices[0];
         return D3D_OK;
     }
-    HRESULT __stdcall UnlockIndexBuffer() { m_gpuDirty = true; m_lodGen = 0; return D3D_OK; }
+    HRESULT __stdcall UnlockIndexBuffer() { m_gpuDirty = true; return D3D_OK; }
     HRESULT __stdcall GetAttributeTable(D3DXATTRIBUTERANGE *pAttribTable, DWORD *pAttribTableSize) {
         if (!pAttribTableSize) return D3DERR_INVALIDCALL;
         if (m_attribTable.empty()) rebuildAttributeTable();
@@ -420,7 +353,7 @@ public:
         *ppData = m_attributes.empty() ? NULL : &m_attributes[0];
         return D3D_OK;
     }
-    HRESULT __stdcall UnlockAttributeBuffer() { m_attribTable.clear(); m_lodGen = 0; return D3D_OK; }
+    HRESULT __stdcall UnlockAttributeBuffer() { m_attribTable.clear(); return D3D_OK; }
     HRESULT __stdcall Optimize(DWORD Options, const DWORD *, DWORD *, DWORD *, LPD3DXBUFFER *,
                                LPD3DXMESH *ppOptMesh) {
         if (!ppOptMesh) return D3DERR_INVALIDCALL;
@@ -444,69 +377,6 @@ public:
     void SortFacesForLoad() { sortFacesByAttribute(); }
 
 private:
-    //  Only the blended character meshes (d3dx_hierarchy.cpp makes them indexed,
-    //  XYZB4 with LASTBETA_UBYTE4): world props, effects and the interface are
-    //  never reduced.
-    bool lodEligible() const {
-        return (m_fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZB4 && (m_fvf & D3DFVF_LASTBETA_UBYTE4) &&
-               !m_vertices.empty() && !m_indices.empty();
-    }
-
-    void buildLod() {
-        m_lodGen = g_lodGen;
-        if (m_lodIb) { m_lodIb->Release(); m_lodIb = NULL; }
-        m_lodIdx.clear();
-        if (m_attribTable.empty()) rebuildAttributeTable();
-        m_lodStart.assign(m_attribTable.size(), 0);
-        m_lodCount.assign(m_attribTable.size(), 0);
-        ++g_lodBuilds;
-
-        std::vector<unsigned> src, dst;
-        DWORD facesIn = 0, facesOut = 0;
-        for (size_t t = 0; t < m_attribTable.size(); ++t) {
-            const D3DXATTRIBUTERANGE &r = m_attribTable[t];
-            const size_t n = (size_t)r.FaceCount * 3;
-            if (!n || (size_t)r.FaceStart * 3 + n > m_indices.size()) continue;
-            src.assign(m_indices.begin() + (size_t)r.FaceStart * 3,
-                       m_indices.begin() + (size_t)r.FaceStart * 3 + n);
-            size_t got = 0;
-            //  A small group is drawn whole: there is little to save and a lot
-            //  of silhouette to lose.
-            if (r.FaceCount >= 48 && g_lodRatio < 1.0f) {
-                dst.resize(n);
-                size_t target = (size_t)((float)n * g_lodRatio) / 3 * 3;
-                if (target < 3) target = 3;
-                got = meshopt_simplify(&dst[0], &src[0], n, (const float *)&m_vertices[0],
-                                       m_numVerts, m_stride, target, g_lodError,
-                                       meshopt_SimplifyLockBorder, NULL);
-            }
-            if (!got) { dst = src; got = n; }
-            m_lodStart[t] = (DWORD)m_lodIdx.size();
-            m_lodCount[t] = (DWORD)got;
-            for (size_t k = 0; k < got; ++k) m_lodIdx.push_back((WORD)dst[k]);
-            facesIn += r.FaceCount;
-            facesOut += (DWORD)(got / 3);
-        }
-        if (m_lodIdx.empty() || !m_device) return;
-        if (FAILED(m_device->CreateIndexBuffer((UINT)(m_lodIdx.size() * sizeof(WORD)), 0,
-                                               D3DFMT_INDEX16, D3DPOOL_MANAGED, &m_lodIb, NULL)) || !m_lodIb) {
-            m_lodIb = NULL;
-            return;
-        }
-        void *p = NULL;
-        if (SUCCEEDED(m_lodIb->Lock(0, (UINT)(m_lodIdx.size() * sizeof(WORD)), &p, 0)) && p) {
-            memcpy(p, &m_lodIdx[0], m_lodIdx.size() * sizeof(WORD));
-            m_lodIb->Unlock();
-        }
-        static int s_said = 0;
-        if (s_said < 12) {
-            ++s_said;
-            LOGI("far detail level: %u -> %u triangles in %u groups (ratio %.2f, error %.3f)",
-                 (unsigned)facesIn, (unsigned)facesOut, (unsigned)m_attribTable.size(),
-                 g_lodRatio, g_lodError);
-        }
-    }
-
     void sortFacesByAttribute() {
         // Stable counting sort: subsets become contiguous, which is what
         // DrawSubset and the attribute table both want.
@@ -529,7 +399,6 @@ private:
         m_attributes.swap(att);
         m_attribTable.clear();
         m_gpuDirty = true;
-        m_lodGen = 0;
     }
 
     void rebuildAttributeTable() {

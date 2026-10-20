@@ -73,6 +73,30 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-20 — Renderer v2 stopped and reverted; costume-load crash fixed
+
+User decision after measurement + online research (`DEV EP9/RENDERER_PLAN.md`): all 500 players at
+full detail cannot hold 60 fps on the Tab S9 once it throttles (GPU held at 295 of 719 MHz within
+3 minutes; with every character effect off the GPU still needs 25-27 ms a frame there), and no
+mobile game publishes doing it. Renderer code reverted: SOURCE e0d858b (merged characters, shine
+pass, far detail level, effcensus) and the MOBILE shim revert of bbedfe0..2eeff68 (bone texture,
+texture arrays, meshoptimizer). The game stays on its existing crowd tiers (nearest 40 full).
+
+**Kept, real bugs (not in a patch yet):**
+- SOURCE 0487f8e — `m_gznhc_earl_body.cps` has a material block the loader cannot read (version
+  7); `SMATERIAL_PIECE::LoadFile` logged "piece dropped" but the load read on, got a garbage trace
+  count and grew `m_vecTrace` past the 2.5 GB watchdog, which aborted the game (the "STRACOR
+  crash" seen when a crowd loads costumes). A player wearing it would crash phones nearby. Now
+  the piece fails to load and simply does not show. Tab S9: 6 spawn/clear cycles of 500, no crash.
+  Pieces still logged as version errors on mobile (pre-existing data issue, not looked into):
+  `w_wing_cap_yellow.cps`, `w_new_shirt_ovp3/7.cps`, `m_new_shirt_ovp6.cps`, `rank_kung1_w.cps`,
+  `m_cos_memo_mask2.cps`, `Dz_m_nikeshoeblue.cps`, `w_as_hk_01_bow.abl`.
+- SOURCE 53ccdea — GLCharClient message slot/skill/type index guards (found by the bounds build).
+
+Measurement notes kept: the Qualcomm GPU profiler (`debug.graphics.gpu.profiler.perfetto=1`)
+crashes the game after 1-5 traces with the graphics thread on; the kgsl busy counter × frame time
+matched its numbers (33.2 vs 33.1 ms) and is the reliable measure.
+
 ## 2026-10-20 — Renderer phase 2 v1: character batch (instanced pieces), opt-in "charbatch"
 
 Plan: `DEV EP9/RENDERER_PLAN.md`. SOURCE 1e2f753 (scope in Render_MobItem), MOBILE 7958786 (shim).

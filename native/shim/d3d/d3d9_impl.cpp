@@ -23,19 +23,6 @@ extern "C" void RanD3D_NoteTexture(unsigned glTex, const char *name);
 extern "C" void RanGLR_ResetShadowBudget(void);
 extern "C" int RanGLR_CanHalveLevel(int d3dFormat);
 extern "C" long long RanGLR_TexGpuBytes(void);
-extern "C" unsigned RanGLR_ArrayAlloc(int width, int height, int levels, int d3dFormat);
-extern "C" void RanGLR_ArrayUploadLevel(unsigned id, int level, int width, int height,
-                                        int d3dFormat, const void *bits, unsigned dataSize);
-extern "C" void RanGLR_ArrayUploadWithMips(unsigned id, int width, int height,
-                                           int d3dFormat, const void *bits, unsigned dataSize,
-                                           int halve);
-//  Costume textures uploaded, by where they went: 0 an array; a texture of
-//  their own because 1 the shim refused, 2 RT/glyph/UI/HD, 3 reloaded after
-//  eviction, 4 not a costume file, 5 needs CPU mips but stays compressed.
-//  Measurement only (reported with the MEM line).
-unsigned long g_arrUp[6] = { 0 };
-extern "C" int RanGLR_ArrayCanMakeMips(int d3dFormat);
-static inline bool RanD3D_IsArrayTexture(unsigned gl) { return (gl & 0xF0000000u) == 0xA0000000u; }
 extern "C" unsigned RanGLR_UploadTextureLevelHalf(unsigned existing, int level, int width, int height,
                                                   int d3dFormat, const void *bits, unsigned dataSize);
 //  The tap ring (touch_ui.cpp): drawn over the whole finished frame.
@@ -337,7 +324,6 @@ public:
     long long m_bornMs = 0;
     long long m_lastUseMs = 0;
     bool      m_evicted = false;
-    bool      m_evictedOnce = false;     //  never back into an array after a reload (texarray)
     //  Counted into g_live.texUndrawnCostume (loader thread adds, render
     //  thread removes on upload or eviction, either on destruction).
     std::atomic<bool> m_countedUndrawn{false};
@@ -447,7 +433,6 @@ public:
             m_surfaces[i]->m_freedAfterUpload = true;
         }
         m_evicted = true;
-        m_evictedOnce = true;
         m_dirty = true;
         ++g_live.texEvicted;
     }
@@ -522,8 +507,8 @@ public:
         //  A surface the client rewrote in part, on a texture GL already has:
         //  send just that rectangle and leave the mip chain alone. This is the
         //  font atlas's path, and it runs many times a frame.
-        if (m_dirty && !m_isRenderTarget && m_glTex && !RanD3D_IsArrayTexture(m_glTex) &&
-            m_surfaces.size() == 1 && !isCompressed(m_format)) {
+        if (m_dirty && !m_isRenderTarget && m_glTex && m_surfaces.size() == 1 &&
+            !isCompressed(m_format)) {
             RanSurface *s = m_surfaces[0];
             if (!s->m_bits.empty() && s->m_dirtyX1 > s->m_dirtyX0 && !s->dirtyIsWholeSurface()) {
                 const UINT bpp = bytesPerPixel(m_format);
@@ -594,66 +579,9 @@ public:
             //  as it first did.
             if (m_halfMode == 1 && m_surfaces.size() > 1) first = 1;
             else if (m_halfMode == 2) boxHalf = true;
-            //  "texarray": a costume texture drawn in 3D becomes one layer of a
-            //  shared texture array (gl_render.cpp), so a merged character can
-            //  draw all its parts at once. Same pixels, same mips, no copy.
-            bool inArray = false;
-            //  Rewritten after it went into an array: the same slot again.
-            if (m_glTex && RanD3D_IsArrayTexture(m_glTex)) {
-                for (size_t i = first; i < m_surfaces.size() && !m_surfaces[i]->m_bits.empty(); ++i) {
-                    RanSurface *s = m_surfaces[i];
-                    RanGLR_ArrayUploadLevel(m_glTex, (int)(i - first), (int)s->m_width, (int)s->m_height,
-                                            (int)m_format, s->m_bits.data(), (unsigned)s->m_bits.size());
-                }
-                inArray = true;
-            }
-            const bool costume3D = !m_srcFile.empty() && isCostumeFile(m_srcFile);
-            if (!m_glTex && costume3D && (m_glyphAtlas || m_hdArt || (m_usage & D3DUSAGE_RENDERTARGET) || g_bindIsUi)) ++g_arrUp[2];
-            else if (!m_glTex && costume3D && m_reloadedOnce) ++g_arrUp[3];   //  counted, and arrays again
-            else if (!m_glTex && !m_srcFile.empty() && !costume3D) ++g_arrUp[4];
-            if (!m_glTex && !m_glyphAtlas && !m_hdArt &&
-                !(m_usage & D3DUSAGE_RENDERTARGET) && !g_bindIsUi && costume3D) {
-                size_t nLev = 0;
-                for (size_t i = first; i < m_surfaces.size() && !m_surfaces[i]->m_bits.empty(); ++i) ++nLev;
-                RanSurface *s0 = m_surfaces[first];
-                //  A box-halved costume (a phone, a single-level sheet): made from
-                //  level 0 at half size, with its mips, in the array path too.
-                const int w0 = boxHalf ? (int)(s0->m_width > 1 ? s0->m_width / 2 : 1) : (int)s0->m_width;
-                const int h0 = boxHalf ? (int)(s0->m_height > 1 ? s0->m_height / 2 : 1) : (int)s0->m_height;
-                int levels = (int)nLev;
-                //  A one-level sheet the GPU keeps compressed: its mips cannot be
-                //  made here, and the plain path draws it without mips. A one-level
-                //  array draws it the same way (applyArraySampler: no mip filter).
-                const bool dxtOne = nLev == 1 && !boxHalf && !RanGLR_ArrayCanMakeMips((int)m_format);
-                const bool makeMips = (nLev == 1 || boxHalf) && !dxtOne;
-                if (makeMips) {
-                    levels = 1;
-                    for (int mw = w0, mh = h0; mw > 1 || mh > 1; ++levels) {
-                        mw = mw > 1 ? mw / 2 : 1; mh = mh > 1 ? mh / 2 : 1;
-                    }
-                }
-                const bool canMips = !makeMips || RanGLR_ArrayCanMakeMips((int)m_format);
-                if (nLev && !canMips) ++g_arrUp[5];
-                const unsigned id = (nLev && canMips) ? RanGLR_ArrayAlloc(w0, h0, levels, (int)m_format) : 0;
-                if (nLev && canMips && !id) ++g_arrUp[1];
-                if (id) {
-                    ++g_arrUp[0];
-                    if (makeMips)
-                        RanGLR_ArrayUploadWithMips(id, (int)s0->m_width, (int)s0->m_height, (int)m_format,
-                                                   s0->m_bits.data(), (unsigned)s0->m_bits.size(), boxHalf ? 1 : 0);
-                    else
-                        for (size_t i = first; i < first + nLev; ++i) {
-                            RanSurface *s = m_surfaces[i];
-                            RanGLR_ArrayUploadLevel(id, (int)(i - first), (int)s->m_width, (int)s->m_height,
-                                                    (int)m_format, s->m_bits.data(), (unsigned)s->m_bits.size());
-                        }
-                    m_glTex = id;
-                    inArray = true;
-                }
-            }
             //  The whole chain, not just level 0: the shipped DDS files carry
             //  their mips and the map shimmers without them.
-            for (size_t i = first; !inArray && i < m_surfaces.size(); ++i) {
+            for (size_t i = first; i < m_surfaces.size(); ++i) {
                 RanSurface *s = m_surfaces[i];
                 if (s->m_bits.empty()) break;
                 if (boxHalf)
@@ -668,7 +596,7 @@ public:
                                                         (unsigned)s->m_bits.size());
             }
             if ((first || boxHalf) && !m_reloadedOnce) ++g_live.texHalved;
-            if (!inArray) RanGLR_FinishTexture(m_glTex, (int)(m_surfaces.size() - first), (int)m_format);
+            RanGLR_FinishTexture(m_glTex, (int)(m_surfaces.size() - first), (int)m_format);
             if (m_glyphAtlas) RanGLR_SampleAsWhiteAlpha(m_glTex);
             if (m_hdArt) RanGLR_MarkHdTexture(m_glTex);
             if (!m_srcPath.empty()) {
@@ -3066,13 +2994,11 @@ extern "C" IDirect3D9 *WINAPI Direct3DCreate9(UINT SDKVersion) {
 //  Buffers exist twice - the RAM copy counted here and the GL buffer - and on
 //  Apple's unified memory both land in the process footprint.
 extern "C" long long RanGLR_TexGpuBytes(void);
-extern "C" long long RanGLR_ArrayBytes(void);
 extern "C" void RanD3D_LiveMemLine(char *out, int cap) {
     const double MB = 1048576.0;
     snprintf(out, cap,
-             "tex %ld = %.0f MB, on GPU as uploaded %.0f MB + arrays %.0f MB [costumes in arrays %lu, own: refused %lu, ui/rt %lu, reloaded %lu, compressed 1-level %lu] (RAM copies %.0f MB) | VB %ld = %.0f MB | IB %ld = %.0f MB | costumes halved %ld | budget evicted %ld reloaded %ld FAILED %ld | undrawn costume %.0f MB, loader paused %ld",
-             (long)g_live.textures, g_live.texBytes / MB, RanGLR_TexGpuBytes() / MB, RanGLR_ArrayBytes() / MB,
-             g_arrUp[0], g_arrUp[1], g_arrUp[2], g_arrUp[3], g_arrUp[5],
+             "tex %ld = %.0f MB, on GPU as uploaded %.0f MB (RAM copies %.0f MB) | VB %ld = %.0f MB | IB %ld = %.0f MB | costumes halved %ld | budget evicted %ld reloaded %ld FAILED %ld | undrawn costume %.0f MB, loader paused %ld",
+             (long)g_live.textures, g_live.texBytes / MB, RanGLR_TexGpuBytes() / MB,
              g_live.texCpuBytes / MB,
              (long)g_live.vbs, g_live.vbBytes / MB, (long)g_live.ibs, g_live.ibBytes / MB,
              (long)g_live.texHalved, (long)g_live.texEvicted, (long)g_live.texReloads,

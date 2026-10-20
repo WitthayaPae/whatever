@@ -166,16 +166,6 @@ unsigned RanGLR_CreateEmptyTexture(void);
 int  RanGLR_OnRenderThread(void);
 void RanGLR_SetVertexBlend(int weightCount, const float *worldMatrices16x4,
                            const float *viewProj16);
-//  Merged characters ("charmerge", DxSkinChar.cpp): every merged character's
-//  bones for the frame in one float texture. Begin, Add per character (returns
-//  its offset, in matrices), Upload once; SetBoneBase(offset) around that
-//  character's indexed draws, -1 after. The vertex shader then reads palette
-//  slots from the texture and places the character with D3DTS_WORLD.
-void RanGLR_BonesBegin(void);
-int  RanGLR_BonesAdd(const float *mats, int count);
-void RanGLR_BonesUpload(void);
-void RanGLR_SetBoneBase(int base);
-void RanGLR_TakeBoneStats(unsigned long *mats, unsigned long *uploads);
 void RanGLR_DiagArm(int n);
 int  RanGLR_DiagArmed(void);
 void RanGLR_DiagVerts(const void *cpuVerts);
@@ -217,19 +207,6 @@ void RanGLR_UpdateTextureRect(unsigned tex, int x, int y, int w, int h,
                               int d3dFormat, const void *bits, unsigned pitchBytes);
 // (the single-level upload is gone; RanGLR_UploadTextureLevel takes its place)
 void     RanGLR_DeleteTexture(unsigned tex);
-
-//  Costume textures as layers of shared texture arrays ("texarray" diag).
-//  ArrayAlloc answers a virtual texture name, or 0 for "upload an ordinary
-//  texture"; the name is then bound, sampled and deleted like any other.
-unsigned RanGLR_ArrayAlloc(int width, int height, int levels, int d3dFormat);
-void     RanGLR_ArrayUploadLevel(unsigned id, int level, int width, int height,
-                                 int d3dFormat, const void *bits, unsigned dataSize);
-void     RanGLR_ArraysContextLost(void);
-//  Level 0 only, with every smaller level made from it (a texture with no mips).
-void     RanGLR_ArrayUploadWithMips(unsigned id, int width, int height,
-                                    int d3dFormat, const void *bits, unsigned dataSize,
-                                    int halve);
-long long RanGLR_ArrayBytes(void);
 
 #ifdef __cplusplus
 }
