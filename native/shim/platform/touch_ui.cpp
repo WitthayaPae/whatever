@@ -1423,7 +1423,7 @@ SlotAdj g_pageBefore[kPageMax];
 //  The toolbar across the top: cancel, reset all, size -, size +, opacity -,
 //  opacity +, save. Positions in surface pixels, recomputed from the unit.
 enum { kToolCancel, kToolReset, kToolSizeDn, kToolSizeUp, kToolAlphaDn, kToolAlphaUp,
-       kToolHide, kToolSave, kToolCount };
+       kToolHide, kToolSave, kToolLeft, kToolUp, kToolDown, kToolRight, kToolCount };
 //  The toolbar can be moved out of the way.
 //
 //  It sits across the top, which is where the status bars, the corner icons
@@ -1451,14 +1451,18 @@ bool *hidFlag() {
 void toolCircle(int t, Vec2 &c, float &r) {
     r = g_unit * 0.26f;
     const float step = g_unit * 0.66f;
-    //  cancel, reset | size - [value] + | opacity - [value] + | hide | save
-    static const float slot[kToolCount] = { 0.0f, 1.0f, 2.6f, 4.4f, 5.6f, 7.4f, 9.0f, 10.4f };
+    //  cancel, reset | size - [value] + | opacity - [value] + | hide | save,
+    //  and under the middle a second row: left, up, down, right. A second row,
+    //  not four more across: the bar is already ~0.96 of the short edge, and
+    //  wider would run off a 4:3 tablet.
+    static const float slot[kToolCount] = { 0.0f, 1.0f, 2.6f, 4.4f, 5.6f, 7.4f, 9.0f, 10.4f,
+                                            3.7f, 4.7f, 5.7f, 6.7f };
     const float total = 10.4f * step;
     c.x = (float)g_width * 0.5f - total * 0.5f + slot[t] * step + g_toolDX;
     //  A third of the way down, not on the top edge: the health section, the
     //  level box and the potion tray are editable now (2026-10-07) and the
     //  bar sat on top of them.
-    c.y = (float)g_height * 0.34f + g_toolDY;
+    c.y = (float)g_height * 0.34f + g_toolDY + (t >= kToolLeft ? step * 1.05f : 0.0f);
 }
 
 //  The plate behind the buttons, which is also its handle.
@@ -1469,7 +1473,36 @@ void toolBar(float *x, float *y, float *w, float *h) {
     if (x) *x = c0.x - r * 1.5f;
     if (y) *y = c0.y - r * 1.45f;
     if (w) *w = (c1.x - c0.x) + r * 3.0f;
-    if (h) *h = r * 2.9f;
+    if (h) *h = r * 2.9f + g_unit * 0.66f * 1.05f;     //  both rows
+}
+
+//  Move what is selected by (mdx, mdy) layout units - the one place a drag and
+//  the arrow buttons both go through, so an arrow moves exactly what a drag
+//  would: a slot on its own, a window on its own, otherwise the group.
+void editNudge(float mdx, float mdy) {
+    if (g_editSel < 0) return;
+    if (g_editSel == kGrpSkill && g_editSlot >= 0) {
+        g_slotAdj[g_editSlot].dx += mdx;
+        g_slotAdj[g_editSlot].dy += mdy;
+    } else if (g_editSel == kGrpPotion && g_editSlot >= 0) {
+        g_potAdj[g_editSlot].dx += mdx;
+        g_potAdj[g_editSlot].dy += mdy;
+    } else if (g_editSel == kGrpPage && g_editSlot >= 0 && g_editSlot < kPageMax) {
+        g_pageAdj[g_editSlot].dx += mdx;
+        g_pageAdj[g_editSlot].dy += mdy;
+    } else if (g_editSel == kGrpCorner && g_editSlot >= 0) {
+        //  One corner icon, not the pair: they are picked separately,
+        //  so they have to move separately too - dragging the quest box
+        //  was taking the party frame with it.
+        g_cornerAdj[g_editSlot].dx += mdx;
+        g_cornerAdj[g_editSlot].dy += mdy;
+    } else if (g_editSel == kGrpWin && g_editSlot >= 0 && g_editSlot < kWinMax) {
+        g_winAdj[g_editSlot].dx += mdx;
+        g_winAdj[g_editSlot].dy += mdy;
+    } else {
+        g_adj[g_editSel].dx += mdx;
+        g_adj[g_editSel].dy += mdy;
+    }
 }
 
 //  Where a group is, for selecting and outlining it.
@@ -1982,6 +2015,12 @@ int RanTouch_PointerDown(int id, float x, float y) {
                 case kToolAlphaDn: if (a) { a->alpha -= 0.1f; if (a->alpha < 0.2f) a->alpha = 0.2f; } break;
                 case kToolAlphaUp: if (a) { a->alpha += 0.1f; if (a->alpha > 1.0f) a->alpha = 1.0f; } break;
                 case kToolHide: { bool *h = hidFlag(); if (h) *h = !*h; } break;
+                //  One screen pixel a tap, for what a finger cannot place
+                //  (user, 2026-10-20: "some user need to move it pixel by pixel").
+                case kToolLeft:  editNudge(-1.0f / g_unit, 0.0f); break;
+                case kToolRight: editNudge( 1.0f / g_unit, 0.0f); break;
+                case kToolUp:    editNudge(0.0f, -1.0f / g_unit); break;
+                case kToolDown:  editNudge(0.0f,  1.0f / g_unit); break;
                 case kToolSave:
                     editEnd();
                     ++g_hudSavedGen;
@@ -2233,30 +2272,7 @@ int RanTouch_PointerMove(int id, float x, float y) {
             return 1;
         }
         if (id == g_editPtr && g_editSel >= 0) {
-            const float mdx = (x - g_editLastX) / g_unit;
-            const float mdy = (y - g_editLastY) / g_unit;
-            if (g_editSel == kGrpSkill && g_editSlot >= 0) {
-                g_slotAdj[g_editSlot].dx += mdx;
-                g_slotAdj[g_editSlot].dy += mdy;
-            } else if (g_editSel == kGrpPotion && g_editSlot >= 0) {
-                g_potAdj[g_editSlot].dx += mdx;
-                g_potAdj[g_editSlot].dy += mdy;
-            } else if (g_editSel == kGrpPage && g_editSlot >= 0 && g_editSlot < kPageMax) {
-                g_pageAdj[g_editSlot].dx += mdx;
-                g_pageAdj[g_editSlot].dy += mdy;
-            } else if (g_editSel == kGrpCorner && g_editSlot >= 0) {
-                //  One corner icon, not the pair: they are picked separately,
-                //  so they have to move separately too - dragging the quest box
-                //  was taking the party frame with it.
-                g_cornerAdj[g_editSlot].dx += mdx;
-                g_cornerAdj[g_editSlot].dy += mdy;
-            } else if (g_editSel == kGrpWin && g_editSlot >= 0 && g_editSlot < kWinMax) {
-                g_winAdj[g_editSlot].dx += mdx;
-                g_winAdj[g_editSlot].dy += mdy;
-            } else {
-                g_adj[g_editSel].dx += mdx;
-                g_adj[g_editSel].dy += mdy;
-            }
+            editNudge((x - g_editLastX) / g_unit, (y - g_editLastY) / g_unit);
             g_editLastX = x; g_editLastY = y;
             layout();
         }
@@ -3710,7 +3726,7 @@ void drawEditor() {
     for (int t = 0; t < kToolCount; ++t) {
         Vec2 c; float r;
         toolCircle(t, c, r);
-        const bool needsSel = (t >= kToolSizeDn && t <= kToolHide);
+        const bool needsSel = (t >= kToolSizeDn && t <= kToolHide) || t >= kToolLeft;
         float dim = (needsSel && !haveSel) ? 0.35f : 1.0f;
         if (t == kToolHide && !hidFlag()) dim = 0.35f;      //  this one cannot be taken off
         chromeDisc(c.x, c.y, r, dim, kFace, kFaceE);
@@ -3747,6 +3763,17 @@ void drawEditor() {
                 drawCapsule(c.x - s, c.y, c.x + s, c.y, w, ink);
                 drawCapsule(c.x, c.y - s, c.x, c.y + s, w, ink);
                 break;
+            case kToolLeft: case kToolRight: case kToolUp: case kToolDown: {
+                //  A chevron pointing the way it moves.
+                const float dx = (t == kToolLeft) ? -1.0f : (t == kToolRight ? 1.0f : 0.0f);
+                const float dy = (t == kToolUp)   ? -1.0f : (t == kToolDown  ? 1.0f : 0.0f);
+                const float tx = c.x + dx * s * 0.55f, ty = c.y + dy * s * 0.55f;   //  tip
+                const float bx = c.x - dx * s * 0.35f, by = c.y - dy * s * 0.35f;   //  back
+                const float px = -dy * s * 0.75f, py = dx * s * 0.75f;              //  across
+                drawCapsule(bx + px, by + py, tx, ty, w, ink);
+                drawCapsule(bx - px, by - py, tx, ty, w, ink);
+                break;
+            }
         }
     }
     //  What the - and + change, and its current value, between each pair.
