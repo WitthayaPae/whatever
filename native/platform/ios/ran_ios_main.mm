@@ -132,12 +132,37 @@ static int  g_imeInsetPerMille = 0;
 + (Class)layerClass { return [CAEAGLLayer class]; }
 @end
 
+//  Where the game is drawn inside a full-screen view: clear of the camera.
+//
+//  The game view filled UIScreen.bounds, so on a notched or Dynamic Island
+//  iPhone the picture - and the HUD laid out to its edges - ran under the
+//  camera housing (user, 2026-10-20). Android never did: with no cutout mode
+//  set, the system keeps a landscape window out of the cutout and leaves a
+//  black strip on that side only. This is the same rule. The housing is at the
+//  top of the phone, so it is on the left in landscape-right and on the right
+//  in landscape-left; only that side is inset, by the safe-area inset (UIKit
+//  reports the same inset on both sides in landscape). The bottom inset (the
+//  home indicator, auto-hidden here) is not taken, as Android does not take it.
+//  The patch page uses the same rect for the boot cover it hands over.
+static CGRect RanIOS_GameFrame ( UIView *root )
+{
+    const CGRect b = root.bounds;
+    const UIEdgeInsets in = root.safeAreaInsets;
+    const CGFloat inset = MAX ( in.left, in.right );
+    if (inset <= 0 || b.size.width <= b.size.height) return b;
+    const UIInterfaceOrientation o = root.window.windowScene.interfaceOrientation;
+    if (o == UIInterfaceOrientationLandscapeLeft)
+        return CGRectMake ( 0, 0, b.size.width - inset, b.size.height );
+    return CGRectMake ( inset, 0, b.size.width - inset, b.size.height );
+}
+
 //  The keyboard responder - see the keyboard section further down for why the
 //  client types into a UITextField and not into the view controller itself.
 @interface RanIMEField : UITextField <UITextFieldDelegate>
 @end
 
 @interface RanViewController : UIViewController
+@property (nonatomic, strong) RanView       *glView;    //  the game, inside the black root view
 @property (nonatomic, strong) RanIMEField   *imeField;
 @property (nonatomic, strong) CADisplayLink *link;
 @property (nonatomic, assign) BOOL           glReady;
@@ -155,7 +180,29 @@ static int  g_imeInsetPerMille = 0;
     __unsafe_unretained UITouch *_slots[10];
 }
 
-- (void)loadView { self.view = [[RanView alloc] initWithFrame:UIScreen.mainScreen.bounds]; }
+- (void)loadView
+{
+    //  A black root, and the game in a child framed by RanIOS_GameFrame, so the
+    //  strip beside the camera is plain black, as it is on Android.
+    UIView *root = [[UIView alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    root.backgroundColor = UIColor.blackColor;
+    root.multipleTouchEnabled = YES;
+    self.glView = [[RanView alloc] initWithFrame:root.bounds];
+    self.glView.multipleTouchEnabled = YES;
+    [root addSubview:self.glView];
+    self.view = root;
+}
+
+//  Turning the phone over moves the camera to the other side. The game keeps
+//  its size, so only the frame's origin moves and the surface is not rebuilt.
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
+{
+    [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+    [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> ctx) {
+        [self.view setNeedsLayout];
+    }];
+}
 - (BOOL)prefersStatusBarHidden { return YES; }
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 
@@ -191,6 +238,13 @@ static int  g_imeInsetPerMille = 0;
 {
     [super viewDidLayoutSubviews];
 
+    const CGRect frame = RanIOS_GameFrame ( self.view );
+    if (!CGRectEqualToRect ( self.glView.frame, frame )) {
+        self.glView.frame = frame;
+        RanPlat_Log ( RANLOG_INFO, "RanIOS", "game frame x=%.0f w=%.0f h=%.0f (screen w=%.0f)",
+                      frame.origin.x, frame.size.width, frame.size.height, self.view.bounds.size.width );
+    }
+
     if (self.glReady) { RanGL_SurfaceChanged (); return; }
 
     //  The layer is all the platform owes the shim. RanGL_Init makes the EAGL
@@ -201,7 +255,7 @@ static int  g_imeInsetPerMille = 0;
     //  contentsScale is set only on this first pass: RanGL_Init divides it when
     //  the renderscale flag asks for a smaller drawable, and setting it again on
     //  a later layout would silently undo that.
-    CAEAGLLayer *layer = (CAEAGLLayer *)self.view.layer;
+    CAEAGLLayer *layer = (CAEAGLLayer *)self.glView.layer;
     layer.contentsScale = UIScreen.mainScreen.nativeScale;
 
     if (!RanGL_Init ( (__bridge void *)layer )) {
@@ -458,8 +512,13 @@ static int  g_imeInsetPerMille = 0;
 
 - (CGPoint)pixelsOf:(UITouch *)t
 {
-    const CGFloat s = self.view.layer.contentsScale;
-    CGPoint p = [t locationInView:self.view];
+    //  In the game view's own space. A finger in the black strip beside the
+    //  camera is held to the game's edge rather than handed in off-surface.
+    const CGFloat s = self.glView.layer.contentsScale;
+    CGPoint p = [t locationInView:self.glView];
+    const CGSize g = self.glView.bounds.size;
+    p.x = MIN ( MAX ( p.x, 0.0 ), g.width );
+    p.y = MIN ( MAX ( p.y, 0.0 ), g.height );
     return CGPointMake ( p.x * s, p.y * s );
 }
 
@@ -1313,7 +1372,11 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
 //  linear filter, and this keeps the write under a frame.
 - (void)writeBootCover
 {
-    const CGSize full = self.view.bounds.size;
+    //  The part of the page the game will be drawn over, not the whole screen:
+    //  the cover is stretched over the game's surface, which is narrower by the
+    //  strip beside the camera (RanIOS_GameFrame).
+    const CGRect game = RanIOS_GameFrame ( self.view );
+    const CGSize full = game.size;
     const CGFloat scale = self.view.window.screen.scale ?: 2.0;
     const int w = (int)( full.width  * scale / 2.0 );
     const int h = (int)( full.height * scale / 2.0 );
@@ -1330,6 +1393,7 @@ static void RanPatchReportFailure ( NSString *error, NSString *code )
     CGContextTranslateCTM ( ctx, 0, h );
     CGContextScaleCTM ( ctx, 1.0, -1.0 );
     CGContextScaleCTM ( ctx, scale / 2.0, scale / 2.0 );
+    CGContextTranslateCTM ( ctx, -game.origin.x, -game.origin.y );
     [self.view.layer renderInContext:ctx];
 
     const unsigned char *px = (const unsigned char *)CGBitmapContextGetData ( ctx );

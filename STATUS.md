@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-14
+- **Last updated:** 2026-10-20
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -18,10 +18,17 @@ If anything here disagrees with another file, this file wins.
 | Patch 785 / APK 273 / iOS 1.1.88 (273) | Built 2026-10-15 in `native/out/upload` (5 blobs 67.9 MB + manifest + ios/ + android/; live server is at 783). minApk 273 / minIos 273. Contents: break-down off, quest fixes (548 dry ice, 6 NPC talk steps, school change), data GLogic/NpcTalk/Quest.rcc + Level.rcc (user's editor work). SOURCE d115c39, MOBILE d7c4a2c, store 1c33ba6. iOS CI 38721115816 success, binary has the new code. Play: store 1.1.88 (273) on Alpha + Internal, completed, sent for review; store build boots to the server page on LDPlayer. **Upload ON HOLD until Google approves 273** (Play players on 272 would be stopped by minApk 273). Server at the same time: ServerField.exe + ServerAgent.exe (d115c39), glogic GLogic.rcc (crow.mnsf), npctalk (NpcTalk.rcc or the 3 changed + 2 new .ntk), quest (Quest.rcc or 00531.qst), level. |
 | Patch 783 / APK 272 / iOS 1.1.87 (272) | Live (server reported 783). |
 | (old) Patch 783 / APK 272 / iOS 1.1.87 (272) | Built 2026-10-15 in `native/out/upload` (5 blobs 107.3 MB + manifest + ios/ + android/; live server is at 780). minApk 272 / minIos 272. Play: 1.1.87 (272) uploaded to Alpha and Internal, sent for review. **Upload ON HOLD until Google approves 272** (Play testers on 271 would be stopped by minApk). Server needs the same GLogic.rcc / NpcTalk.rcc / Quest.rcc at the same time (talk numbers changed). |
+| Release 795 / APK 276 / iOS 1.1.90 (276) | Built 2026-10-20 in `native/out/upload` (10 blobs 121.1 MB + manifest + ios/ + android/; live server at 793), **waiting for the user's upload**. minApk 276, minIos 276. Carries: HUD editor arrows, iOS game frame clear of the camera housing (RanIOS_GameFrame in ran_ios_main.mm; Android already letterboxes the cutout at targetSdk 34), event item exchange data (GLogic.rcc, NpcTalk.rcc, Level.rcc, eventexchange01 icons), NPC sell prices re-squeezed to max 7,500 (sellprice-squeeze.js, report DEV EP9/sellprice_curve_2026-10-20.csv, 4,998 items, coin 1996_10 kept). Server also needs GLogic.rcc, GLogicServer.rcc (event drops at the armor rate), NpcTalk.rcc, Level.rcc. **Not tested on an iPhone** (none here). |
+| HUD editor arrows (2026-10-20) | Second toolbar row: left, up, down, right, one screen pixel per tap on the selection (same path as a drag, editNudge in touch_ui.cpp). Built arm64 + x86_64, installed on test LDPlayer (emulator-5554); **not tested on screen yet, not in a patch**. Shared shim, so iOS gets it from the next CI build; no iPhone to check. |
+| Event Item Exchange (2026-10-20) | Data built and installed locally, **not shipped, NPC not placed** (user places 49/24 in the Level editor). Items 512/57 (300 -> 512/55) and 512/58 (150 -> 512/56), specs 991/992 at each field table's stone rate (101 tables), NPC 49/24 "แลก ไอเท็มกิจกรรม", npc_eventexchange.ntk, eventexchange.npcex, icon sheet eventexchange01. GLogic.rcc, NpcTalk.rcc, GLogicServer.rcc changed; backups in backups/event_exchange_20261020/. Guide + how to repeat: DEV EP9/EVENT_EXCHANGE.md, scripts tools/event-exchange/. Untested in game: the user tests in the PC Emulator. |
 | Drop tables (server) | Built and installed locally, **not on the live server yet**. User uploads both: `CLIENT/data/glogicserver/GLogicServer.rcc` 1,651,123 bytes (sha eb2956d3ccf5) -> server `data\glogicserver\`, and `CLIENT/data/glogic/GLogic.rcc` 12,321,198 bytes (sha 04655f179584) -> server `data\glogic\`, then restart. Contents: stones 2% in every normal lv* table (5 tables got the line added), weapon/armor of the 100 normal field tables kept in 4.30-5.30 per 100 kills (existing lines only), empty lines removed (lv220SB/230SB/240SB potions now drop), missing tables added (lv220, SaintSS_01_1, SaintSS_01_2, suryun), 10 monsters with no table given the table of their level. Sections 2026-10-14 (1)-(4) below. |
 | Drop test in game | User spawned 300 monsters on the live server (emulator, GM) and got no stone (2026-10-14). Not resolved: which monster, and whether the server had the new file + restart, are unknown. Test plan in `drop_analysis_2026-10-13/stone_normal_monsters_2026-10-14.md`: 300 x 38/12 Ice Tyrant (~20 stones with any file) then 300 x 40/1 (~5 new file, ~1 old). |
 | UI batch keep default | 2026-10-17, shim d3d9_impl.cpp: `uibatchkeep` is now the default (`nouibatchkeep` to disable) + FOGCOLOR-while-fog-off kept. Name plates toggled LIGHTING between draws and split the screen-space batch: 500 players, 731 -> 350 interface draws; 300 players/160 names: 225 draws, flushes 470 -> ~80 a frame (left: ZENABLE 33, FOGCOLOR with fog on 10). Quiet-scene pixel compare identical (69 px idle residue only). Frame draw total ~3,100 at 6 us on LDPlayer = ~19 ms submission; the other big source is 1,197 skinned part draws for 120 bodies (~10/body). |
 | 2026-10-17 user batch (1-4) | Built arm64 + x86_64 + MSVC 0 errors, on LDPlayer instance 0; **pinch and GM zoom untested by hand**. (1) pinch sign flipped in touch_ui.cpp: spread = zoom in (`RanInput_PointerWheel(-notches*120)`, both pinch paths). (2) stick slides round obstacles: swings 20-80 deg each side with shorter steps after the straight tries (DxGameStage, sticklog shows `slide +-80` along the market wall). (3) character window: ความดี shows m_nBright as a number beside the bar (verified, shows 1). (4) GM (USER_GM4+) zoom-out cap 600 vs 200 (DxViewPort::SetGMZoom from DxGameStage). Crowd tiers now only under Settings > quality > ลื่นที่สุด (dwMobileCrowdMode); default unchanged. (5) chat redesign done and tested on LDPlayer instance 0 (screenshots): box alpha 0xD8 -> 0xA8, fold plate gone, balloon icon always beside the ride button (touch_ui mode 2; both stepped left a button so the balloon is not under the box) and shows/hides the whole chat; a tap on the input slides the chat in from the left to 80% of the screen (0.2 s, eased, `CBasicChat::MobileSetWide/MobileWideFrame`, DxGameStage places it) with a dark veil behind the whole screen and a close X top right; close X or a tap on the dark 20% slides it back and ends the input (keyboard away); the touch overlay is not kept alive while wide (`RanTouch_SetActive` skipped), so the stick and rings are off the page; channel and view buttons stay on the input line. Shared SOURCE: Android + iOS. Not on a phone/iPhone yet. Second pass (user: HP over the page, no bg, fadeInLeft/Out, smoother, no UI flicker): narrow box has no plate and no grip (text on the world, PC-like); wide page kept in front of the HP bars (`MobileKeepFront(BASIC_CHAT_BOX)` each frame, InnerInterface no longer pushes it behind BASIC_INFO_VIEW while wide); **root cause of the rough open: `CUIControl::SetGlobalPos` clamps every control to the screen (CheckBoundary), so the box and each child snapped to x=0 and the veil never reached the right side** - fixed with `MobileSetNonBoundaryTree` on the chat tree while wide and on the veil; slide now 0.3 s cubic-out with a draw-time alpha fade (`CUIControl::s_fMobileFade`, applied to queued quads, CBasicTextBox words and CUIEditBox text; CBasicChat/CMobileChatChannelBar::Render set it) = fadeInLeft / fadeOutLeft; the touch overlay cross-fades with the page (`RanTouch_SetDim`) instead of blinking off 4 frames in; first wide frame drawn at fade 0 (was a one-frame flash of a small page). Measured frame by frame on LDPlayer instance 0 (PrintWindow grabs at ~59 fps, scratchpad open2_sub.png / close_sub.png): both directions smooth, no pop. Third pass, Tab S9 (user: flicker when about to type): screenrecord at 68 fps showed a one-frame 16 px jump of the page every ~1.0 s, typing or not - the once-a-second edge sweep in DxGameStage::MobileArrangeInterface pushed the page in from the left/top edges; BASIC_CHAT_BOX added to its skip list. Installed on the Tab S9, user confirmed 2026-10-17: "working good". |
+| Release 792 / store 275 (replaces unuploaded 790) | 2026-10-18 midday. User edited `CLIENT/data/glogic/skill.ssf` (1 byte at 626216 vs the packed copy); repacked into `GLogic.rcc` with rcc-pack.js (389 entries, only skill.ssf differs; backup `backups/GLogic.rcc.bak_pre_skilledit_20261018`). Patch 792: same APK 275 "1.1.89", minApk 275, minIos 275, iOS build 275 in ios/source.json, 4 blobs 57.0 MB (APK + GLogic.rcc 4a880fd80da2 + NpcTalk.rcc + Quest.rcc) + ios/ + android/ + manifest in `native/out/upload`. **Detour:** the first run bumped to APK 276 because the ranking server fix (SOURCE f773d7a, GLChar.cpp) is also compiled into libran.so; the client never runs that path (server death handler), so versionCode was put back to 275, the APK repackaged (new bytes, same code for the client) and the patch rebuilt with `--min-apk 275 --version 792` after dropping the `apk` record from the local manifest so make-manifest's "different build, same versionCode" guard let it through. Libs (11:55/11:57) are older than RanMobile.apk (12:02), so the next MAKE-PATCH will not bump again. Side effect: the mobile arm64 + x86_64 compile of f773d7a passed (0 errors). Server at the same time: glogic/GLogic.rcc (+ npctalk/NpcTalk.rcc, quest/Quest.rcc if not yet up) + field restart. |
+| School leader quests 702-711 (Fancer Leader etc.) | 2026-10-18, user: leaders never appear. Cause: a leader spawns only from a MOBGEN Q-box picked up (GLChar::ApplyQItemFact -> DropCrow); the school mobs' question tables (q_Lv5/14/22/50/55/50_C/53_W) have every MobGen line commented out, and the q_002_*/q_003_* tables that carry the boxes were used by no mob; no .lev places a leader. Same in the 10-13 backup and EP1, so old. Fix `MOBILE/tools/rcc-extract/crow-qt-leader.js`: 16 mobs (2/0-1, 19/0-1, 4/0-1, 5/0-1, 10/0-1, 22/0, 27/0, 28/0, 7/0-2) point m_strQtGenItem at a new table: their old table (or q_002_lv017/028/030, q_003_lv050 when they had none) + the leader box at 3.3%, about one per 30 kills (user asked; 12 new q_*_ldr*.genitem in GLogicServer.rcc + loose). crow.mnsf: only those 16 strings differ (re-parsed); GLogic.rcc: only crow.mnsf; GLogicServer.rcc: 12 added. Backups `backups/CLIENT/data/glogic*/**.bak_pre_qtleader_20261018`. **Quest 701 Vulgar Leader not fixed:** box 9/10 summons Blue Snake 63/14 (lv150) and no box summons 0/22; needs an item data change (user rule: no). Server: glogic/GLogic.rcc + glogicserver/GLogicServer.rcc, field restart. Not tested in game yet (user tests on the emulator). Next MAKE-PATCH ships GLogic.rcc. |
+| iOS deployment target 13.0 -> 15.0 (open) | Apple warning ITMS-90068 on build 275 (2026-10-17): from April 2027 uploads must target iOS 15.0+. Warning only, 275 delivered and in Beta App Review. Change in the next iOS build, all three places together: `native/build-ios.sh:29`, `.github/workflows/ios-build.yml:115`, `.github/workflows/ios-testflight.yml:75` + `:102` (`--minimum-deployment-target`), on main and store. No phone model is lost: iOS 13 and iOS 15 both support iPhone 6s / SE (1st gen) and later; only phones never updated past iOS 14 would be refused. |
+| Release 790 / store 275 | 2026-10-17 evening. Patch 790 (versionCode 275 "1.1.89", minApk 275, minIos 275; 790 = 789 + NpcTalk.rcc nurse quests + the user's Quest.rcc, no app change) replaces unuploaded 787/788/789; carries chat outline, bag ฝาก/ถอน rows, quest เส้นทาง, GLogic.rcc (PvP 0.40 + buff durations). iOS main CI 39027282027 (CFBundleVersion 275) published via make-ios-source. Store `7a17b6b` (merge). Play: AAB 275 sha256 60f96d4a… internal completed + alpha 275. TestFlight CI 39027367996 uploaded build 275 (processing → What to Test → Public → Beta review: see below). Main tree restored (libs 17:58 < APK 18:03, ninja no-op). User uploads `native/out/upload` (4 blobs 57.0 MB + ios/ + android/ + manifest) then PATCH-UPLOADED. Server at the same time: glogic/GLogic.rcc, npctalk/NpcTalk.rcc, quest/Quest.rcc + field restart. |
 | Release 787 / store 274 | 2026-10-17: patch 787 built (versionCode 274 "1.1.89", minApk 274, minIos 274; data change GLogic.rcc PvP 0.40) - **out/upload NOT yet uploaded by the user** (blobs, ios/, android/, manifest last). iOS main CI 39004379530 -> RanLegacyM.ipa 1.1.89 (274) in ios/source.json (RanTouch_SetDim present in the binary). Store branch merged from main (4ee6d70): Play AAB 1.1.89 (274) uploaded by API to internal (completed) and released on alpha (closed test) 274 completed - Play reviews closed-test releases itself. TestFlight CI 39004444384 green with upload: build 274 VALID, What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW (273 was still IN_REVIEW). Main tree restored after the store build (mtimes + libs, ninja no-op, libs older than the APK). |
 | Magnified-window last label at 1x | 2026-10-17, SOURCE UIManBasic.cpp. The exit dialog's ไม่ (and the last text drawn in any magnified window) came out small and off its plate: CUIMan::RenderList flushed only the UI quad queue before resetting RanGLR_SetUiMagnify, while text goes to the device as DrawPrimitiveUP and sat in the device's kept screen-space batch (uibatchkeep) until after the reset. Now RanD3D_FlushPending(pd3dDevice) on both sides of the switch. Verified on LDPlayer instance 0 (menu > ออก). arm64 + x86_64 + MSVC 0 errors. Shared SOURCE: Android + iOS. Not in a patch. |
 | Crowd tier 3: impostors | 2026-10-17, SOURCE (git log), arm64 + x86_64 + MSVC 0 errors; **not in a patch, not on a phone**. Far players (past full 40 + cheap 80) draw as one quad each: real costume captured cheap via the main camera + sub-frustum into a 64x128 cell of a 2048^2 RT atlas (512 cells), refreshed every 500 ms oldest-first (~8 captures/frame), quad = screen rect at capture as a world rect at the char's depth, carried with the char, depth+alpha tested, one DrawPrimitiveUP for all. 500 fighting fakes: far hidden 29 fps / far impostors (111 shown) 28 fps / far cheap bodies 22 fps; 111 impostors ~1 ms vs ~11 ms as bodies. Look 1:1 OK (softer, upright, no edges). Open: capture adds one RT switch per frame (tile GPU resolve - fold into the shadow batch later), 500 ms period makes far walkers step twice a second (impperiod to tune), cell size vs 4K screens. Diag noimpostor, impcap, impperiod. Next: ANGLE/Vulkan on the Tab S9 (needs the device), part merging. |
@@ -49,6 +56,8 @@ If anything here disagrees with another file, this file wins.
 | TestFlight | Apple enrollment paid, pending approval. Store build + CI (`ios-testflight.yml`, Xcode 26.6) green on `store`; signing/upload wait for the API key. |
 | Mobile UI redesign | **Built, on by default, in patch 725 (APK 242, iOS 1.0.242); awaiting upload.** Plan `UI-MOBILE-PLAN.md`. Four styles: D Original (classic grey chrome, first on the picker), A Crystal, B Royal, C Tactical (default C). Tier 1 and tier 2 windows are re-laid out; every other window gets a themed skin. Not checked on the Tab S9 or an iPhone; trade, stalls, auction, party and club actions need a second player. Backup: git tag `ui-classic-2026-10-08` (SOURCE + MOBILE) and `BACKUP/ui-classic-2026-10-08/`; `classicui` diag forces the old UI, `uitheme0..3` force a style. |
 | Storage ถอน into the bag | 2026-10-17, user: ถอน left the item on the finger (ReqStorageTo = storage -> hand). Now lift + MobilePlaceItem(INVEN, first free open bag cell); no row when the bag is full. Built both ABIs, installed on LDPlayer, NOT exercised (no storage NPC on test01). Not in a patch yet. |
+| Ranking guild / class tabs empty | 2026-10-18, user: days of Club War + Tyranny tries, ranking guild and class tabs still empty. Live DB: `ChaPKScore` 0 for every character, `GuBattleWin` 0 for both guilds, `GuildBattle` table empty, but `ChaMMR` non-zero for 4 characters. Cause: the class tabs (and Kill tab) are `ChaPKScore` filtered by class; the PK-score gate in GLChar's death path counted Tyranny / SW / CTF / **declared** guild battle / CDM but not the guidance-map Club War the server actually runs (the MMR gate did, hence MMR > 0). The guild tab reads `GuildInfo.GuBattleWin`, which only `sp_EndGuBattle` (declared guild battle) wrote; `GLGuidanceFieldMan::EndBattle` kept the winner in memory only. Tyranny: same gate as MMR, so no kill happened while its battle ran. Fix SOURCE `f773d7a`: field adds `bGuidClubWar` to the PK-score gate; agent `MsgClubWarWinner` bumps the winner's `m_dwBattleWin`, queues `CAddClubBattleWin` (`UPDATE GuildInfo SET GuBattleWin+1`, new DbAction + `COdbcManager::AddClubBattleWin`) and refreshes `m_vecTopGuild`. MSBuild ServerAgent + ServerField 0 errors; both strings in `_Bin/Tool/*.exe` (00:29). **Deploy `SOURCE/_Bin/Tool/ServerAgent.exe` + `ServerField.exe`, restart both.** Server-only, no client patch. Past wars were never written and are not recoverable. Not tested in game; mobile arm64 compile check not run (both identifiers already used in that function). |
+| Nurse Drunkard quests 2122/2126/2127 | 2026-10-17, user ported sc_q_012_s/h/b.qst (reward ลูกแก้วจิตวิญญาณ ลูกที่ 5) but no NPC offered them: no talk file had a quest-start answer (2127 only on 2009_01_veranda.ntk, an id collision). Added to `npc_1/2/3_medic_1.ntk` page 1: "รับฟังเควส: [กำจัดพวกขี้เมา]" (quest start, school-locked like the old nurse quest, any level/class) and "ส่งเควส: [กำจัดพวกขี้เมา]" (quest step 2; SG relabelled from ฆ่า Drunkard on the user's request). `NpcTalk.rcc` repacked (1,314,789; other 664 entries identical). Backups `backups/CLIENT/data/glogic/npctalk/*.bak_pre_nursequest_20261017`. Script scratchpad `ntk_addnurse.js`. Verified by re-parse only, not in game. Server needs NpcTalk.rcc + Quest.rcc; clients get them in patch 790. |
 | Quest page: เส้นทาง keeps the page open | 2026-10-17, user. `MobileQuestPanel.cpp` ID_ROUTE no longer calls ClosePanel; button flips to ปิดเส้นทาง like โชว์บนจอ. Checked on LDPlayer (page stays, route arrows drawn, list row tagged เส้นทาง). Not in a patch yet. |
 | Bag item sheet: ฝาก row | 2026-10-17, user: a skill scroll had no storage option with the locker open. There never was one for any item (storage put = long-press carry + tap a cell). SOURCE `MobileItemSheet.cpp`: with STORAGE_WINDOW open, bag items that ReqStorageTo / MsgReqHoldToStorage accept (IsEXCHANGE or wrapper box, not the summoned pet card; all 600 skill books are flags 7) and a free cell on the open page get ACT_STORE = ReqInvenTo lift + MobilePlaceItem(STORAGE, first free cell). Built arm64 + x86_64, installed on LDPlayer, NOT exercised (no storage NPC reachable on test01); Tab S9 offline. Not in a patch yet. |
 | Buff durations (skill.ssf) | 2026-10-17, user request. `CLIENT/data/glogic/skill.ssf` + the copy inside `GLogic.rcc` (loose == packed, verified): Power Kick 1/8 60..180 s step 15; Team Agility 14/11 and Light Speed 3/4, 7/4, 11/4, 39/8 + Extreme 30/23..33/23 40..120 s step 10 (was 28..60 / 20..50 / 10..60 / 10..42). Byte layer EMBYTECRYPT_SKILL, no gamecrypt; CDATA_LVL stride 52, fLIFE at +4; records split on the SBASIC v0x115 signature. CSV in the archive NOT updated (export only; all 1167 records matched the binary before the edit). Backups `backups/skill.ssf.bak_pre_bufftime_20261017`, `GLogic.rcc.bak_pre_bufftime_20261017`. Script scratchpad `patch_bufftime.js`. NOT deployed: user uploads GLogic.rcc (server data/glogic) and ships it in the next patch. |
@@ -64,6 +73,183 @@ the patch ships a needless APK bump).
 
 **Known open bugs:** Back key does not open the ESC menu (direct and store build, found
 2026-10-08). Full list in the dated sections below.
+
+---
+
+## 2026-10-20 — Drop rates: "perfect" backup, then weapon/armor -0.4 and stone -0.2 (NOT uploaded)
+
+- The user named the rates as of this morning "the perfect backup": `backups/drop_perfect_20261020/`
+  (GLogicServer.rcc md5 62eb85ca..., GLogic.rcc 8c26d647..., report CSVs, README with the table).
+- Then, per 100 kills on every normal field table (lv*, osaka*, Infinitystairs*, gmd_*; 101 tables,
+  397 monsters): weapon and armor -0.4, upgrade stone -0.2. `tools/rcc-extract/drop-delta.js`
+  (copy of drop-field-even.js's maths). The stone line was a single 2% line in 89 tables, and the
+  0.7 rule makes [1.4, 2) unreachable for one line, so it is split into two equal lines under 2%
+  (user chose this, option A): stones are now also raised by a killer's drop bonus (cards,
+  events), and lv14 lost 0.37 potions / 100 kills for room. 7 weapon/armor lines split the same way.
+- Checked with the full drop report: only weapon, armor and stone moved (and lv14's potion);
+  band medians exactly -0.40 / -0.20. New `CLIENT/data/glogicserver/GLogicServer.rcc` md5
+  3b83bb45..., GLogic.rcc unchanged. Per-table list: `backups/drop_minus_20261020/changed_tables.csv`.
+- Live only after the user uploads GLogicServer.rcc to the server's data/glogicserver and restarts
+  ServerField.
+- **Step 2 (same day):** upgrade stones on the level 1-39 tables (lv02-lv39, 14 tables) set to
+  0.75 / 100 kills (`drop-delta.js --only=... --set-stone=0.75`). 43 monsters; also Shadow Crow 0/3
+  (level 75) and summon Basic Garam 85/3, which use lv02. Only stones moved. New GLogicServer.rcc
+  md5 18977336...; step 1 file kept as `backups/drop_minus_20261020/GLogicServer.rcc.step1_minus`.
+- **Report caveat found:** the drop report's "Upgrade stone (grinding)" column also counts spec 196
+  (Iron, Silver, Crystal, Bone Powder, Sodium and Special versions: production materials typed as
+  grinding). Real upgrade stones are spec 191 only (Rust Scrub Brush, Polish, Red Gem, Fine Polish).
+  Earlier "stone" figures of 1.49-1.60 on some tables included those materials.
+- **Step 3 (same day):** spec 196 is not materials - same item type as the upgrade stones; most
+  likely the elemental resistance stones (not yet read per item). Iron, Silver, Crystal, Bone Powder,
+  Sodium + Special forms. User: "they should have similar to the upgrade stone" -> each of the 101
+  field tables now gives spec 196 exactly what it gives spec 191 (`drop-delta.js --match-resist`;
+  7 tables got the line added, 75 split under 2%; lv160S and the gmd/Infinitystairs tables went DOWN
+  to match). Only the grinding column moved (+ lv14 potion -0.01). Step 2 file kept as
+  `backups/drop_minus_20261020/GLogicServer.rcc.step2_stone39`.
+
+## 2026-10-20 — Pick-up hand button, name balloons, nearby-players list (on LDPlayer for the user's test; NOT patched)
+
+User request: the pick-up button uses the PC cursor (`data/editor/select.ani`), sits outside the
+skill arc, shows only near an item, stays editable; the long press on a player is replaced by a
+balloon at the end of a near player's name, and in a crowd a button that lists them.
+
+- **Pick-up:** shown only while Space would pick something up (`GLCharacter::MobilePickFind` =
+  `FindNearItem` finds an item or money in 83 units, not stunned / on a vehicle); always in the HUD
+  editor. Round slot bezel + the 16 select.ani frames (1/6 s each, from the .ani rate chunk) as
+  `textures/gui/mobile_pickup.png` (512x512, 4x4 cells of 128, nearest 4x; client hands it over like
+  the HUD sheet). Default place: just outside the skill arc on its outer edge towards the screen
+  middle (`placePickup`, re-run when the arc moves); skill-slot size. Old layouts whose pick-up was
+  dragged keep the old anchor (under attack) so it stays put; reset moves it out.
+- **Balloons:** players within bodies + 25 + 50 (P2P reach + a few steps, like the talk button),
+  nearest first; up to 3 get the talk bubble at the right end of their plate (`CNameDisplayMan::
+  MobilePlayerPlate`); a tap = `GLCharacter::MobileOpenPlayerMenu` (P2PReaction, walks first).
+  The 450 ms hold no longer opens the menu.
+- **Crowd:** more than 3 near, or one without a shown name -> the nearby-players button (HUD group
+  `kGrpNear`, after the talk button; cannot be hidden) -> `CMobileNearList` (kit panel + CMobileList,
+  10 nearest, name + level); a name opens that player's menu; a press outside closes it.
+- **Layout file:** 228 floats (+4 nearby-players group, +1 pick-up anchor); 223-float files load.
+- **Follow-up (user, same day):** the nearby-players button shows whenever anyone is near (not only
+  in a crowd; balloons still for 3 or fewer, a player whose name is not shown just gets none). The
+  list opens beside the button (left, or right when short of room), is dragged by its title bar
+  and then opens where it was left (`fMobileNearListPos` in option.ini). Every balloon is one size
+  (radius 11, was sized from the name box, which is two lines with a guild) and sits level with
+  the player-name line. Drag reads the UI's own pointer: the raw device also saw the button's own
+  tap and once saved a position with no drag (caught on LDPlayer, fixed, key renamed so the bad
+  value is ignored).
+- **Data to ship:** `Gui.rcc` (word MOBILE_NEARPLAYERS "ผู้เล่นใกล้เคียง" / "Nearby players" in
+  gameword + gameword_en, repacked, verified) and `textures/gui/mobile_pickup.png`. Backups
+  `backups/ui_nearplayers_20261020/`.
+- **Verified on LDPlayer (emulator-5554, x86_64 RanTest.apk):** balloon on a near player, tap opens
+  the menu; 150 fakes -> button replaces balloons, list opens, a name opens its menu; hand button
+  outside the arc in the editor, dragged + saved + survives a restart, put back. **Not yet seen:**
+  the hand appearing beside a real ground item (no gold / no spare item on the test account to
+  drop) - user to check. iOS: shared code only, CI build on push; no iPhone run.
+
+## 2026-10-20 — Renderer v2 stopped and reverted; costume-load crash fixed
+
+User decision after measurement + online research (`DEV EP9/RENDERER_PLAN.md`): all 500 players at
+full detail cannot hold 60 fps on the Tab S9 once it throttles (GPU held at 295 of 719 MHz within
+3 minutes; with every character effect off the GPU still needs 25-27 ms a frame there), and no
+mobile game publishes doing it. Renderer code reverted: SOURCE e0d858b (merged characters, shine
+pass, far detail level, effcensus) and the MOBILE shim revert of bbedfe0..2eeff68 (bone texture,
+texture arrays, meshoptimizer). The game stays on its existing crowd tiers (nearest 40 full).
+
+**Kept, real bugs (not in a patch yet):**
+- SOURCE 0487f8e — `m_gznhc_earl_body.cps` has a material block the loader cannot read (version
+  7); `SMATERIAL_PIECE::LoadFile` logged "piece dropped" but the load read on, got a garbage trace
+  count and grew `m_vecTrace` past the 2.5 GB watchdog, which aborted the game (the "STRACOR
+  crash" seen when a crowd loads costumes). A player wearing it would crash phones nearby. Now
+  the piece fails to load and simply does not show. Tab S9: 6 spawn/clear cycles of 500, no crash.
+  Pieces still logged as version errors on mobile (pre-existing data issue, not looked into):
+  `w_wing_cap_yellow.cps`, `w_new_shirt_ovp3/7.cps`, `m_new_shirt_ovp6.cps`, `rank_kung1_w.cps`,
+  `m_cos_memo_mask2.cps`, `Dz_m_nikeshoeblue.cps`, `w_as_hk_01_bow.abl`.
+- SOURCE 53ccdea — GLCharClient message slot/skill/type index guards (found by the bounds build).
+
+Measurement notes kept: the Qualcomm GPU profiler (`debug.graphics.gpu.profiler.perfetto=1`)
+crashes the game after 1-5 traces with the graphics thread on; the kgsl busy counter × frame time
+matched its numbers (33.2 vs 33.1 ms) and is the reliable measure.
+
+## 2026-10-20 — Renderer phase 2 v1: character batch (instanced pieces), opt-in "charbatch"
+
+Plan: `DEV EP9/RENDERER_PLAN.md`. SOURCE 1e2f753 (scope in Render_MobItem), MOBILE 7958786 (shim).
+
+- **What it does:** inside `RanGLR_CharBatchBegin/End` (player loop, monster loop), each
+  skinned costume piece draw that qualifies (opaque or alpha-tested, GPU buffers,
+  indexed blend, to the screen, no specular / stage 1 / texgen) is recorded. At the end, or
+  before any other draw, every piece is sent once with `glDrawElementsInstanced`. Bone
+  palette, world, material and lights come per instance from an RGBA32F texture
+  (`RAN_INST` variant, bit 20).
+- **LDPlayer measurements (500 fighting fakes, 40 full + 80 cheap + impostors, interleaved x2):**
+
+  | | batch off | batch on |
+  |---|---|---|
+  | fps | 25.1 | 25.0 |
+  | draws/frame | 2,007 | 1,190 |
+  | GL calls/frame | 11,001 | 6,436 |
+  | `part:skinned` | 8.6 ms | ~2.6 ms |
+
+  - Recorded: ~1,090 piece draws/frame became ~235 draws in ~9 flushes.
+  - Monsters only (Little Hime pack): ~36 piece draws became 3.
+  - fps did not change: the emulator's GL transport scales with data volume, not call count.
+- **Pictures checked at 1:1 on LDPlayer:** monsters and the 500 crowd look the same as with
+  the batch off.
+- **NOT measured on the Tab S9 / iPhone yet.** That is where call count is the cost (iPhone
+  ~44k GL calls/frame). Default stays off until then.
+- **Known limits (v1):**
+  - flushes split at every effect draw (~9/frame);
+  - the player's own character and impostor capture are outside the scope;
+  - single-piece groups draw the old way.
+- Also found: GameMaster's own option is "show all players" (`dwMobilePlayerDraw` 0), so the
+  crowd tiers never ran for that character. All 500 at full detail = 11.9 fps.
+
+---
+
+## 2026-10-20 — Six HUD/menu fixes, user-tested on LDPlayer: "it's all work" (NOT patched yet)
+
+User: "do it but did not patch yet just install in ldPlayer so I can test it". SOURCE 3a572b8.
+
+1. **Change character** in the menu (new cell, icon at mobile_icons.dds 512,384). Confirm ->
+   the server wait -> lobby, which replays this session's login once (`NSMobileRelogin`,
+   memory only) and stops on the character list. If the replay fails, the normal login page shows.
+2. **Event buffs** (`SYSTEM_BUFF_TIME_DISPLAY`, Tyranny etc.) now ride at the end of the pet /
+   vehicle row, units left to right (were top right under the minimap).
+3. **Talk-to-NPC button** is a HUD-editor group (`kGrpTalk`, shim touch_ui.cpp): move, size,
+   opacity; always shown in the editor. Saved as 4 floats at the END of the layout
+   (nMOBILE_HUD_FLOATS 223, 219 still read). Cannot be hidden.
+4. **Narrow chat scrolls again**: its plate stays visible at alpha 0 (hidden, nothing drawn
+   covered the lines, so a drag turned the camera).
+5. **Aimed skill past the front mob**: lock range at least reach + 50, scored along the drag
+   line (MobileAimPick pvDir). SkillReaction walks into range as before.
+6. **Large map tap after a drag**: a pan released off the map left the map grabbed with a stale
+   press point; the next tap scrolled instead of walking. Cleared when no finger is down.
+
+- Data: `Gui.rcc` repacked (uiinnercfg02 control, gameword/_en MOBILE_MENULABEL 23,
+  gameintext/_en MODAL_MOBILE_CHANGE_CHAR), `textures/gui/mobile_icons.dds` new cell.
+  Backups `backups/ui_changechar_20261019/`.
+- Built: arm64 + x86_64 0 errors; MiniA, Emulator, ServerAgent, ServerField 0 errors.
+- LDPlayer (emulator-5554): `out/RanTest.apk` installed (`out/RanMobile.apk` untouched), Gui.rcc
+  and mobile_icons.dds pushed (md5 checked), boots to the server list.
+- Trap hit: LDPlayer's storage stopped answering directory listings (every case-walk failed,
+  "File Open Config.ini", boot failed) after a push whose /sdcard path Git Bash had rewritten.
+  An emulator reboot cleared it. Use `MSYS_NO_PATHCONV=1` for adb push from Git Bash.
+- Libraries are newer than out/RanMobile.apk: the next MAKE-PATCH bumps versionCode (276) and
+  needs an iOS build too. Includes the club-chat agent fix's file (no phone behaviour).
+
+---
+
+## 2026-10-19 — Club chat reached players outside the club (server; caused by my f773d7a; fixed bf41e76, NOT deployed)
+
+- **Symptom:** LEGACY#147 (no club, ordinary account) saw Sixnine90s club chat in the club colour.
+- **Cause:** `GLAgentServer::MsgReqGlobalRanking` counted a top guild's online members with
+  `m_mapMembers[k]`, k = 0..size(). The map is keyed by ChaNum, so `[k]` inserted an empty
+  member for every missing number up to the highest real one (178 for club 1). Those fake
+  members then got all club traffic. The loop only runs when the guild ranking list is not
+  empty, and it was empty until f773d7a (2026-10-18) recorded the first Club War win.
+- **Fix:** iterate the map (5 copies). ServerAgent/ServerField rebuilt 2026-10-19 22:24, 0 errors.
+- **Deploy:** new `SOURCE\_Bin\Tool\ServerAgent.exe` and restart ServerAgent. The restart also
+  clears the fake members (they live only in the agent's memory; DB GuNum was never changed).
+- **Mobile:** `GLAgentServerMsg.cpp` is compiled into libran.so but phones never run it. The next
+  MAKE-PATCH will see a lib change and bump versionCode: put it back as on 2026-10-18 (patch 792).
 
 ---
 

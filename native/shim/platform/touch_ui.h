@@ -269,3 +269,22 @@ extern "C" void RanTouch_SetSkillCarry(int carrying);
 //  reach; ConsumeTalk returns 1 once per press.
 extern "C" void RanTouch_SetTalkButton(int show);
 extern "C" int  RanTouch_ConsumeTalk(void);
+
+//  Pick up (2026-10-20): shown only while Space would pick something up; its
+//  press is still RANTOUCH_SLOT_PICKUP. The art is the PC cursor select.ani as
+//  one sheet of frames, cols across, row by row.
+extern "C" void RanTouch_SetPickupButton(int show);
+extern "C" void RanTouch_SetPickupArt(unsigned tex, int w, int h, int frames, int cols);
+
+//  Nearby players (2026-10-20). A balloon at the end of each near player's
+//  name, placed by the client every frame as fractions of the surface (x of
+//  the width, y and r of the height); a press returns that player's id once.
+//  In a crowd the client shows the nearby-players button instead, and a press
+//  of it returns 1 once.
+extern "C" void RanTouch_SetBalloons(int n, const float *fx, const float *fy, const float *fr,
+                                     const unsigned *id);
+extern "C" int  RanTouch_ConsumeBalloon(unsigned *id);
+extern "C" void RanTouch_SetNearButton(int show);
+//  The nearby-players button's place: cx of the width, cy and r of the height.
+extern "C" void RanTouch_GetNearButton(float *cx, float *cy, float *r);
+extern "C" int  RanTouch_ConsumeNear(void);
