@@ -88,6 +88,14 @@ the patch ships a needless APK bump).
   3b83bb45..., GLogic.rcc unchanged. Per-table list: `backups/drop_minus_20261020/changed_tables.csv`.
 - Live only after the user uploads GLogicServer.rcc to the server's data/glogicserver and restarts
   ServerField.
+- **Step 2 (same day):** upgrade stones on the level 1-39 tables (lv02-lv39, 14 tables) set to
+  0.75 / 100 kills (`drop-delta.js --only=... --set-stone=0.75`). 43 monsters; also Shadow Crow 0/3
+  (level 75) and summon Basic Garam 85/3, which use lv02. Only stones moved. New GLogicServer.rcc
+  md5 18977336...; step 1 file kept as `backups/drop_minus_20261020/GLogicServer.rcc.step1_minus`.
+- **Report caveat found:** the drop report's "Upgrade stone (grinding)" column also counts spec 196
+  (Iron, Silver, Crystal, Bone Powder, Sodium and Special versions: production materials typed as
+  grinding). Real upgrade stones are spec 191 only (Rust Scrub Brush, Polish, Red Gem, Fine Polish).
+  Earlier "stone" figures of 1.49-1.60 on some tables included those materials.
 
 ## 2026-10-20 — Pick-up hand button, name balloons, nearby-players list (on LDPlayer for the user's test; NOT patched)
 

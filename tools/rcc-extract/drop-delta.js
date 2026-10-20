@@ -5,6 +5,11 @@
 // armor current - 0.4 and upgrade stone current - 0.2").
 //
 //   node drop-delta.js <CLIENT/data dir> <report dir> <work dir> [--write] [--nosplit]
+//                      [--only=lv02.genitem,lv05.genitem,...] [--set-stone=0.75]
+//
+// --only: change just these tables. --set-stone: instead of the deltas, set the
+// stone drop of each table to this many per 100 kills and leave weapon and armor
+// alone (user, 2026-10-20: "for mob level 1-39 make the stone drop ~0.7 - 0.8").
 //
 // Same tables, same server maths and same checks as drop-field-even.js (which
 // this is copied from): field table = lv*, osaka*, Infinitystairs*, gmd_* used by
@@ -27,7 +32,13 @@ const { RccArchive } = require('./rcc.js');
 const gamecrypt = require('./gamecrypt.js');
 
 // What comes off each table, per 100 kills.
-const SET = { Weapon: true, Armor: true, Stone: true };
+const argv0 = process.argv.slice(2);
+const onlyArg = argv0.find((a) => a.startsWith('--only='));
+const ONLY = onlyArg ? new Set(onlyArg.slice(7).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean)) : null;
+const stoneArg = argv0.find((a) => a.startsWith('--set-stone='));
+const SET_STONE = stoneArg ? parseFloat(stoneArg.slice(12)) : null;
+if (stoneArg && !(SET_STONE >= 0)) throw new Error('--set-stone needs a number');
+const SET = SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
 const DELTA = { Weapon: 0.4, Armor: 0.4, Stone: 0.2 };
 const CATS = ['Weapon', 'Armor', 'Acc', 'Stone', 'Potion', 'Book'];
 const POTION_FLOOR = 52.49;
@@ -147,6 +158,7 @@ const T = [];
 for (const name of server.list()) {
   const k = name.toLowerCase();
   if (!users.has(k)) continue;
+  if (ONLY && !ONLY.has(k)) continue;
   const raw = server.read(name);
   if (!gamecrypt.isEncoded(raw)) throw new Error(name + ': not v8');
   const text = plain(raw).toString('latin1').replace(/\0+$/, '');
@@ -239,7 +251,7 @@ for (const t of T) {
   if (!(t.rolls > 0) || !(t.gen > 0)) { skipped.push([t.name, t.level, 'never fires']); continue; }
   const before = perCat(t, t.spec, t.gen);
   const want = {}, base = {};
-  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = Math.max(0, before[c] - DELTA[c]); }
+  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
   const note = new Set();
 
   let gen = t.gen, L = build(t, gen, want, before, note);
@@ -301,7 +313,7 @@ for (const t of T) {
     if (Math.abs(d) > 0.02) { if (!NOSPLIT) throw new Error(`${t.name}: ${c} ${after[c]} not ${want[c]}`); off.push(`${c} off by ${d.toFixed(2)}`); }
   }
   for (const o of off) note.add(o);
-  for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
+  if (SET_STONE === null) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
   const out = encode(lines.join(t.eol) + t.eol);
   if (plain(out).toString('latin1').replace(/ +$/, '') !== lines.join(t.eol) + t.eol) throw new Error('round trip failed: ' + t.name);
   const file = path.join(workDir, 'files', t.name);
