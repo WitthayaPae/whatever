@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 9+ (API 28): the same theme, kept out of the camera cutout.
+
+         The game asks for an edge-to-edge window (setDecorFitsSystemWindows
+         false, immersive), and with no cutout mode set the system default let
+         newer Android versions and the makers' "full screen apps" settings
+         draw it under the camera, HUD and all (the user, 2026-10-22). "never"
+         keeps the window off the cutout: a black strip on the camera side
+         only, the same as the iPhone build (ran_ios_main.mm,
+         RanIOS_GameFrame). Both activities use this theme, so the patch page
+         gets it too. -->
+    <style name="RanSplash" parent="@android:style/Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">never</item>
+    </style>
+</resources>

@@ -1719,6 +1719,10 @@ void editDefaultsAll() {
 }
 
 float shownScale(bool hidden, float s) { return (hidden && !g_edit) ? 0.0f : s; }
+//  A skill slot taken off the HUD: its circle is handed over at its place on
+//  the arc (the F1-F4 row, pick-up, potion row and cancel circle hang off the
+//  arc), so drawing and pressing have to skip it here - outside the editor.
+bool skillOff(int i) { return i >= 0 && i < RANTOUCH_MAX_SKILL_CIRCLES && g_hidSkill[i] && !g_edit; }
 
 void editEnd() {
     g_edit = false;
@@ -2154,6 +2158,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
         int best = -1;
         float bestD = 0.0f;
         for (int i = 0; i < g_skillCircleCount; ++i) {
+            if (skillOff(i)) continue;
             const SkillCircle &c = g_skillCircles[i];
             const float d = len(x - c.x, y - c.y);
             if (d > skillHitRadius(c)) continue;
@@ -2243,6 +2248,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
     //  claimed: the press still goes through to the client, which is what
     //  actually runs the skill.
     for (int i = 0; i < g_skillCircleCount; ++i) {
+        if (skillOff(i)) continue;
         SkillCircle &c = g_skillCircles[i];
         if (!c.filled) continue;
         if (len(x - c.x, y - c.y) <= c.r) { c.press = 0.0f; botNoteTap(x, y); break; }
@@ -3969,6 +3975,7 @@ void RanTouch_Render(void) {
     //  and leaves a round window. That is what turns a square slot round.
     g_drawAlpha = g_adj[kGrpSkill].alpha;
     for (int i = 0; i < g_skillCircleCount; ++i) {
+        if (skillOff(i)) continue;
         const SkillCircle &c = g_skillCircles[i];
         //  A ring around the slot, not a mask over it.
         //
@@ -4205,6 +4212,7 @@ void RanTouch_Render(void) {
     if (hudSheet() && g_skillCircleCount > 0) {
         const float sa = g_adj[kGrpSkill].alpha;
         for (int i = 0; i < g_skillCircleCount; ++i) {
+            if (skillOff(i)) continue;
             const SkillCircle &c = g_skillCircles[i];
             //  The slots' own round bezel: glass and a chrome rim, the
             //  picture laid inside it below.
@@ -4267,6 +4275,7 @@ void RanTouch_Render(void) {
     glUniform2f(uViewport, (float)g_width, (float)g_height);
     g_drawAlpha = g_adj[kGrpSkill].alpha;
     for (int i = 0; i < g_skillCircleCount; ++i) {
+        if (skillOff(i)) continue;
         const SkillCircle &c = g_skillCircles[i];
         if (!c.filled || c.cool <= 0.0f) continue;
         //  ARGB(150,0,0,0), the colour the client tints its own recharge bar.
