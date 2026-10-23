@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.ran.native"
-    android:versionCode="279"
-    android:versionName="1.1.93">
+    android:versionCode="280"
+    android:versionName="1.1.94">
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
@@ -14,6 +14,10 @@
           ever sees them. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- RanSessionService: keeps the game alive while the player is in another
+         app (OPPO / Infinix kill background apps within a second otherwise). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <!--  Only ever used to find a pre-private-root install under /sdcard/ran and
@@ -71,5 +75,13 @@
             <!-- tells NativeActivity which .so to load -->
             <meta-data android:name="android.app.lib_name" android:value="ran" />
         </activity>
+
+        <!-- Not exported: no other app can start, stop or bind it. -->
+        <service android:name="com.ran.launcher.RanSessionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the online game session (server connection) alive while the player briefly switches to another app; stops when the game closes." />
+        </service>
     </application>
 </manifest>

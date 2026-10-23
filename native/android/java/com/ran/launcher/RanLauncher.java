@@ -81,6 +81,15 @@ public class RanLauncher extends Activity {
     private static int sLang = -1;      // -1 not read yet, 0 Thai, 1 English
     static {
         LANG_EN.put("กำลังเริ่ม", "Starting");
+        LANG_EN.put("ป้องกันเกมหลุดเมื่อสลับแอป", "Stop the game dropping when you switch apps");
+        LANG_EN.put("มือถือรุ่นนี้ปิดแอปที่อยู่เบื้องหลังเองอัตโนมัติ ทำให้เกมหลุดทันทีเมื่อสลับไปแอปอื่น\n\n", "This phone closes apps in the background by itself, so the game disconnects as soon as you switch to another app.\n\n");
+        LANG_EN.put("วิธีแก้ (ทำครั้งเดียว):\n", "To fix it (once):\n");
+        LANG_EN.put("1. กด \"เปิดการตั้งค่า\"\n", "1. Tap \"Open settings\"\n");
+        LANG_EN.put("2. เข้า \"แบตเตอรี่\" หรือ \"การใช้แบตเตอรี่\"\n", "2. Open \"Battery\" or \"Battery usage\"\n");
+        LANG_EN.put("3. เปิด \"อนุญาตให้ทำงานในเบื้องหลัง\" หรือเลือก \"ไม่จำกัด\"\n\n", "3. Turn on \"Allow background activity\" or choose \"Unrestricted\"\n\n");
+        LANG_EN.put("และล็อกเกมไว้ในหน้าแอปล่าสุด (กดค้างที่หน้าต่างเกม แล้วเลือก ล็อก) จะช่วยได้อีก", "Locking the game in Recent apps (press and hold the game card, then Lock) helps too.");
+        LANG_EN.put("เปิดการตั้งค่า", "Open settings");
+        LANG_EN.put("เริ่มเกม", "Start game");
         LANG_EN.put("พื้นที่ในเครื่องเต็ม", "Device storage is full");
         LANG_EN.put("กรุณาลบไฟล์หรือแอปอื่นเพื่อเพิ่มพื้นที่ จะลองใหม่ใน ", "Please delete files or other apps to free space. Retrying in ");
         LANG_EN.put(" วินาที", " sec");
@@ -1783,12 +1792,82 @@ public class RanLauncher extends Activity {
 
     /* ---------------------------------------------------------------- play */
 
+    /*  Background setup guide (2026-10-24).
+     *
+     *  Crash reports of 2026-10-23: OPPO phones killed the game about one second
+     *  after it left the screen ("o-kill(40)"), Infinix with its "Swipe-up clean".
+     *  RanSessionService is the main defence; on these brands the phone's own
+     *  "allow background activity" switch is the other half, and only the player
+     *  can turn it on. Shown once, before the first game start, on the brands
+     *  known to kill background apps. The button opens Android's App info page
+     *  for this package only - nothing typed, nothing from outside the app.      */
+    private static final String PREFS = "ran_launcher";
+    private static final String PREF_BG_GUIDE = "bg_guide_shown_v1";
+
+    private boolean needsBackgroundGuide() {
+        String m = (Build.MANUFACTURER + " " + Build.BRAND).toLowerCase(java.util.Locale.ROOT);
+        String[] killers = { "oppo", "realme", "oneplus", "infinix", "tecno", "itel",
+                             "vivo", "iqoo", "xiaomi", "redmi", "poco", "huawei", "honor" };
+        boolean hit = false;
+        for (String k : killers) if (m.contains(k)) { hit = true; break; }
+        if (!hit) return false;
+        try {
+            return !getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_BG_GUIDE, false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void showBackgroundGuide() {
+        final CountDownLatch done = new CountDownLatch(1);
+        final String title = L("ป้องกันเกมหลุดเมื่อสลับแอป");
+        final String msg =
+            L("มือถือรุ่นนี้ปิดแอปที่อยู่เบื้องหลังเองอัตโนมัติ ทำให้เกมหลุดทันทีเมื่อสลับไปแอปอื่น\n\n") +
+            L("วิธีแก้ (ทำครั้งเดียว):\n") +
+            L("1. กด \"เปิดการตั้งค่า\"\n") +
+            L("2. เข้า \"แบตเตอรี่\" หรือ \"การใช้แบตเตอรี่\"\n") +
+            L("3. เปิด \"อนุญาตให้ทำงานในเบื้องหลัง\" หรือเลือก \"ไม่จำกัด\"\n\n") +
+            L("และล็อกเกมไว้ในหน้าแอปล่าสุด (กดค้างที่หน้าต่างเกม แล้วเลือก ล็อก) จะช่วยได้อีก");
+        ui.post(new Runnable() { public void run() {
+            try {
+                AlertDialog d = new AlertDialog.Builder(RanLauncher.this)
+                    .setTitle(title).setMessage(msg).setCancelable(false)
+                    .setPositiveButton(L("เปิดการตั้งค่า"), null)
+                    .setNegativeButton(L("เริ่มเกม"), null)
+                    .create();
+                d.show();
+                //  Opening the settings keeps the dialog up: back from them the
+                //  player still has the steps, and starts the game from here.
+                d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        try {
+                            Intent s = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                  Uri.fromParts("package", getPackageName(), null));
+                            startActivity(s);
+                        } catch (Throwable t) { Log.w(TAG, "no app settings page: " + t); }
+                    } });
+                final AlertDialog fd = d;
+                d.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) { fd.dismiss(); done.countDown(); } });
+                try {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_BG_GUIDE, true).apply();
+                } catch (Throwable t) { /* shown again next time, harmless */ }
+            } catch (Throwable t) {
+                Log.w(TAG, "background guide not shown: " + t);
+                done.countDown();
+            }
+        }});
+        try { done.await(); } catch (InterruptedException e) { /* start anyway */ }
+    }
+
     private void play() {
         if (sCurrent != this) {
             Log.i(TAG, "an older launcher finished its patch; the newer one starts the game");
             finish();
             return;
         }
+        //  play() runs on the patch thread; waiting on the UI thread would freeze it.
+        if (Looper.myLooper() != Looper.getMainLooper() && needsBackgroundGuide()) showBackgroundGuide();
         //  A bare Intent plus setComponent. Intent(Context, Class) builds the
         //  ComponentName from the class immediately, so passing null there
         //  throws before setComponent can replace it.

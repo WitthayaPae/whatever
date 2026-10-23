@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-22
+- **Last updated:** 2026-10-24
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -21,6 +21,16 @@ If anything here disagrees with another file, this file wins.
 | Store 276 (2026-10-20) | Store branch merged with main (2120e15), pushed. Play: AAB 276 "1.1.90" sha256 0462e9a5... internal completed + alpha completed. TestFlight CI 39452027302 uploaded build 276 (VALID, altool warning 90068 iOS 13 target, still open), What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW. Main tree restored (libs 22:13 < APK 22:17, ninja no-op). Auto mode blocked the Play shell upload (google-play MCP is disabled in .claude/settings.local.json; ~/.claude/settings.json autoMode.environment still says no remotes / nothing to publish); done in manual mode. |
 | Release 795 / APK 276 / iOS 1.1.90 (276) | Built 2026-10-20 in `native/out/upload` (10 blobs 121.1 MB + manifest + ios/ + android/; live server at 793), **waiting for the user's upload**. minApk 276, minIos 276. Carries: HUD editor arrows, iOS game frame clear of the camera housing (RanIOS_GameFrame in ran_ios_main.mm; Android already letterboxes the cutout at targetSdk 34), event item exchange data (GLogic.rcc, NpcTalk.rcc, Level.rcc, eventexchange01 icons), NPC sell prices re-squeezed to max 7,500 (sellprice-squeeze.js, report DEV EP9/sellprice_curve_2026-10-20.csv, 4,998 items, coin 1996_10 kept). Server also needs GLogic.rcc, GLogicServer.rcc (event drops at the armor rate), NpcTalk.rcc, Level.rcc. **Not tested on an iPhone** (none here). |
 | Store 277 (2026-10-22) | Store branch merged with main (f987086), pushed. Play: AAB 277 "1.1.91" sha256 513d97ce... internal completed + alpha completed, sent for review (th/en notes: boot freeze, club list crash, BGM freeze, skill damage balance). TestFlight CI 39653208245 uploaded build 277 (VALID), What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW. Main tree restored (libs 10-21 01:35 < APK 10-22 01:02, build.sh no-op). |
+| Web server moved off XAMPP (2026-10-23) | PHP2Shell (CVE-2026-109618/109619): XAMPP PHP 7.1 had no fix; user uninstalled it. Now Apache 2.4 (service Apache24, C:\Apache24) + PHP 8.5.12 TS (C:\php85, odbc+openssl only, exec/system disabled), site root **C:\www** (website + patch uploads go there now), HTTPS 443 with a Cloudflare Origin Certificate (Full strict). Firewall: 443 from Cloudflare only; RAN-ONLINE keeps the game ports. Break-in check on the old htdocs (C:\112233htdocs): clean. Code checked: PHP 8.5 compatible, prepared SQL, signed webhook. 3-test-site.ps1: 13/13 OK. Guide + files: DEV EP9/WEB_SERVER_SETUP.md, web_server_setup/. **Open:** user to confirm top-up login with a test account, crash login, a game login; turn on Cloudflare WAF managed rules; topup SQL login checked read-only 2026-10-23: already least privilege (no server/db roles, VIEW ANY DATABASE denied, only RanUser TopUpMoney/TopUpOrder/CheckPromotion/UserInfo and RanShop ShopPurchase grants, no RanGame1/RanLog access) - nothing to change. |
+| Store 279 (2026-10-23) | Store branch merged with main (62b910b), pushed. Play: AAB 279 "1.1.93" sha256 752d8cea... internal completed + alpha completed (th/en notes: stat preview, Resurrection, chat, HUD hide, cutout, change character, Shaman POW, word filter). TestFlight CI 39819825083 uploaded build 279 (VALID, 1 warning), What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW. 277 is APPROVED on TestFlight. Main tree restored (libs 23:38 < APK 23:39, build.sh no-op). |
+| Boss viewer icon (2026-10-24) | mobile_icons.dds cell (896,128) 128x128 (BOSS_VIEWER_BUTTON_IMAGE): the blue cartoon monster replaced by a demon head (curved ridged horns, angry brow, red glowing eyes, fangs; v1 skull was "funny") on the sheet's own steel tile (chart tile with the bars inpainted), to match the other icons. Only that cell changed (header identical). Script scratchpad bossicon/make_boss_icon2.py; backup backups/bossicon_20261024. Pushed to LDPlayer for the user; **NOT patched**. |
+| Destroy without Garbage Card (2026-10-24) | SOURCE 2116bbad. Item sheet "ทำลาย" on TRADE_GARBAGE bag items (confirm MOBILE_DESTROY_CONFIRM), sends GARBAGE_RESULT if the cell still holds the same item and no trade/rebuild/mix/stall is open. Server: cardless open clears the card cell; a card is used up only if the cell holds a Garbage Card (stale-cell bug). Client: missing break after GARBAGE_RESULT_FB. Gui.rcc repacked (gameword MOBILE_ITEM_SHEET 27, gameintext MOBILE_DESTROY_CONFIRM, TH+EN; backup backups/gui_20261024_destroy). Tested on LDPlayer (row only on trashable items, confirm, No keeps the item). **NOT patched; server needs the new ServerField.exe + ServerAgent.exe (_Bin/Tool 02:01).** PC MiniA/Emulator rebuilt and copied to CLIENT (old in backups/pcclient_20261024). |
+| Reset potion descriptions (2026-10-24) | ItemStrTable.txt + _en: 16 ID_ lines for ITEM_SKP_STAT_RESET potions (ลบความจำ A 0 / B 30 / C 60 / D 90 / E all stat points, all reset skills + refund skill gold, clear quick slots), from sDrugOp.wCureVolume and RESET_STATS_SKILL. GLogic.rcc repacked (only those 2 entries changed; 154 small entries re-stored, contents identical; boots on LDPlayer). User checked: looks OK. Backup backups/glogic_20261024_resetdesc. **NOT patched; server GLogic.rcc should match.** |
+| Map pinch direction (2026-10-24) | SOURCE: CLargeMapWindow::MobileZoom now zooms in on a negative notch, so a finger spread zooms the map in like the camera (it ran backwards since the 2026-10-17 pinch flip). Shared (Android + iOS). On LDPlayer for the user to test; **NOT patched**. |
+| Swap-app disconnect fix (2026-10-24) | Android only, **built + tested on LDPlayer, NOT patched** (needs MAKE-PATCH: APK code changed). Foreground service + Thai background guide + non-blocking lifecycle glue. See the 2026-10-24 section. |
+| Release 803 (data only, APK/iOS 279) | Built 2026-10-23 in `native/out/upload`: 1 blob 8.0 MB (GLogic.rcc 21cef72a, user edit 20:57) + manifest + sig, **waiting for the user upload**; server at 802. Server needs the same GLogic.rcc. |
+| Release 802 (data only, APK/iOS 279) | Built 2026-10-23 in `native/out/upload`: 1 blob 8.0 MB (GLogic.rcc 4c689ac2, user edit 20:45) + manifest + sig, uploaded; server at 801 then. Server needs the same GLogic.rcc. |
+| Release 801 (data only, APK/iOS 279) | Built 2026-10-23 in `native/out/upload`: 2 blobs 19.0 MB (GLogic.rcc 4a1bc37e, Level.rcc 690ca079, user edits 20:29) + manifest + sig, uploaded; server at 800 then. No store review (no new app build). Server needs the same GLogic.rcc + Level.rcc. |
 | Release 800 / APK 279 / iOS 1.1.93 (279) | Built 2026-10-22 23:46 in `native/out/upload` (2 blobs 55.5 MB: APK + GLogic.rcc, android/, ios/, manifest + sig), **waiting for the user upload**; server at 797 (798/799 never uploaded, superseded). minApk 279, minIos 279 (iOS CI 39815779915, MOBILE f4b5444, SOURCE b591dc0f; binary has the new strings). Carries: stat preview fix, Resurrection target, party pick, chat re-wrap, hidden HUD slots (+F1-F4), Android cutout, change character retry, Shaman POW damage (skill.ssf 22:03), bad-word lists. **Server must get GLogic.rcc + ServerAgent.exe + ServerField.exe (SOURCE/_Bin/Tool, 23:28) together.** Store builds still 277 in review. |
 | Stat preview fix (2026-10-22) | SOURCE b591dc0f. The character panel preview put typed points on the REAL character and ran INIT_DATA only (no UPDATE_DATA): after-values missed buffs/passives/rates and the live char sat on base values a frame. Now two copies built like the PC (CCharacterWindowCharStat::InitData) and the difference added to live values. LDPlayer: copy-now = live values exactly; +12 Pow atk 9~9 -> 11~11, PA 6 -> 8; reset leaves points unspent. Not tested with buffs up. **Patch 798 in out/upload was built BEFORE this fix (APK 278) - do not upload it; rebuild.** |
 | Change character auto re-login (2026-10-22) | SOURCE (this commit), NOT in a patch. The menu replay logged in at once and the server answered result 23 (EM_LOGIN_FB_SUB_REQUIRETIME = user_verify 30, 20 s login delay; leaving the game counts on the live DB), so the player was left on the login form. Now an automatic attempt waits 5 s behind the please-wait box and retries (max 8); Cancel or any other answer stops it. LDPlayer: 4 refusals then OK at ~23 s, character list shown. Shared code: Android + iOS (iOS not built). The ~20 s wait itself is the server rule. |
@@ -86,6 +96,51 @@ the patch ships a needless APK bump).
 2026-10-08). Full list in the dated sections below.
 
 ---
+
+## 2026-10-24 — "Swap app = instant disconnect": OPPO/Infinix background kills (Android, NOT patched)
+
+**Measured** (38 crash/killed reports, build 279, 2026-10-22/23; OnePlus PHB110 = our LDPlayer, left out):
+Android's ApplicationExitInfo for the run each report covers -
+- OPPO CPH2737 x5, CPH2639, (CPH2457/2251 user swipes aside): REASON_OTHER `[UNKNOWN] o-kill(40)`,
+  importance 400, **about 1 s after the game's last log line** - i.e. ColorOS kills the game the moment
+  it leaves the screen (after 27 s ... 31 min of play). This is the reported "swap app, instant disconnect".
+- Infinix X6873: `[Swipe-up clean]` the same way.
+- Infinix X6873, Xiaomi 2511FPC34G: `bg anr: Input dispatching timed out ... RanActivity is not
+  responding`, importance 400, 7-8 s into the run (still loading).
+- 8x `REMOVE TASK` (the player swiped the game away) - expected.
+- iPhone14,5 / iPhone15,4 killed reports: both died in the first seconds of start-up (file loads), not on
+  an app switch.
+
+**Cause of the bg ANR:** the NDK's android_native_app_glue.c makes the UI thread wait in onPause /
+onStop / onStart / onResume / onSaveInstanceState until the game thread takes the command; the game
+thread takes commands only between frames, and the boot and map loads keep it busy for seconds.
+
+**Changes (Android):**
+1. `RanSessionService` (new, foreground service, type `specialUse`, NOT exported): started once per
+   session from RanActivity.onResume, stopped in onDestroy; START_NOT_STICKY; low-importance silent
+   notification "Ran Legacy M กำลังทำงาน / กดเพื่อกลับเข้าเกม", tap = explicit + FLAG_IMMUTABLE intent to
+   RanLauncher (which brings the running game forward). Manifest: FOREGROUND_SERVICE,
+   FOREGROUND_SERVICE_SPECIAL_USE, PROPERTY_SPECIAL_USE_FGS_SUBTYPE text. Started once only because
+   Android 12+ throws ForegroundServiceDidNotStartInTimeException if onStartCommand (UI thread) is late.
+   **Play Console needs the special-use FGS declaration before the next store review.**
+2. RanLauncher: one-time Thai guide (EN in LANG_EN) on oppo/realme/oneplus/infinix/tecno/itel/vivo/
+   iqoo/xiaomi/redmi/poco/huawei/honor: how to allow background activity; "เปิดการตั้งค่า" opens
+   ACTION_APPLICATION_DETAILS_SETTINGS for our package only, "เริ่มเกม" continues. Pref
+   `ran_launcher/bg_guide_shown_v1`. Shown from the patch thread (never waits on the UI thread).
+3. Our copy of the glue: `native/platform/android/glue/android_native_app_glue.c` (CMakeLists points at
+   it; header stays the NDK's). Activity-state and save-state commands are sent without waiting;
+   window / input-queue changes still wait. Nothing in our code reads activityState or savedState.
+
+**Tested on LDPlayer (127.0.0.1:5555), APK built by hand (libran.so touched after):**
+- guide shows (emulator reports OnePlus), "เปิดการตั้งค่า" opens App info and the guide is still there
+  on return, "เริ่มเกม" starts;
+- Home pressed 3 s into the boot: alive 20 s later, no ANR, procState 4 (FOREGROUND_SERVICE), oom adj 50;
+  launcher icon brings the same process back (pid unchanged);
+- in the world (ตลาดปลอดภาษี): 60 s in Settings, all sockets stayed ESTABLISHED, procState 4; back in
+  the world, game clock and announcements moved on - still connected.
+- NOT verified: a real OPPO / Infinix phone (none here); the next build's reports will show it.
+- iOS: no change. No OEM background killers or ANR there; background is already kept by the silent
+  audio session (2026-10-05) and the 10-minute grace.
 
 ## 2026-10-20 — Drop rates: "perfect" backup, then weapon/armor -0.4 and stone -0.2 (NOT uploaded)
 
