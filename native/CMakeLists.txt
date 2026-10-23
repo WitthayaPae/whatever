@@ -350,7 +350,9 @@ if(RAN_IOS)
     XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
 elseif(APP_SRC)
   set(GLUE "${CMAKE_ANDROID_NDK}/sources/android/native_app_glue")
-  add_library(ran SHARED ${APP_SRC} ${GLUE}/android_native_app_glue.c)
+  # Our copy of the glue (platform/android/glue): lifecycle commands no longer
+  # block the UI thread while the game thread loads. The header stays the NDK's.
+  add_library(ran SHARED ${APP_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/platform/android/glue/android_native_app_glue.c)
   target_include_directories(ran PRIVATE
     ${RAN_COMMON_INCLUDES} ${ENGINE_INCLUDES} ${CLIENT_INCLUDES} ${GLUE})
   # stdafx force-include is C++ only — native_app_glue.c must not get it.

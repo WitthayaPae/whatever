@@ -3,7 +3,7 @@
 **This is the living document. It is updated at the end of every working session.**
 If anything here disagrees with another file, this file wins.
 
-- **Last updated:** 2026-10-22
+- **Last updated:** 2026-10-24
 - **Approach:** the real PC client (`SOURCE/`) compiled for Android and iOS, D3D9 -> GLES shim. Decided 2026-08-24.
 - **Live:** Close Beta. Android APK + iOS (SideStore) ship through the signed patch at
   https://ran-legacy-m.com/launcher_mobile/. Released: **patch 721, APK 240, iOS 1.0.240**
@@ -23,6 +23,7 @@ If anything here disagrees with another file, this file wins.
 | Store 277 (2026-10-22) | Store branch merged with main (f987086), pushed. Play: AAB 277 "1.1.91" sha256 513d97ce... internal completed + alpha completed, sent for review (th/en notes: boot freeze, club list crash, BGM freeze, skill damage balance). TestFlight CI 39653208245 uploaded build 277 (VALID), What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW. Main tree restored (libs 10-21 01:35 < APK 10-22 01:02, build.sh no-op). |
 | Web server moved off XAMPP (2026-10-23) | PHP2Shell (CVE-2026-109618/109619): XAMPP PHP 7.1 had no fix; user uninstalled it. Now Apache 2.4 (service Apache24, C:\Apache24) + PHP 8.5.12 TS (C:\php85, odbc+openssl only, exec/system disabled), site root **C:\www** (website + patch uploads go there now), HTTPS 443 with a Cloudflare Origin Certificate (Full strict). Firewall: 443 from Cloudflare only; RAN-ONLINE keeps the game ports. Break-in check on the old htdocs (C:\112233htdocs): clean. Code checked: PHP 8.5 compatible, prepared SQL, signed webhook. 3-test-site.ps1: 13/13 OK. Guide + files: DEV EP9/WEB_SERVER_SETUP.md, web_server_setup/. **Open:** user to confirm top-up login with a test account, crash login, a game login; turn on Cloudflare WAF managed rules; topup SQL login checked read-only 2026-10-23: already least privilege (no server/db roles, VIEW ANY DATABASE denied, only RanUser TopUpMoney/TopUpOrder/CheckPromotion/UserInfo and RanShop ShopPurchase grants, no RanGame1/RanLog access) - nothing to change. |
 | Store 279 (2026-10-23) | Store branch merged with main (62b910b), pushed. Play: AAB 279 "1.1.93" sha256 752d8cea... internal completed + alpha completed (th/en notes: stat preview, Resurrection, chat, HUD hide, cutout, change character, Shaman POW, word filter). TestFlight CI 39819825083 uploaded build 279 (VALID, 1 warning), What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW. 277 is APPROVED on TestFlight. Main tree restored (libs 23:38 < APK 23:39, build.sh no-op). |
+| Swap-app disconnect fix (2026-10-24) | Android only, **built + tested on LDPlayer, NOT patched** (needs MAKE-PATCH: APK code changed). Foreground service + Thai background guide + non-blocking lifecycle glue. See the 2026-10-24 section. |
 | Release 803 (data only, APK/iOS 279) | Built 2026-10-23 in `native/out/upload`: 1 blob 8.0 MB (GLogic.rcc 21cef72a, user edit 20:57) + manifest + sig, **waiting for the user upload**; server at 802. Server needs the same GLogic.rcc. |
 | Release 802 (data only, APK/iOS 279) | Built 2026-10-23 in `native/out/upload`: 1 blob 8.0 MB (GLogic.rcc 4c689ac2, user edit 20:45) + manifest + sig, uploaded; server at 801 then. Server needs the same GLogic.rcc. |
 | Release 801 (data only, APK/iOS 279) | Built 2026-10-23 in `native/out/upload`: 2 blobs 19.0 MB (GLogic.rcc 4a1bc37e, Level.rcc 690ca079, user edits 20:29) + manifest + sig, uploaded; server at 800 then. No store review (no new app build). Server needs the same GLogic.rcc + Level.rcc. |
@@ -91,6 +92,51 @@ the patch ships a needless APK bump).
 2026-10-08). Full list in the dated sections below.
 
 ---
+
+## 2026-10-24 — "Swap app = instant disconnect": OPPO/Infinix background kills (Android, NOT patched)
+
+**Measured** (38 crash/killed reports, build 279, 2026-10-22/23; OnePlus PHB110 = our LDPlayer, left out):
+Android's ApplicationExitInfo for the run each report covers -
+- OPPO CPH2737 x5, CPH2639, (CPH2457/2251 user swipes aside): REASON_OTHER `[UNKNOWN] o-kill(40)`,
+  importance 400, **about 1 s after the game's last log line** - i.e. ColorOS kills the game the moment
+  it leaves the screen (after 27 s ... 31 min of play). This is the reported "swap app, instant disconnect".
+- Infinix X6873: `[Swipe-up clean]` the same way.
+- Infinix X6873, Xiaomi 2511FPC34G: `bg anr: Input dispatching timed out ... RanActivity is not
+  responding`, importance 400, 7-8 s into the run (still loading).
+- 8x `REMOVE TASK` (the player swiped the game away) - expected.
+- iPhone14,5 / iPhone15,4 killed reports: both died in the first seconds of start-up (file loads), not on
+  an app switch.
+
+**Cause of the bg ANR:** the NDK's android_native_app_glue.c makes the UI thread wait in onPause /
+onStop / onStart / onResume / onSaveInstanceState until the game thread takes the command; the game
+thread takes commands only between frames, and the boot and map loads keep it busy for seconds.
+
+**Changes (Android):**
+1. `RanSessionService` (new, foreground service, type `specialUse`, NOT exported): started once per
+   session from RanActivity.onResume, stopped in onDestroy; START_NOT_STICKY; low-importance silent
+   notification "Ran Legacy M กำลังทำงาน / กดเพื่อกลับเข้าเกม", tap = explicit + FLAG_IMMUTABLE intent to
+   RanLauncher (which brings the running game forward). Manifest: FOREGROUND_SERVICE,
+   FOREGROUND_SERVICE_SPECIAL_USE, PROPERTY_SPECIAL_USE_FGS_SUBTYPE text. Started once only because
+   Android 12+ throws ForegroundServiceDidNotStartInTimeException if onStartCommand (UI thread) is late.
+   **Play Console needs the special-use FGS declaration before the next store review.**
+2. RanLauncher: one-time Thai guide (EN in LANG_EN) on oppo/realme/oneplus/infinix/tecno/itel/vivo/
+   iqoo/xiaomi/redmi/poco/huawei/honor: how to allow background activity; "เปิดการตั้งค่า" opens
+   ACTION_APPLICATION_DETAILS_SETTINGS for our package only, "เริ่มเกม" continues. Pref
+   `ran_launcher/bg_guide_shown_v1`. Shown from the patch thread (never waits on the UI thread).
+3. Our copy of the glue: `native/platform/android/glue/android_native_app_glue.c` (CMakeLists points at
+   it; header stays the NDK's). Activity-state and save-state commands are sent without waiting;
+   window / input-queue changes still wait. Nothing in our code reads activityState or savedState.
+
+**Tested on LDPlayer (127.0.0.1:5555), APK built by hand (libran.so touched after):**
+- guide shows (emulator reports OnePlus), "เปิดการตั้งค่า" opens App info and the guide is still there
+  on return, "เริ่มเกม" starts;
+- Home pressed 3 s into the boot: alive 20 s later, no ANR, procState 4 (FOREGROUND_SERVICE), oom adj 50;
+  launcher icon brings the same process back (pid unchanged);
+- in the world (ตลาดปลอดภาษี): 60 s in Settings, all sockets stayed ESTABLISHED, procState 4; back in
+  the world, game clock and announcements moved on - still connected.
+- NOT verified: a real OPPO / Infinix phone (none here); the next build's reports will show it.
+- iOS: no change. No OEM background killers or ANR there; background is already kept by the silent
+  audio session (2026-10-05) and the 10-minute grace.
 
 ## 2026-10-20 — Drop rates: "perfect" backup, then weapon/armor -0.4 and stone -0.2 (NOT uploaded)
 

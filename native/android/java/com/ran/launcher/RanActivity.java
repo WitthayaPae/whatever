@@ -88,7 +88,19 @@ public class RanActivity extends NativeActivity {
 
     @Override protected void onDestroy() {
         sAlive = false;
+        RanSessionService.stop(this);
         super.onDestroy();
+    }
+
+    /*  The keep-alive service (RanSessionService) is started while the game is
+     *  on screen - the one moment Android always allows a foreground service to
+     *  start - so it is already running when the player switches away and the
+     *  OPPO / Infinix background killers look at the process. Starting it again
+     *  on every resume is a no-op once it runs (RanSessionService.sRunning):
+     *  only the first resume of a session really starts it.                                                        */
+    @Override protected void onResume() {
+        super.onResume();
+        RanSessionService.start(this);
     }
 
     @Override protected void onCreate(Bundle b) {
