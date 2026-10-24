@@ -1818,6 +1818,58 @@ public class RanLauncher extends Activity {
         try { done.await(); } catch (InterruptedException e) { /* start anyway */ }
     }
 
+    /*  Notification permission (2026-10-24, build 281).
+     *
+     *  Android 13+ hides every notification of an app that has not been granted
+     *  POST_NOTIFICATIONS, so RanSessionService ran in the foreground with its
+     *  "Ran Legacy M กำลังทำงาน" notification invisible (Tab S9: appops
+     *  POST_NOTIFICATION ignore). Asked once, before the first game start, and
+     *  waited for like the background guide. A "no" changes nothing else: the
+     *  service still runs, only its notification stays hidden.                */
+    private static final String PREF_NOTIF_ASKED = "notif_perm_asked_v1";
+    private static final int REQ_NOTIF = 7102;
+    private volatile CountDownLatch notifDone;
+
+    private boolean needsNotificationAsk() {
+        if (Build.VERSION.SDK_INT < 33) return false;
+        try {
+            if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) return false;
+            return !getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_NOTIF_ASKED, false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void askNotificationPermission() {
+        final CountDownLatch done = new CountDownLatch(1);
+        notifDone = done;
+        ui.post(new Runnable() { public void run() {
+            try {
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_NOTIF_ASKED, true).apply();
+            } catch (Throwable t) { /* asked again next time, harmless */ }
+            try {
+                requestPermissions(new String[] { "android.permission.POST_NOTIFICATIONS" }, REQ_NOTIF);
+            } catch (Throwable t) {
+                Log.w(TAG, "notification permission not asked: " + t);
+                done.countDown();
+            }
+        }});
+        //  Bounded: a dialog that never answers must not keep the game from starting.
+        try { done.await(120, TimeUnit.SECONDS); } catch (InterruptedException e) { /* start anyway */ }
+        notifDone = null;
+    }
+
+    @Override public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(code, perms, results);
+        if (code != REQ_NOTIF) return;
+        boolean ok = results != null && results.length > 0
+                  && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        Log.i(TAG, "notification permission " + (ok ? "granted" : "refused"));
+        CountDownLatch d = notifDone;
+        if (d != null) d.countDown();
+    }
+
     private void play() {
         if (sCurrent != this) {
             Log.i(TAG, "an older launcher finished its patch; the newer one starts the game");
@@ -1826,6 +1878,7 @@ public class RanLauncher extends Activity {
         }
         //  play() runs on the patch thread; waiting on the UI thread would freeze it.
         if (Looper.myLooper() != Looper.getMainLooper() && needsBackgroundGuide()) showBackgroundGuide();
+        if (Looper.myLooper() != Looper.getMainLooper() && needsNotificationAsk()) askNotificationPermission();
         //  A bare Intent plus setComponent. Intent(Context, Class) builds the
         //  ComponentName from the class immediately, so passing null there
         //  throws before setComponent can replace it.
