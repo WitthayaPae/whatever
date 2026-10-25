@@ -93,6 +93,14 @@ void        RanCrash_Begin ( void );
 void        RanCrash_SetForeground ( int foreground );
 void        RanCrash_CleanExit ( void );
 
+//  The streaming copy (gl_render.cpp RingBuffer, 2026-10-25): 15 of 18 crashes
+//  on 25 Oct faulted in that memcpy on the login screen, and the report could
+//  not say which side was bad. The copy is bracketed with these; a fault inside
+//  it is reported against both ranges, and leaves the "nopersistmap" diag file
+//  so the next start streams through glBufferSubData instead of the mapping.
+void        RanCrash_CopyBegin ( const void *dst, const void *src, unsigned long n );
+void        RanCrash_CopyEnd ( void );
+
 //  End the app, completely: the game's own Exit (WM_CLOSE, win_impl.cpp).
 //  Android finishes and removes the task, then ends the process; iOS exits.
 void        RanPlat_Quit ( void );
