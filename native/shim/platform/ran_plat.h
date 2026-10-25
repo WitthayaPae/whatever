@@ -63,6 +63,13 @@ void        RanPlat_OpenURL ( const char *url );
 //  pay, so the client hides the item shop's top-up button there.
 int         RanPlat_IsStore ( void );
 
+//  The phone's battery, 0..100, or -1 while not known yet; *pCharging (may be
+//  NULL) is 1 while it is charging or full on the charger. No permission on
+//  either platform: Android reads the sticky BATTERY_CHANGED broadcast, iOS
+//  UIDevice (read on the main thread; the answer lags one call behind).
+//  Cheap, but meant to be asked every few seconds, not every frame.
+int         RanPlat_BatteryLevel ( int *pCharging );
+
 //  MB left before the platform starts killing: iOS the app's own limit
 //  (os_proc_available_memory), Android the system's MemAvailable. -1 unknown.
 int         RanPlat_MemHeadroomMB ( void );

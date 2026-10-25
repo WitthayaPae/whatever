@@ -357,6 +357,63 @@ extern "C" int RanPlat_IsStore(void) {
     return s;
 }
 
+//  The battery, for the top bar (2026-10-25). The sticky BATTERY_CHANGED
+//  broadcast, asked for with a null receiver: no permission, nothing stays
+//  registered, and it works on every API level the app runs on. All plain
+//  JNI on framework classes, so the launcher's Java is untouched. Any Java
+//  exception is cleared before returning - one left pending makes the next
+//  JNI call abort the process.
+extern "C" int RanPlat_BatteryLevel(int *pCharging) {
+    if (pCharging) *pCharging = 0;
+    if (!g_app || !g_app->activity) return -1;
+
+    JNIEnv *env = NULL;
+    if (g_app->activity->vm->AttachCurrentThread(&env, NULL) != JNI_OK || !env) return -1;
+
+    int nPct = -1;
+    jobject act = g_app->activity->clazz;
+    jclass cFilter = env->FindClass("android/content/IntentFilter");
+    jclass cAct = env->GetObjectClass(act);
+    jstring jAction = env->NewStringUTF("android.intent.action.BATTERY_CHANGED");
+    if (cFilter && cAct && jAction && !env->ExceptionCheck()) {
+        jmethodID ctor = env->GetMethodID(cFilter, "<init>", "(Ljava/lang/String;)V");
+        jmethodID reg = env->GetMethodID(cAct, "registerReceiver",
+            "(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;)Landroid/content/Intent;");
+        jobject filter = (ctor && !env->ExceptionCheck()) ? env->NewObject(cFilter, ctor, jAction) : NULL;
+        jobject intent = (filter && reg && !env->ExceptionCheck())
+                       ? env->CallObjectMethod(act, reg, (jobject)NULL, filter) : NULL;
+        if (intent && !env->ExceptionCheck()) {
+            jclass cIntent = env->GetObjectClass(intent);
+            jmethodID getInt = cIntent ? env->GetMethodID(cIntent, "getIntExtra", "(Ljava/lang/String;I)I") : NULL;
+            if (getInt && !env->ExceptionCheck()) {
+                jstring kLevel = env->NewStringUTF("level");
+                jstring kScale = env->NewStringUTF("scale");
+                jstring kStatus = env->NewStringUTF("status");
+                const int nLevel = env->CallIntMethod(intent, getInt, kLevel, -1);
+                const int nScale = env->CallIntMethod(intent, getInt, kScale, -1);
+                const int nStatus = env->CallIntMethod(intent, getInt, kStatus, -1);
+                if (!env->ExceptionCheck() && nLevel >= 0 && nScale > 0) {
+                    nPct = (nLevel * 100 + nScale / 2) / nScale;
+                    if (nPct > 100) nPct = 100;
+                    //  BatteryManager.BATTERY_STATUS_CHARGING 2, _FULL 5
+                    if (pCharging) *pCharging = (nStatus == 2 || nStatus == 5) ? 1 : 0;
+                }
+                if (kLevel) env->DeleteLocalRef(kLevel);
+                if (kScale) env->DeleteLocalRef(kScale);
+                if (kStatus) env->DeleteLocalRef(kStatus);
+            }
+            if (cIntent) env->DeleteLocalRef(cIntent);
+        }
+        if (intent) env->DeleteLocalRef(intent);
+        if (filter) env->DeleteLocalRef(filter);
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (jAction) env->DeleteLocalRef(jAction);
+    if (cAct) env->DeleteLocalRef(cAct);
+    if (cFilter) env->DeleteLocalRef(cFilter);
+    return nPct;
+}
+
 //  Hand a link to the browser, through the activity.
 //
 //  Same shape as the keyboard calls above: attach to the VM, find the method on

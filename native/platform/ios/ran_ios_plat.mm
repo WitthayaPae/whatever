@@ -26,6 +26,27 @@ extern "C" int RanPlat_IsStore ( void )
     return s;
 }
 
+//  The battery, for the top bar (2026-10-25). UIDevice is main-thread only and
+//  this is asked from the game thread, so each call queues a read on the main
+//  queue and answers with the previous one: the first call says "not known"
+//  (-1) and the caller asks again a second later. No permission or Info.plist
+//  key is needed for batteryMonitoringEnabled.
+extern "C" int RanPlat_BatteryLevel ( int *pCharging )
+{
+    static volatile int s_nPct = -1;
+    static volatile int s_nCharging = 0;
+    dispatch_async ( dispatch_get_main_queue (), ^{
+        UIDevice *d = [UIDevice currentDevice];
+        if ( !d.batteryMonitoringEnabled )	d.batteryMonitoringEnabled = YES;
+        const float f = d.batteryLevel;					//	-1 when unknown
+        s_nPct = ( f < 0.0f ) ? -1 : (int) ( f * 100.0f + 0.5f );
+        const UIDeviceBatteryState st = d.batteryState;
+        s_nCharging = ( st == UIDeviceBatteryStateCharging || st == UIDeviceBatteryStateFull ) ? 1 : 0;
+    } );
+    if ( pCharging )	*pCharging = s_nCharging;
+    return s_nPct;
+}
+
 //  Open a link in Safari (or whatever the phone's default browser is).
 //
 //  openURL:options:completionHandler: rather than the deprecated openURL: - the
