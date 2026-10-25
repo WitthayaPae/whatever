@@ -1930,6 +1930,14 @@ extern "C" int RanGLR_Init(void) {
         if (ext && strstr(ext, "GL_EXT_buffer_storage"))
             p_glBufferStorageEXT = (PFN_BUFSTORAGE)RanGL_ProcAddress("glBufferStorageEXT");
         g_havePersistentMap = p_glBufferStorageEXT != NULL;
+        //  A previous run crashed inside the copy into the mapped ring
+        //  (RanCrash_CopyBegin left this file): stream through
+        //  glBufferSubData on this phone from now on. Delete the file to try
+        //  the mapping again.
+        if (g_havePersistentMap && RanPlat_DiagExists("nopersistmap")) {
+            g_havePersistentMap = false;
+            LOGE("persistent buffer mapping: off (nopersistmap - a stream copy crashed before)");
+        }
         LOGI("persistent buffer mapping: %s",
              g_havePersistentMap ? "yes (streaming writes are a memcpy)" : "no");
     }
@@ -3380,7 +3388,9 @@ struct RingBuffer {
                 RingBuffer *self = this;
                 RanGLT_PostData(data, (unsigned)size, [self, offset, size, wrap](const void *p) {
                     if (wrap) { self->markLap(); self->waitForLap(); }
+                    RanCrash_CopyBegin(self->mapped + offset, p, (unsigned long)size);
                     memcpy(self->mapped + offset, p, (size_t)size);
+                    RanCrash_CopyEnd();
                 });
                 cursor += size;
                 cursor = (cursor + 15) & ~15;
@@ -3484,7 +3494,9 @@ struct RingBuffer {
                     waitForLap();
                     cursor = 0;
                 }
+                RanCrash_CopyBegin(mapped + cursor, data, (unsigned long)size);
                 memcpy(mapped + cursor, data, (size_t)size);
+                RanCrash_CopyEnd();
                 const GLintptr offset = cursor;
                 cursor += size;
                 cursor = (cursor + 15) & ~15;

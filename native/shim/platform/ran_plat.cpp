@@ -595,9 +595,16 @@ int SafeRead ( uintptr_t addr, void *out, size_t n )
 #endif
 #endif
 
+//  The streaming copy in flight, if any (RanCrash_CopyBegin).
+volatile uintptr_t g_copyDst = 0, g_copySrc = 0, g_copyLen = 0;
+volatile int       g_copyOn  = 0;
+
 const int kCrashSignals[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT, SIGTRAP, SIGSYS };
 struct sigaction g_oldAct[32];
 volatile int     g_inCrash = 0;
+
+//  Filled once at RanCrash_Begin: the handler cannot build a path.
+char g_noMapPath[640] = "";
 
 void OnCrashSignal ( int sig, siginfo_t *si, void *ucv )
 {
@@ -618,6 +625,26 @@ void OnCrashSignal ( int sig, siginfo_t *si, void *ucv )
         CW ( "thread" );
 #endif
         CW ( " \"" ); CW ( tname ); CW ( "\"\n" );
+
+        //  Inside the streaming copy: say which side the fault is in, and
+        //  turn the mapped ring off for the next start (open/close are
+        //  async-signal-safe; the path buffer was filled at boot).
+        if ( g_copyOn ) {
+            const uintptr_t fa = si ? (uintptr_t) si->si_addr : 0;
+            const uintptr_t d = g_copyDst, s = g_copySrc, l = g_copyLen;
+            CW ( "stream copy: dst " ); CWHex ( d ); CW ( ".." ); CWHex ( d + l );
+            CW ( " src " ); CWHex ( s ); CW ( ".." ); CWHex ( s + l );
+            CW ( " len " ); CWDec ( (long) l );
+            CW ( fa >= d && fa < d + l ? " -> fault in DST (mapped ring)"
+               : fa >= s && fa < s + l ? " -> fault in SRC (client data)"
+               : " -> fault outside both" );
+            CW ( "\n" );
+            if ( g_noMapPath[0] ) {
+                const int fd = open ( g_noMapPath, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0644 );
+                if ( fd >= 0 ) { (void) !write ( fd, "1", 1 ); close ( fd ); }
+                CW ( "nopersistmap set for the next start\n" );
+            }
+        }
 
         //  Registers at the fault, straight from the signal frame: correct even
         //  when the unwinder below cannot get past the trampoline.
@@ -1076,6 +1103,7 @@ extern "C" void RanCrash_Begin ( void )
 
     char path[640];
     snprintf ( path, sizeof(path), "%s", RanPlat_DiagPath ( "lastrun.bin" ) );
+    snprintf ( g_noMapPath, sizeof(g_noMapPath), "%s", RanPlat_DiagPath ( "nopersistmap" ) );
 
     ReportPreviousRun ( path );
 
@@ -1200,6 +1228,19 @@ extern "C" int RanHang_MsSinceFrame ( void )
     if ( !g_lastFrameMs ) return 0;
     const int64_t d = RanMonoMs () - g_lastFrameMs;
     return d > 0x7fffffff ? 0x7fffffff : (int) d;
+}
+
+extern "C" void RanCrash_CopyBegin ( const void *dst, const void *src, unsigned long n )
+{
+    g_copyDst = (uintptr_t) dst;
+    g_copySrc = (uintptr_t) src;
+    g_copyLen = (uintptr_t) n;
+    __atomic_store_n ( &g_copyOn, 1, __ATOMIC_RELEASE );
+}
+
+extern "C" void RanCrash_CopyEnd ( void )
+{
+    __atomic_store_n ( &g_copyOn, 0, __ATOMIC_RELEASE );
 }
 
 extern "C" void RanCrash_SetForeground ( int foreground )
