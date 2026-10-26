@@ -3,7 +3,7 @@
 
 	A GM picks a picture in the GM window (Player tab: เลือกรูปพ่อค้า, then
 	ตั้งรูปพ่อค้า with the merchant's character name). The game cuts it to
-	96 x 96, the Agent names it by the SHA-256 of its pixels and stores it here
+	256 x 256, the Agent names it by the SHA-256 of its pixels and stores it here
 	once; the merchant's account points at it. Players see it above the
 	merchant's name in ตลาดปลอดภาษี (map 22), like the green title.
 
@@ -19,7 +19,7 @@ GO
 IF OBJECT_ID('dbo.MerchantImage', 'U') IS NULL
 	CREATE TABLE dbo.MerchantImage (
 		ImgHash		CHAR(64)		NOT NULL PRIMARY KEY,	-- SHA-256 of Pixels, lower-case hex
-		Pixels		VARBINARY(MAX)		NOT NULL,			-- 96 x 96 x 4 = 36864 bytes (B,G,R,A)
+		Pixels		VARBINARY(MAX)		NOT NULL,			-- 256 x 256 x 4 = 262144 bytes (B,G,R,A); 96 x 96 before 2026-10-27
 		CreateDate	DATETIME		NOT NULL CONSTRAINT DF_MerchantImage_CreateDate DEFAULT (GETDATE())
 	)
 GO
