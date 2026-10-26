@@ -6,6 +6,9 @@
 #   0 coin  1 random box  2 belt card  3 belt attack  4 belt energy  5 belt hit rate  6 belt avoid
 #   py mk_icons_hunter.py <CLIENT/textures dir> <out dir>
 import sys, math, os
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import ranframe
 from PIL import Image, ImageDraw, ImageFilter
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -21,16 +24,9 @@ def radial(c_in, c_out, cx=0.5, cy=0.55, r=0.66):
     return im.convert('RGBA')
 
 def frame(base):
-    d = ImageDraw.Draw(base, 'RGBA')
-    gloss = Image.new('RGBA', (S, S), (0, 0, 0, 0)); gd = ImageDraw.Draw(gloss)
-    for y in range(22, S // 2):
-        a = int(70 * (1 - (y - 22) / (S / 2 - 22)) ** 1.5)
-        gd.line([(22, y), (S - 22, y)], fill=(255, 255, 255, a))
-    base.alpha_composite(gloss)
-    d.rectangle([0, 0, S - 1, S - 1], outline=(0, 0, 0, 255), width=16)
-    d.rectangle([16, 16, S - 17, S - 17], outline=(205, 190, 150, 255), width=5)
-    d.rectangle([21, 21, S - 22, S - 22], outline=(60, 45, 30, 200), width=2)
-    return base
+    # The picture only, without the old drawn border: ranframe.cell() puts the game's own
+    # 35 px frame around it (2026-10-26, the user: "the icon it's not align").
+    return base.crop((22, 22, S - 22, S - 22))
 
 def outline_paste(base, layer, width=7, color=(25, 10, 5, 255)):
     a = layer.getchannel('A')
@@ -173,8 +169,8 @@ os.makedirs(OUT, exist_ok=True)
 sheet = Image.new('RGBA', (512, 256), (0, 0, 0, 255))
 hd = Image.new('RGB', (1024, 512), (0, 0, 0))
 for i, ic in enumerate(icons):
-    sheet.paste(ic.resize((35, 35), Image.LANCZOS), (i * 35, 0))
-    hd.paste(ic.convert('RGB').resize((70, 70), Image.LANCZOS), (i * 70, 0))
+    sheet.paste(ranframe.cell(ic, 1).convert('RGBA'), (i * 35, 0))
+    hd.paste(ranframe.cell(ic, 2), (i * 70, 0))
 hd.save(os.path.join(OUT, 'dailyhunter01.png'))
 ref = open(os.path.join(TEX, 'gui', 'commercialset07.dds'), 'rb').read()
 px = sheet.tobytes('raw', 'RGBA')
@@ -185,6 +181,6 @@ assert chk.size == (512, 256) and chk.getpixel((17, 17)) == sheet.getpixel((17, 
 prev = Image.new('RGB', (len(icons) * 150, 300), (30, 30, 30))
 for i, ic in enumerate(icons):
     prev.paste(ic.convert('RGB').resize((140, 140), Image.LANCZOS), (i * 150, 0))
-    prev.paste(ic.convert('RGB').resize((35, 35), Image.LANCZOS).resize((140, 140), Image.NEAREST), (i * 150, 150))
+    prev.paste(ranframe.cell(ic, 1).resize((140, 140), Image.NEAREST), (i * 150, 150))
 prev.save(os.path.join(OUT, 'icons_preview.png'))
 print('ok')
