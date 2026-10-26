@@ -19,7 +19,7 @@ GO
 IF OBJECT_ID('dbo.MerchantImage', 'U') IS NULL
 	CREATE TABLE dbo.MerchantImage (
 		ImgHash		CHAR(64)		NOT NULL PRIMARY KEY,	-- SHA-256 of Pixels, lower-case hex
-		Pixels		VARBINARY(36864)	NOT NULL,			-- 96 x 96 x 4 bytes (B,G,R,A)
+		Pixels		VARBINARY(MAX)		NOT NULL,			-- 96 x 96 x 4 = 36864 bytes (B,G,R,A)
 		CreateDate	DATETIME		NOT NULL CONSTRAINT DF_MerchantImage_CreateDate DEFAULT (GETDATE())
 	)
 GO
