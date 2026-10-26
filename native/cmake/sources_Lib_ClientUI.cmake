@@ -254,6 +254,7 @@ set(Lib_ClientUI_SOURCES
   ${RAN_SRC}/Lib_ClientUI/Interface/ItemTransferWindow.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/KeySettingWindow.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/GMGenItemWindow.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MerchantImgWindow.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/AuctionWindow.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/AuctionStorageWindow.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/LargeMapWindow.cpp
