@@ -65,6 +65,17 @@ public class RanSessionService extends Service {
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
+    /*  The player swiped the game out of recents. A running foreground
+     *  service keeps the process alive past that, so the game would go on in
+     *  the background, sound and all, with nothing on screen (2026-10-26).
+     *  Swiping away means quit: end the process, as the in-game Exit does. */
+    @Override public void onTaskRemoved(Intent rootIntent) {
+        sRunning = false;
+        try { stopForeground(true); } catch (Throwable t) { /* gone anyway */ }
+        stopSelf();
+        android.os.Process.killProcess(android.os.Process.myPid());
+    }
+
     @Override public void onDestroy() {
         sRunning = false;
         super.onDestroy();

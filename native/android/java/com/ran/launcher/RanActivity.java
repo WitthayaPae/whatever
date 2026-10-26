@@ -89,7 +89,14 @@ public class RanActivity extends NativeActivity {
     @Override protected void onDestroy() {
         sAlive = false;
         RanSessionService.stop(this);
+        final boolean bClosing = isFinishing();
         super.onDestroy();
+        /*  Closed for good (swiped out of recents, Back, Exit): the process
+         *  goes too, as ranQuit does. Left alive, a NativeActivity process
+         *  keeps the game thread, its socket and the sound running with no
+         *  screen - players heard the game after closing it and had to open
+         *  it again to stop it (2026-10-26).                                  */
+        if (bClosing) android.os.Process.killProcess(android.os.Process.myPid());
     }
 
     /*  The keep-alive service (RanSessionService) is started while the game is
