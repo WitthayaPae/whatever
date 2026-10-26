@@ -4,7 +4,7 @@
 # textures/gui_hd/dailyhunter01.png (1024x512).
 # Cells, left to right on row 0:
 #   0 coin  1 random box  2 belt card  3 belt attack  4 belt energy  5 belt hit rate  6 belt avoid
-# Cells 3-6 are then replaced by mk_belts_game.py (the game's own belt icon, re-hued): run it after this.
+# Superseded by mk_hunter_icons2.py (game-style set built on the game's own icons): run that instead.
 #   py mk_icons_hunter.py <CLIENT/textures dir> <out dir>
 import sys, math, os
 import os as _os, sys as _sys
