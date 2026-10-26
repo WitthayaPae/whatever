@@ -1256,6 +1256,37 @@ Not verified: iPhone; item 5 and the item-4 flicker on screen.
   stall window and bag side by side; log `window 75 drawn with its pair -> x1.50`.
 - **Note:** patch 231 was built but not uploaded; this needs a rebuild (232).
 
+## 2026-10-26 — Trusted-merchant picture (new feature, not shipped yet)
+
+- **What:** a GM sets a 96 x 96 picture for a merchant from the GM window; players see it
+  above the merchant's green title in ตลาดปลอดภาษี (map 22,0), drawn 48 UI units wide.
+- **GM window, Player tab:** เลือกรูปพ่อค้า (18) opens the phone's photo picker
+  (`RanPlat_PickImage`, Android + iOS already had it for the club emblem) or, on PC, a file
+  dialog loaded by D3DX (centre square, 96 x 96). The preview shows where the Mob tab's text
+  goes. ตั้งรูปพ่อค้า (19) sends it for ชื่อตัวละคร; ลบรูปพ่อค้า (20) removes it. Labels:
+  `gameword.xml` GM_BTN3 18-20, GM_MSG 15-21, packed into `CLIENT/data/gui/Gui.rcc`.
+- **Upload:** `NET_MSG_GM_MERCHANT_IMG` pieces of 1536 bytes over the game connection to the
+  agent (`MsgGmMerchantImg`, USER_MASTER+). The agent names the picture by `RanSha256` of
+  the pixels (never the sender's word), keeps it in `m_mapMerchantImg`, saves it
+  (`CSetUserMerchantImg`: `MerchantImage` row once + `UserInfo.UserMerchantImg`) and sends
+  `_FLD` to every channel; the field broadcasts `MERCHANT_BRD` (now carries the name).
+- **Join:** `GetUserMerchantImg` (separate query - missing column = no picture) in
+  `CGetChaInfoAndJoin` -> `GLCHARAG_DATA` -> `NET_GAME_JOIN_FIELDSVR` (static_assert on size)
+  -> `SINFO` -> `GLChar` -> `SDROP_CHAR` (appended after the title, size-guarded on the client).
+- **Players:** `GLMerchantImg` asks the agent (`NET_MSG_MERCHANT_IMG_REQ`, 40 a minute per
+  client) for a name it has not got; pieces come back as `NET_MSG_MERCHANT_IMG_DATA`; the
+  bytes must hash to the name or they are dropped. Pixels are copied into a texture - no
+  image file is decoded on a phone. 64 pictures kept, oldest-used dropped.
+- **Shared fix:** `ran_plat.cpp` pick buffer 64x64 -> 96x96, and `RanPlat_TakePickedImage`
+  now clears only on a size match (the club emblem polls 16 x 11 every frame and would
+  have eaten the 96 x 96 pick).
+- **Builds:** arm64 + x86_64; PC GameClient2, Emulator, ServerAgent, ServerField (SOURCE e144acc9).
+- **Not verified:** nothing has run yet - the server half needs `server/merchant_image.sql`
+  on the live DB and the new Agent + every Field; the picker/preview and the drawing were
+  not tried on a device. iOS cannot be tried here.
+- **Deploy order:** SQL, then Agent + all Fields together, then the app. A GM pressing
+  ตั้งรูปพ่อค้า against an old agent sends a message it does not know.
+
 ## 2026-10-07 — Trusted merchant (new feature, not shipped yet)
 
 - **What:** an account flag and title in `UserInfo` (`UserMerchant`, `UserMerchantTitle`,
