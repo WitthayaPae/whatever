@@ -111,6 +111,19 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-26 — Bot-time potion + auto-click log (SOURCE 154a39af, NOT deployed, NOT patched)
+
+**Potion:** new drug type 16 (ITEM_DRUG_AUTOHUNT). Item = ITEM_CURE, drug type 16,
+wCureVolume = minutes (0 means 120). Adds to TODAY's auto-hunt time (gone at midnight),
+never more than 24 h left; stored as negative AutoHuntDaily.HuntSec (no DB change).
+Needs: new ServerAgent + ServerField, then the item in the item CSV (Editor_Item in
+CLIENT/ shows the new type), then a client patch. Before the servers are deployed the
+potion is eaten with no effect - do not hand it out until then.
+**Auto-click:** Android 12+ touches injected by an accessibility service are counted
+(flag 0x800) and logged by the field to `_autoclick.txt` (and `injected` in
+`_botscore.txt`). Log only. iOS / Android 11 and older: not detectable.
+Built: Android arm64 + x86_64, PC client, Emulator, servers, Editor_Item. NOT tested in game.
+
 ## 2026-10-26 — Buff effect stayed on the body after every buff ended (SOURCE bb42cedf, NOT patched)
 
 User saw rings/aura on LDPlayer with no buff icons left. Cause (code read, not reproduced):

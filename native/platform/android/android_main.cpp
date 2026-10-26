@@ -891,6 +891,10 @@ int32_t onInputEvent(android_app *app, AInputEvent *event) {
         switch (action) {
             case AMOTION_EVENT_ACTION_DOWN:
             case AMOTION_EVENT_ACTION_POINTER_DOWN:
+                //  0x800 = AMOTION_EVENT_FLAG_IS_ACCESSIBILITY_EVENT (Input.h,
+                //  Android 12+): injected by an accessibility service, which is
+                //  how auto-click apps tap. Only counted, for the server's log.
+                if (AMotionEvent_getFlags(event) & 0x800) RanTouch_NoteInjectedDown();
                 if (RanTouch_PointerDown(pid, (float)px, (float)py)) return 1;
                 RanGesture_Down(px, py);
                 return 1;

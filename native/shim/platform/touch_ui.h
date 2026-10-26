@@ -138,6 +138,10 @@ extern "C" int  RanTouch_AttackHeld(void);
     on attack and the skill circles, distinct pixels they hit, and the
     spread of the gaps between them x1000 (0 = too few to say).           */
 extern "C" void RanTouch_TakeBotStats(int *taps, int *spots, int *gapCV1000);
+/*  Auto-click count: a touch-down Android marked as injected by an
+    accessibility service (Android 12+). iOS has no such mark: never called. */
+extern "C" void RanTouch_NoteInjectedDown(void);
+extern "C" int  RanTouch_TakeInjected(void);
 
 extern "C" void RanTouch_SetChatButton(float cx, float cy, float r, int mode);
 
