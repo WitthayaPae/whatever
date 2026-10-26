@@ -95,6 +95,7 @@ set(Lib_Client_SOURCES
   ${RAN_SRC}/Lib_Client/G-Logic/GLCrowGenerateReward.cpp
   ${RAN_SRC}/Lib_Client/G-Logic/GLCrowReAction.cpp
   ${RAN_SRC}/Lib_Client/G-Logic/GLCrowRenList.cpp
+  ${RAN_SRC}/Lib_Client/G-Logic/GLMerchantImg.cpp
   ${RAN_SRC}/Lib_Client/G-Logic/GLCrowSkill.cpp
   ${RAN_SRC}/Lib_Client/G-Logic/GLCrowSkillTarget.cpp
   ${RAN_SRC}/Lib_Client/G-Logic/GLDescriptionFile.cpp

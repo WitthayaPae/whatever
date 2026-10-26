@@ -4379,6 +4379,9 @@ void RanTouch_Render(void) {
     if (!g_edit && g_balloonN > 0) {
         for (int i = 0; i < g_balloonN; ++i) {
             const Balloon &b = g_balloon[i];
+            //  High bit: a tap area only (a merchant's picture thumbnail, which
+            //  the game draws itself) - nothing to draw here.
+            if (b.id & 0x80000000u) continue;
             const bool dn = g_balloonDown && g_balloonHit == i;
             const float br = b.r * (dn ? 0.92f : 1.0f);
             if (hudSheet()) {

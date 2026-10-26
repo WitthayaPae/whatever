@@ -1257,7 +1257,7 @@ extern "C" void RanCrash_CleanExit ( void )
 //  The gallery pick, handed from the platform's thread to the game's.
 //  (RanPlat_PickImage / RanPlat_ImagePicked / RanPlat_TakePickedImage.)
 namespace {
-const int        kPickMax = 64 * 64;
+const int        kPickMax = 512 * 512;    //  the merchant picture (512 x 512 since 2026-10-27); the club emblem is 16 x 11
 unsigned int     g_pickPx[kPickMax];
 int              g_pickW = 0, g_pickH = 0;
 int              g_pickReady = 0;
@@ -1279,11 +1279,13 @@ extern "C" int RanPlat_TakePickedImage ( unsigned int *argb, int w, int h )
 {
     int got = 0;
     pthread_mutex_lock ( &g_pickLock );
+    //  Only the size that was asked for takes it: the club emblem polls every
+    //  frame for 16 x 11, and must not eat the GM window's 96 x 96.
     if ( g_pickReady && argb && g_pickW == w && g_pickH == h ) {
         memcpy ( argb, g_pickPx, sizeof(unsigned int) * (size_t)( w * h ) );
         got = 1;
+        g_pickReady = 0;
     }
-    g_pickReady = 0;
     pthread_mutex_unlock ( &g_pickLock );
     return got;
 }

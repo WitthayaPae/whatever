@@ -2036,6 +2036,11 @@ static int baseHeight(void) { return g_sceneActive ? g_sceneH : RanGL_Height(); 
 //  Only on the frame itself: a render target or the scene target is never
 //  magnified.
 static float g_uiMagS = 1.0f, g_uiMagAX = 0.0f, g_uiMagAY = 0.0f;
+//	RanGLR_SetUiSmooth: interface draws sample plainly (the sampler's own filter) instead
+//	of the pixel-grid snap / sharp bilinear meant for pixel-art icons and panels. For a
+//	photograph drawn as interface - the merchant picture (2026-10-27) - which that snap
+//	turned into hard blocks of texels.
+static int g_uiSmooth = 0;
 //  The D3D viewport the client last set, logical; w < 0 means the full surface.
 static int   g_vpX = 0, g_vpY = 0, g_vpW = -1, g_vpH = -1;
 
@@ -2082,6 +2087,8 @@ static void viewportFull(void) {
 //  Draw what follows magnified by s about (ax, ay), logical pixels; s = 1 ends
 //  it. The client flushes its own quad queue around this so no quad drawn
 //  before is caught by it, and no quad of the window escapes it.
+extern "C" void RanGLR_SetUiSmooth(int on) { g_uiSmooth = on ? 1 : 0; }
+
 extern "C" void RanGLR_SetUiMagnify(float s, float ax, float ay) {
     if (!g_inited) return;
     if (!(s > 0.0f)) s = 1.0f;
@@ -4738,13 +4745,13 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
             }
         }
         setUniform2f(uTexSize, s_lastW, s_lastH);
-        setUniform1i(uTexHD, s_lastHD);
+        setUniform1i(uTexHD, g_uiSmooth ? 0 : s_lastHD);
         //  A magnified window's logical pixel is UIScale*s panel pixels, and
         //  its grid starts where the window's anchor maps to.
         {
             const float mag = uiMagnifyOn() ? g_uiMagS : 1.0f;
             const float U = RanGL_UIScale();
-            setUniform1f(uUiSharpen, g_noUiSharp ? 1.0f : U * mag);
+            setUniform1f(uUiSharpen, ( g_noUiSharp || g_uiSmooth ) ? 1.0f : U * mag);
             setUniform2f(uUiOrigin, mag != 1.0f ? U * g_uiMagAX * (1.0f - mag) : 0.0f,
                                     mag != 1.0f ? U * g_uiMagAY * (1.0f - mag) : 0.0f);
         }
