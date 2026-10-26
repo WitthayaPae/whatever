@@ -111,6 +111,15 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-26 — Daily Hunter NPC + event variants (data ready, NOT packed into GLogic.rcc, NOT deployed)
+
+See DEV EP9/EVENT_EXCHANGE.md. item.csv has 512/61-80 (potion, necklace/ring variants +
+boxes, coin, random box, card, 4 belts) - user imports CSV and saves item.isf, then GLogic.rcc
+gets item.isf/csv, crow.mnsf, CrowStrTable*, ItemStrTable_en, eventexchange.npcex,
+dailyhunter.npcex. Quest.rcc (3100-3104) and NpcTalk.rcc (npc_dailyhunter.ntk) already
+packed. NPC 49/25 to be placed in the Level editor. Rotation needs new ServerField + client
+(SOURCE 358ad760).
+
 ## 2026-10-26 — Bot-time potion + auto-click log (SOURCE 154a39af, NOT deployed, NOT patched)
 
 **Potion:** new drug type 16 (ITEM_DRUG_AUTOHUNT). Item = ITEM_CURE, drug type 16,
