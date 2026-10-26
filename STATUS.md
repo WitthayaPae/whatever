@@ -24,6 +24,7 @@ If anything here disagrees with another file, this file wins.
 | Web server moved off XAMPP (2026-10-23) | PHP2Shell (CVE-2026-109618/109619): XAMPP PHP 7.1 had no fix; user uninstalled it. Now Apache 2.4 (service Apache24, C:\Apache24) + PHP 8.5.12 TS (C:\php85, odbc+openssl only, exec/system disabled), site root **C:\www** (website + patch uploads go there now), HTTPS 443 with a Cloudflare Origin Certificate (Full strict). Firewall: 443 from Cloudflare only; RAN-ONLINE keeps the game ports. Break-in check on the old htdocs (C:\112233htdocs): clean. Code checked: PHP 8.5 compatible, prepared SQL, signed webhook. 3-test-site.ps1: 13/13 OK. Guide + files: DEV EP9/WEB_SERVER_SETUP.md, web_server_setup/. **Open:** user to confirm top-up login with a test account, crash login, a game login; turn on Cloudflare WAF managed rules; topup SQL login checked read-only 2026-10-23: already least privilege (no server/db roles, VIEW ANY DATABASE denied, only RanUser TopUpMoney/TopUpOrder/CheckPromotion/UserInfo and RanShop ShopPurchase grants, no RanGame1/RanLog access) - nothing to change. |
 | Store 279 (2026-10-23) | Store branch merged with main (62b910b), pushed. Play: AAB 279 "1.1.93" sha256 752d8cea... internal completed + alpha completed (th/en notes: stat preview, Resurrection, chat, HUD hide, cutout, change character, Shaman POW, word filter). TestFlight CI 39819825083 uploaded build 279 (VALID, 1 warning), What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW. 277 is APPROVED on TestFlight. Main tree restored (libs 23:38 < APK 23:39, build.sh no-op). |
 | Release 808 (was 807) / APK 281 / iOS 1.1.95 (281) | **Rebuilt as 808 with `--min-ios 280`** so TestFlight 280 (approved) is not stopped; iOS 280 = 281 in code. Next build without the flag raises minIos to 281 again - by then TestFlight 281 must be approved. Built 2026-10-24 12:50 in `native/out/upload`, **replaces 805 (accumulated since 804: same 4 blobs + APK 281)**; waiting for the user upload, server at 803. minApk 281, minIos 281. New: POST_NOTIFICATIONS declared and asked once before the first game start (Android 13+ hid the RanSessionService notification: Tab S9 appops POST_NOTIFICATION ignore). Verified on Tab S9: dialog shown, granted, notification "Ran Legacy M กำลังทำงาน" visible, game resumes connected. iOS: no code change (CI 40066134325, MOBILE 0432908). Server files as 805. |
+| Release 814 / APK 284 / iOS 1.1.97 (284) (2026-10-26) | Built in `native/out/upload`, **waiting for the user upload** (replaces 811-813). **minApk 284 / minIos 284** (user: older versions must not be allowed; store players are blocked until review passes). Item shop one item per row (full names), battery read every 5 s + on return (SOURCE 6463b483), Android swipe-close ends the process (RanSessionService.onTaskRemoved + RanActivity.onDestroy when finishing; MOBILE e027f50) - tested on LDPlayer: process gone, no audio player. iOS CI 40272649748 (MOBILE 8df8d8f, Info.plist 1.1.97) published via make-ios-source. Store merge ac18c72, AAB `store-release/RanMobile-store-284.aab` sha 5a7e4046e561. Play: 284 internal + alpha completed. TestFlight CI 40281323024 uploaded 284. Shaman "1500 hit kills 1952 HP": measured with a temporary client log - deaths were crushing blows (flag 4, 2045/2047); hits of 1108-1571 never killed. Client HP runs ~230 above the server for up to 1.6 s after a potion (not fixed). |
 | Release 811 / APK 282 / iOS 1.1.96 (282) (2026-10-26) | Built in `native/out/upload` (3 blobs 105.5 MB + manifest + ios/ + android/), **waiting for the user upload**; server at 808. **minApk 281 / minIos 281 (given on the command line)**: the store builds have no in-app APK download, so 282 would lock Play/TestFlight 281 players out until review passes; the 811 data (skills, one UI text) runs on 281. Carries everything since 808: item shop 3 rows + numbers + solid, camera turn speed, bot range window + ring, corner icon names (short), change character -> login page (Gui.rcc), reset all settings, battery, potion row anchor, stream-copy crash guard + nopersistmap fallback, CloseConnect single close, SPI grade 12 + Shaman POW crush (GLogic.rcc). iOS CI 40217514060 (MOBILE 0ec28b2) - binary has the new strings incl. battery selectors. Store: `store` merged main (fbbe384), AAB `DEV EP9/store-release/RanMobile-store-282.aab` sha 8b16d4f19b7e; booted on LDPlayer to the server page (server did not answer from this PC at 00:56 - user changing the firewall), login not tested. Play: 282 on internal + alpha completed, th/en notes. TestFlight CI 40218625294 uploaded 282: VALID, What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW. Main tree restored (libs older than APK). **Server needs GLogic.rcc + restart.** Not run on a device with persistent mapping / an iPhone. |
 | GLogic.rcc repacked (2026-10-26 00:25) | User saved skill.ssf in EditorSkill (00:22) from skill.csv. Checked by decoding skill.ssf (EMBYTECRYPT_SKILL table from ByteCryptDefVer1.h): -2308/-2428 now x4 (was x1, +3 skills), -1716/-1836 gone, crush rates +1..+4 occurrences as planned. Also changed (harmless, not ours): the summon data dwType/bEventSkill per level in every skill grew 11*k -> 111*k, because the editor's CSV export writes `dwType << i` (GLSkillSpecial.cpp:196) and each export/import adds a digit; nothing in the game reads those two fields. `CLIENT/data/glogic/GLogic.rcc` 7,810,617 bytes sha c4b397f8e161: 390 entries, only skill.ssf + skill.csv differ (== loose files). Backup `backups/glogic_rcc_20261026/`. `Ran/data/glogic/GLogic.rcc` (7 Oct) not touched. **Server needs this GLogic.rcc** (data\glogic) + restart, together with the next client patch. |
 | Shaman POW crushing blow (2026-10-26) | skill.csv only (**not packed yet**). User: Shaman POW still low, no "critical". Finding: critical (x1.20, max 40%) is gear + low HP, same for every class and for SPI; crushing blow (x1.30, default.charclass dwCRUSHING_BLOW_MAX 25) comes from the skill (EMSPECA_CRUSHING_BLOW 20, fVAR2). Swordsman POW has it at grades 3,5,9,11,12,13,14,16; Shaman POW only 1,4,9,10,13,15. User: SPI is fine, fix POW Shaman only. Agreed plan: copy the Swordsman POW crush entry (whole spec slot, all levels) into the Shaman POW skill's first free spec slot: grade 11 12/7 <- 6/7 (6->30%), 12 12/8 <- 6/8 (20->60%), 14 12/12 <- 6/10 (10->50%), 16 12/14 <- 6/12 (16->40%), 6 12/3 <- Swordsman grade 5 6/2 (30->70%). Grades 2, 8, 17-22 left (no Swordsman crush to copy). 5 lines changed, only the target slot (12/14 slot 1 had type 0 with old unused rates 5->30%, replaced). Damage unchanged. Script `DEV EP9/reports/adjust-shaman-pow-crush.js`, backup `backups/skill_shaman_pow_crush_20261026/` (skill.csv + skill.ssf). **User: EditorSkill Load CSV -> save skill.ssf** (also carries the SPI grade 12 change), then repack GLogic.rcc (client + server). |
@@ -109,6 +110,38 @@ the patch ships a needless APK bump).
 2026-10-08). Full list in the dated sections below.
 
 ---
+
+## 2026-10-26 — Daily Hunter NPC + event variants (data ready, NOT packed into GLogic.rcc, NOT deployed)
+
+See DEV EP9/EVENT_EXCHANGE.md. item.csv has 512/61-80 (potion, necklace/ring variants +
+boxes, coin, random box, card, 4 belts) - user imports CSV and saves item.isf, then GLogic.rcc
+gets item.isf/csv, crow.mnsf, CrowStrTable*, ItemStrTable_en, eventexchange.npcex,
+dailyhunter.npcex. Quest.rcc (3100-3104) and NpcTalk.rcc (npc_dailyhunter.ntk) already
+packed. NPC 49/25 to be placed in the Level editor. Rotation needs new ServerField + client
+(SOURCE 358ad760).
+
+## 2026-10-26 — Bot-time potion + auto-click log (SOURCE 154a39af, NOT deployed, NOT patched)
+
+**Potion:** new drug type 16 (ITEM_DRUG_AUTOHUNT). Item = ITEM_CURE, drug type 16,
+wCureVolume = minutes (0 means 120). Adds to TODAY's auto-hunt time (gone at midnight),
+never more than 24 h left; stored as negative AutoHuntDaily.HuntSec (no DB change).
+Needs: new ServerAgent + ServerField, then the item in the item CSV (Editor_Item in
+CLIENT/ shows the new type), then a client patch. Before the servers are deployed the
+potion is eaten with no effect - do not hand it out until then.
+**Auto-click:** Android 12+ touches injected by an accessibility service are counted
+(flag 0x800) and logged by the field to `_autoclick.txt` (and `injected` in
+`_botscore.txt`). Log only. iOS / Android 11 and older: not detectable.
+Built: Android arm64 + x86_64, PC client, Emulator, servers, Editor_Item. NOT tested in game.
+
+## 2026-10-26 — Buff effect stayed on the body after every buff ended (SOURCE bb42cedf, NOT patched)
+
+User saw rings/aura on LDPlayer with no buff icons left. Cause (code read, not reproduced):
+the client overwrote a buff slot without removing the old buff's effect when the server
+reused that slot for a different buff (client timers lag the server, e.g. app in background),
+and `InitAllSkillFact` plus the vehicle path cleared slots before deleting their effects.
+Fixed in GLCharacterSkill/GLCharClient (RECEIVE_SKILLFACT), GLCharacterMsg (SKILLHOLDEX_BRD),
+GLCharacter (InitAllSkillFact). Built: Android arm64 + x86_64, PC client, Emulator, servers.
+iOS gets it from the same SOURCE (CI at next release). Not tested in game yet.
 
 ## 2026-10-24 — "Swap app = instant disconnect": OPPO/Infinix background kills (Android, NOT patched)
 

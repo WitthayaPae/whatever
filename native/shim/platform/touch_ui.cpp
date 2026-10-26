@@ -1773,6 +1773,10 @@ void tapFxPush(float x, float y) {
 const int kBotSpotMax = 64;
 int    g_botTaps = 0;
 int    g_botSpots = 0;
+//  Touches Android marked as injected by an accessibility service
+//  (AMOTION_EVENT_FLAG_IS_ACCESSIBILITY_EVENT, Android 12+) - how auto-click
+//  apps tap. Anywhere on the screen, not only attack and skills.
+int    g_botInjected = 0;
 int    g_botSpotX[kBotSpotMax], g_botSpotY[kBotSpotMax];
 double g_botLastTap = -1.0;
 int    g_botGapN = 0;
@@ -1798,6 +1802,14 @@ void botNoteTap(float x, float y) {
 }
 
 }   // namespace
+
+extern "C" void RanTouch_NoteInjectedDown(void) { ++g_botInjected; }
+
+extern "C" int RanTouch_TakeInjected(void) {
+    const int n = g_botInjected;
+    g_botInjected = 0;
+    return n;
+}
 
 extern "C" void RanTouch_TakeBotStats(int *taps, int *spots, int *gapCV1000) {
     //  Spots past the cap: every press beyond it was a different pixel too.
