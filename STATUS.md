@@ -111,6 +111,16 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-26 — Buff effect stayed on the body after every buff ended (SOURCE bb42cedf, NOT patched)
+
+User saw rings/aura on LDPlayer with no buff icons left. Cause (code read, not reproduced):
+the client overwrote a buff slot without removing the old buff's effect when the server
+reused that slot for a different buff (client timers lag the server, e.g. app in background),
+and `InitAllSkillFact` plus the vehicle path cleared slots before deleting their effects.
+Fixed in GLCharacterSkill/GLCharClient (RECEIVE_SKILLFACT), GLCharacterMsg (SKILLHOLDEX_BRD),
+GLCharacter (InitAllSkillFact). Built: Android arm64 + x86_64, PC client, Emulator, servers.
+iOS gets it from the same SOURCE (CI at next release). Not tested in game yet.
+
 ## 2026-10-24 — "Swap app = instant disconnect": OPPO/Infinix background kills (Android, NOT patched)
 
 **Measured** (38 crash/killed reports, build 279, 2026-10-22/23; OnePlus PHB110 = our LDPlayer, left out):
