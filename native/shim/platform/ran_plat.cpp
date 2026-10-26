@@ -1257,7 +1257,7 @@ extern "C" void RanCrash_CleanExit ( void )
 //  The gallery pick, handed from the platform's thread to the game's.
 //  (RanPlat_PickImage / RanPlat_ImagePicked / RanPlat_TakePickedImage.)
 namespace {
-const int        kPickMax = 256 * 256;    //  the merchant picture (256 x 256 since 2026-10-27); the club emblem is 16 x 11
+const int        kPickMax = 512 * 512;    //  the merchant picture (512 x 512 since 2026-10-27); the club emblem is 16 x 11
 unsigned int     g_pickPx[kPickMax];
 int              g_pickW = 0, g_pickH = 0;
 int              g_pickReady = 0;
