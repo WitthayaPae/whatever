@@ -113,6 +113,17 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-27 — Blue [bot] before the name while on the auto-hunt bot (SOURCE 0965033d, NOT deployed, NOT patched)
+
+- Field: AUTOHUNT_STATE_AF (agent, every 20 s) also sets GLChar::m_fAutoHuntTag (60 s,
+  own clock). On a change it sends NET_MSG_GCTRL_AUTOHUNT_TAG_BRD 3944 to self + view
+  around; MsgReady resends it to self on each map entry; SDROP_CHAR::bAutoHunt (last
+  field, size-checked in GLGaeaClient) covers players who come into view later.
+- Client: CROWREN::m_bBOT, CNameDisplay::SetName(bBot) draws "[bot] " DODGERBLUE before
+  the badge and name. Same SOURCE for Android, iOS, MiniA and Emulator.
+- Built: arm64 + x86_64 libs, MiniA, Emulator, ServerAgent, ServerField (0 errors).
+  NOT verified in game: needs the new ServerField (and ServerAgent) deployed.
+
 ## 2026-10-26 — Daily Hunter NPC + event variants (data ready, NOT packed into GLogic.rcc, NOT deployed)
 
 See DEV EP9/EVENT_EXCHANGE.md. item.csv has 512/61-80 (potion, necklace/ring variants +
