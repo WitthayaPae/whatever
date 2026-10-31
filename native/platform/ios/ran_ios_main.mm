@@ -41,6 +41,7 @@ int  RanTouch_PointerDown ( int id, float x, float y );
 int  RanTouch_PointerMove ( int id, float x, float y );
 int  RanTouch_PointerUp ( int id, float x, float y );
 void RanTouch_Frame ( float elapsedSeconds );
+int  RanTouch_IsRestMode ( void );
 
 void RanInput_PointerMove ( int x, int y );
 //  The touch-to-mouse gesture layer, shared with Android - long press for
@@ -170,6 +171,7 @@ static CGRect RanIOS_GameFrame ( UIView *root )
 @property (nonatomic, assign) BOOL           bootFailed;
 @property (nonatomic, assign) CFTimeInterval lastTick;
 @property (nonatomic, assign) BOOL           pacedForHeat;
+@property (nonatomic, assign) BOOL           pacedForRest;  //  the rest screen's 10 Hz
 - (void)ensureImeField;
 @end
 
@@ -313,9 +315,42 @@ static CGRect RanIOS_GameFrame ( UIView *root )
 //  of world-eff apparently costing three times its parent, which is how the
 //  measurement was caught. At 30 Hz the GPU sits at 28% and every section is
 //  inside the noise, so the attribution cannot be done there either.
+//  The rest screen (SOURCE MobileRestScreen.h): 10 Hz while it is up - a
+//  black frame and a few lines of text, and the game steps on elapsed time -
+//  then back to whatever the heat and the switches say, as android_main does.
+//  Checked every tick, so the game comes back at full rate on the same frame.
+- (void)updateRestPacing
+{
+    if (!self.link) return;
+    const BOOL bRest = RanTouch_IsRestMode () ? YES : NO;
+    if (bRest == self.pacedForRest) return;
+    self.pacedForRest = bRest;
+    if (bRest) {
+        if (@available(iOS 15.0, *)) {
+            self.link.preferredFrameRateRange = CAFrameRateRangeMake ( 10, 10, 10 );
+        } else {
+            self.link.preferredFramesPerSecond = 10;
+        }
+        RanPlat_Log ( RANLOG_INFO, "RanPace", "rest screen: frame loop at 10 Hz" );
+        return;
+    }
+    //  Back to the display rate (or the pace30 switch), then let the heat
+    //  decide again from scratch.
+    const BOOL b30 = RanPlat_DiagExists ( "pace30" ) ? YES : NO;
+    if (@available(iOS 15.0, *)) {
+        self.link.preferredFrameRateRange = b30 ? CAFrameRateRangeMake ( 30, 30, 30 ) : CAFrameRateRangeMake ( 30, 60, 60 );
+    } else {
+        self.link.preferredFramesPerSecond = b30 ? 30 : 0;
+    }
+    self.pacedForHeat = NO;
+    RanPlat_Log ( RANLOG_INFO, "RanPace", "rest screen closed: frame loop at %s", b30 ? "30 Hz" : "the display rate" );
+    [self updateThermalPacing];
+}
+
 - (void)updateThermalPacing
 {
     if (!self.link) return;
+    if (self.pacedForRest) return;      //  the rest screen holds 10 Hz
     if (RanPlat_DiagExists ( "pace30" )) return;
 
     //  Setting the switch while the clamp is already on has to LIFT it, not
@@ -363,6 +398,7 @@ static CGRect RanIOS_GameFrame ( UIView *root )
     }
 
     RanSampler_Tick ();     //  ran_ios_sampler.mm; idle unless the "sampler" diag is set
+    [self updateRestPacing];
     const CFTimeInterval now = link.timestamp;
     const float dt = self.lastTick > 0 ? (float)(now - self.lastTick) : 0.0f;
     self.lastTick = now;

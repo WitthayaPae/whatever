@@ -1764,8 +1764,13 @@ public class RanLauncher extends Activity {
 
     private boolean needsBackgroundGuide() {
         String m = (Build.MANUFACTURER + " " + Build.BRAND).toLowerCase(java.util.Locale.ROOT);
+        //  nubia / zte / redmagic / meizu added 2026-10-31: a Nubia player
+        //  still dropped on every switch to the top-up page, and the guide had
+        //  never shown there. The pref is only written when the guide shows, so
+        //  these phones get it once at their next start.
         String[] killers = { "oppo", "realme", "oneplus", "infinix", "tecno", "itel",
-                             "vivo", "iqoo", "xiaomi", "redmi", "poco", "huawei", "honor" };
+                             "vivo", "iqoo", "xiaomi", "redmi", "poco", "huawei", "honor",
+                             "nubia", "zte", "redmagic", "meizu" };
         boolean hit = false;
         for (String k : killers) if (m.contains(k)) { hit = true; break; }
         if (!hit) return false;

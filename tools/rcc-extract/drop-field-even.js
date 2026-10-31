@@ -44,7 +44,10 @@ const gamecrypt = require('./gamecrypt.js');
 // A table already inside [LO, HI] is left as it is; one outside is moved to the
 // nearer edge (user, 2026-10-14: "between 4.30 to 5.30").
 const SET = { Weapon: true, Armor: true };
-const LO = 4.3, HI = 5.3;
+//  --lo= / --hi= override (user, 2026-10-31: "weapon and Armor should be around 2.9 to 3.1").
+const loArg = process.argv.find((a) => a.startsWith('--lo=')), hiArg = process.argv.find((a) => a.startsWith('--hi='));
+const LO = loArg ? parseFloat(loArg.slice(5)) : 4.3, HI = hiArg ? parseFloat(hiArg.slice(5)) : 5.3;
+if (!(LO >= 0 && HI >= LO)) throw new Error('--lo/--hi: need 0 <= lo <= hi');
 const CATS = ['Weapon', 'Armor', 'Acc', 'Stone', 'Potion', 'Book'];
 const POTION_FLOOR = 52.49;
 const STONE_SPEC = 191, MAX_LINES = 30, FULL = 99.99;

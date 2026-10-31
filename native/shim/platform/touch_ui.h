@@ -234,6 +234,23 @@ extern "C" void RanTouch_SetActive(int active);
 extern "C" void RanTouch_SetDim(float k);
 extern "C" int  RanTouch_IsActive(void);
 
+//  Photo mode: the client's interface is off; the pad draws only a close
+//  button top right and every other touch goes to the world (camera, zoom).
+//  The client sets it each frame from its own state and polls the close.
+extern "C" void RanTouch_SetPhotoMode(int on);
+extern "C" int  RanTouch_IsPhotoMode(void);
+extern "C" int  RanTouch_ConsumePhotoExit(void);
+//  Photo mode's emote button (under the X): a tap since the last call; and
+//  whether the emote list is open (the button is lit).
+extern "C" int  RanTouch_ConsumePhotoEmote(void);
+extern "C" void RanTouch_SetPhotoEmoteOpen(int open);
+
+//  Rest screen (SOURCE MobileRestScreen.h): every touch is eaten; the first
+//  lift is a wake (ConsumeRestExit). The frame loops slow down while it is on.
+extern "C" void RanTouch_SetRestMode(int on);
+extern "C" int  RanTouch_IsRestMode(void);
+extern "C" int  RanTouch_ConsumeRestExit(void);
+
 //  The player's HUD arrangement: move, size and opacity per control group,
 //  edited on screen. Layout is kGrpCount * 4 floats (dx, dy, size, opacity).
 extern "C" void RanTouch_SetEditMode(int on);

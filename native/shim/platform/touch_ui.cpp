@@ -1409,6 +1409,28 @@ bool hit(const Vec2 &c, float r, float x, float y) {
 //  that sits in the way, and that is a group of its own.
 //
 bool   g_edit = false;
+
+//  Photo mode (2026-10-31): the client's interface is off (PC F12) and the
+//  pad draws one thing, a close button top right. Every other finger is the
+//  world's - drag turns the camera, two fingers zoom.
+bool   g_photo = false;
+int    g_photoPtr = -1;
+bool   g_photoDown = false;
+bool   g_photoExit = false;
+//  Its emote button, under the X (2026-10-31): opens the client's emote list,
+//  which the game stage runs alone while the interface is off.
+int    g_photoEmotePtr = -1;
+bool   g_photoEmoteDown = false;
+bool   g_photoEmoteEdge = false;
+bool   g_photoEmoteOpen = false;     //  the list is up: the button lit
+
+//  Rest screen (2026-10-31, SOURCE MobileRestScreen.h): the client draws a
+//  black screen while the bot runs. Every finger is ours, so nothing reaches
+//  the game, and the first one to lift wakes it (RanTouch_ConsumeRestExit).
+//  The platform loops read RanTouch_IsRestMode to slow the frame rate.
+bool   g_rest = false;
+bool   g_restDown = false;
+bool   g_restExit = false;
 bool   g_editBar = false;           //  dragging the editor's own toolbar
 int    g_editSel = -1;              //  selected group, -1 none
 int    g_editSlot = -1;             //  which skill slot, when the group is the arc
@@ -1474,6 +1496,54 @@ void toolBar(float *x, float *y, float *w, float *h) {
     if (y) *y = c0.y - r * 1.45f;
     if (w) *w = (c1.x - c0.x) + r * 3.0f;
     if (h) *h = r * 2.9f + g_unit * 0.66f * 1.05f;     //  both rows
+}
+
+//  Photo mode's close button: a circle in the top right corner.
+void photoCloseCircle(Vec2 &c, float &r) {
+    r = g_unit * 0.30f;
+    const float m = g_unit * 0.22f;
+    c.x = (float)g_width - m - r;
+    c.y = m + r;
+}
+
+//  The emote button: the same circle, one and a half sizes below the X.
+void photoEmoteCircle(Vec2 &c, float &r) {
+    photoCloseCircle(c, r);
+    c.y += r * 2.6f;
+}
+
+void drawPhotoEmote() {
+    Vec2 c; float r;
+    photoEmoteCircle(c, r);
+    const float k = g_photoEmoteDown ? 0.75f : 1.0f;
+    const float lit = g_photoEmoteOpen ? 1.0f : 0.0f;
+    discGrad(c.x, c.y, r, Col{0.08f + 0.20f * lit, 0.08f + 0.16f * lit, 0.10f, 0.66f * k},
+                          Col{0.04f + 0.14f * lit, 0.04f + 0.11f * lit, 0.05f, 0.58f * k});
+    drawRing(c.x, c.y, r - g_unit * 0.02f, r, 0.92f, 0.92f, 0.92f, 0.55f * k);
+    //  A smiling face: two eyes and a smile of short strokes on an arc.
+    const Col gold = {0.96f, 0.84f, 0.48f, 0.95f * k};
+    const float e = r * 0.075f;
+    discGrad(c.x - r * 0.24f, c.y - r * 0.14f, e, gold, gold);
+    discGrad(c.x + r * 0.24f, c.y - r * 0.14f, e, gold, gold);
+    const float R = r * 0.36f, w = r * 0.07f;
+    const int n = 6;
+    for (int i = 0; i < n; ++i) {
+        const float a0 = 0.35f + (2.79f * i) / n, a1 = 0.35f + (2.79f * (i + 1)) / n;
+        drawCapsule(c.x + R * cosf(a0), c.y + r * 0.02f + R * sinf(a0),
+                    c.x + R * cosf(a1), c.y + r * 0.02f + R * sinf(a1), w, gold);
+    }
+}
+
+void drawPhotoClose() {
+    Vec2 c; float r;
+    photoCloseCircle(c, r);
+    const float k = g_photoDown ? 0.75f : 1.0f;
+    discGrad(c.x, c.y, r, Col{0.08f, 0.08f, 0.10f, 0.66f * k}, Col{0.04f, 0.04f, 0.05f, 0.58f * k});
+    drawRing(c.x, c.y, r - g_unit * 0.02f, r, 0.92f, 0.92f, 0.92f, 0.55f * k);
+    const float a = r * 0.40f, w = r * 0.09f;
+    const Col white = {0.92f, 0.92f, 0.92f, 0.95f * k};
+    drawCapsule(c.x - a, c.y - a, c.x + a, c.y + a, w, white);
+    drawCapsule(c.x - a, c.y + a, c.x + a, c.y - a, w, white);
 }
 
 //  Move what is selected by (mdx, mdy) layout units - the one place a drag and
@@ -1957,6 +2027,10 @@ void RanTouch_SetActive(int active) {
     if (on) g_activeAge = 0;
     if (on == g_active) return;
     g_active = on;
+    //  Leaving the world ends photo mode; the client sets it again if needed.
+    if (!on) { g_photo = false; g_photoPtr = -1; g_photoDown = false; g_photoExit = false; }
+    if (!on) { g_photoEmotePtr = -1; g_photoEmoteDown = false; g_photoEmoteEdge = false; g_photoEmoteOpen = false; }
+    if (!on) { g_rest = false; g_restDown = false; g_restExit = false; }
     //  Drop anything held, or a finger that was down when the world unloaded
     //  would leave the character walking forever.
     g_stick.pointer = -1; g_stick.held = false;
@@ -1973,14 +2047,101 @@ void RanTouch_SetActive(int active) {
 
 int RanTouch_IsActive(void) { return g_active ? 1 : 0; }
 
+extern "C" void RanTouch_SetPhotoMode(int on) {
+    const bool b = on != 0;
+    if (b == g_photo) return;
+    g_photo = b;
+    g_photoPtr = -1; g_photoDown = false; g_photoExit = false;
+    g_photoEmotePtr = -1; g_photoEmoteDown = false; g_photoEmoteEdge = false;
+    //  Drop anything held, as when the pad goes away: a thumb on the stick
+    //  would otherwise keep the character walking under the photo.
+    g_stick.pointer = -1; g_stick.held = false;
+    g_stick.dir.x = g_stick.dir.y = 0.0f; g_stick.magnitude = 0.0f;
+    for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; }
+    skillAimDrop();
+    g_skillEvtN = 0;
+    g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
+    g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+    g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
+}
+
+extern "C" int RanTouch_IsPhotoMode(void) { return g_photo ? 1 : 0; }
+
+extern "C" int RanTouch_ConsumePhotoEmote(void) {
+    const bool b = g_photoEmoteEdge;
+    g_photoEmoteEdge = false;
+    return b ? 1 : 0;
+}
+
+extern "C" void RanTouch_SetPhotoEmoteOpen(int open) { g_photoEmoteOpen = open != 0; }
+
+extern "C" void RanTouch_SetRestMode(int on) {
+    const bool b = on != 0;
+    if (b == g_rest) return;
+    g_rest = b;
+    g_restDown = false; g_restExit = false;
+    //  Drop anything held, as photo mode does: a thumb left on the stick
+    //  would keep the character walking behind the black screen.
+    g_stick.pointer = -1; g_stick.held = false;
+    g_stick.dir.x = g_stick.dir.y = 0.0f; g_stick.magnitude = 0.0f;
+    for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; }
+    skillAimDrop();
+    g_skillEvtN = 0;
+    g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
+    g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+    g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
+    g_pinch.a = g_pinch.b = -1;
+}
+
+extern "C" int RanTouch_IsRestMode(void) { return g_rest ? 1 : 0; }
+
+extern "C" int RanTouch_ConsumeRestExit(void) {
+    const bool b = g_restExit;
+    g_restExit = false;
+    return b ? 1 : 0;
+}
+
+extern "C" int RanTouch_ConsumePhotoExit(void) {
+    const bool b = g_photoExit;
+    g_photoExit = false;
+    return b ? 1 : 0;
+}
+
 int RanTouch_PointerDown(int id, float x, float y) {
     //  Every touch gets its ring, whatever it lands on and whether or not the
     //  HUD is up - except in the HUD editor, where a ring under each drag
     //  would only be noise.
-    if (g_inited && !g_edit) tapFxPush(x, y);
+    if (g_inited && !g_edit && !g_photo && !g_rest) tapFxPush(x, y);
 
     if (!g_inited) return 0;
     if (!g_active) { lobbyPinchDown(id, x, y); return 0; }
+
+    //  Resting: every finger is ours; the lift wakes the game.
+    if (g_rest) { g_restDown = true; return 1; }
+
+    //  Photo mode: the close button, or the world.
+    if (g_photo) {
+        Vec2 c; float r;
+        photoCloseCircle(c, r);
+        if (g_photoPtr < 0 && len(x - c.x, y - c.y) <= r * 1.3f) {
+            g_photoPtr = id;
+            g_photoDown = true;
+            Touch *tp = addTouch(id, x, y);
+            if (tp) tp->claimed = true;
+            return 1;
+        }
+        photoEmoteCircle(c, r);
+        if (g_photoEmotePtr < 0 && len(x - c.x, y - c.y) <= r * 1.3f) {
+            g_photoEmotePtr = id;
+            g_photoEmoteDown = true;
+            Touch *tp = addTouch(id, x, y);
+            if (tp) tp->claimed = true;
+            return 1;
+        }
+        if (!findTouch(id)) addTouch(id, x, y);
+        pinchCheckStart();
+        return 0;
+    }
 
     //  Editing the HUD: every touch is the editor's. Nothing reaches the game,
     //  so dragging a skill slot moves it instead of casting it.
@@ -2275,6 +2436,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
 int RanTouch_PointerMove(int id, float x, float y) {
     if (!g_inited) return 0;
     if (!g_active) { lobbyPinchMove(id, x, y); return 0; }
+    if (g_rest) return 1;
     if (g_edit) {
         if (id == g_editPtr && g_editBar) {
             g_toolDX += x - g_editLastX;
@@ -2294,6 +2456,22 @@ int RanTouch_PointerMove(int id, float x, float y) {
             g_editLastX = x; g_editLastY = y;
             layout();
         }
+        return 1;
+    }
+    if (g_photo && id == g_photoPtr) {
+        Vec2 c; float r;
+        photoCloseCircle(c, r);
+        g_photoDown = len(x - c.x, y - c.y) <= r * 1.6f;
+        Touch *tp = findTouch(id);
+        if (tp) { tp->x = x; tp->y = y; }
+        return 1;
+    }
+    if (g_photo && id == g_photoEmotePtr) {
+        Vec2 c; float r;
+        photoEmoteCircle(c, r);
+        g_photoEmoteDown = len(x - c.x, y - c.y) <= r * 1.6f;
+        Touch *tp = findTouch(id);
+        if (tp) { tp->x = x; tp->y = y; }
         return 1;
     }
     Touch *t = findTouch(id);
@@ -2394,8 +2572,28 @@ int RanTouch_PointerMove(int id, float x, float y) {
 int RanTouch_PointerUp(int id, float x, float y) {
     if (!g_inited) { removeTouch(id); return 0; }
     if (!g_active) { lobbyPinchUp(id); return 0; }
+    if (g_rest) {
+        if (g_restDown) g_restExit = true;
+        g_restDown = false;
+        removeTouch(id);
+        return 1;
+    }
     if (g_edit) {
         if (id == g_editPtr) g_editPtr = -1;
+        removeTouch(id);
+        return 1;
+    }
+    if (g_photo && id == g_photoPtr) {
+        if (g_photoDown) g_photoExit = true;
+        g_photoPtr = -1;
+        g_photoDown = false;
+        removeTouch(id);
+        return 1;
+    }
+    if (g_photo && id == g_photoEmotePtr) {
+        if (g_photoEmoteDown) g_photoEmoteEdge = true;
+        g_photoEmotePtr = -1;
+        g_photoEmoteDown = false;
         removeTouch(id);
         return 1;
     }
@@ -3912,6 +4110,20 @@ void RanTouch_Render(void) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glUniform2f(uViewport, (float)g_width, (float)g_height);
+
+    //  Photo mode: only the close button.
+    if (g_photo) {
+        g_drawAlpha = 1.0f;
+        drawPhotoClose();
+        drawPhotoEmote();
+        emit();
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        RanGLR_InvalidateStateCache();
+        return;
+    }
 
     //  Stick: the ring sits where the finger went down while held, so the
     //  control follows the thumb instead of the thumb hunting for the control.

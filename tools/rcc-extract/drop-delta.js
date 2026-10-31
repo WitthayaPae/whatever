@@ -50,6 +50,26 @@ const stoneArg = argv0.find((a) => a.startsWith('--set-stone='));
 const SET_STONE = stoneArg ? parseFloat(stoneArg.slice(12)) : null;
 if (stoneArg && !(SET_STONE >= 0)) throw new Error('--set-stone needs a number');
 const MATCH_RESIST = argv0.includes('--match-resist');
+// --set-wa=X: set weapon and armor of each table to X per 100 kills, up or down
+// (user, 2026-10-31: "weapon and Armor should be around 2.9 to 3.1"). A table
+// with no weapon (armor) line keeps none.
+const waArg = argv0.find((a) => a.startsWith('--set-wa='));
+//  --set-wa=LO-HI (2026-10-31, the user: "weapon and Armor ... random between 2.7-2.8"):
+//  each table and category gets its own value in the range, drawn from a hash of
+//  the table name, so a rerun gives the same numbers. Kept 0.02 inside each edge,
+//  the tolerance a line can miss by.
+const waSpec = waArg ? waArg.slice(9) : null;
+const waRange = waSpec && /^[0-9.]+-[0-9.]+$/.test(waSpec) ? waSpec.split('-').map(Number) : null;
+const SET_WA = waSpec ? (waRange ? waRange[0] : parseFloat(waSpec)) : null;
+if (waArg && !(SET_WA >= 0)) throw new Error('--set-wa needs a number or LO-HI');
+if (waRange && !(waRange[1] - waRange[0] > 0.04)) throw new Error('--set-wa range too narrow');
+function waFor(name, cat) {
+  if (!waRange) return SET_WA;
+  let h = 2166136261;
+  for (const ch of name + '|' + cat) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  const lo = waRange[0] + 0.02, hi = waRange[1] - 0.02;
+  return Math.round((lo + (hi - lo) * (h / 4294967296)) * 1000) / 1000;
+}
 const specArg = argv0.find((a) => a.startsWith('--match-spec='));
 const MATCH_SPEC = specArg ? specArg.slice(13).split(',').map((x) => parseInt(x, 10)) : null;
 if (MATCH_SPEC && MATCH_SPEC.some((x) => !(x > 0 && x < 999))) throw new Error('--match-spec needs spec ids');
@@ -58,7 +78,7 @@ const evCat = (id) => 'Spec' + id;
 const toArg = argv0.find((a) => a.startsWith('--match-to='));
 const MATCH_TO = toArg ? toArg.slice(11) : 'Stone';
 const SET = MATCH_SPEC ? Object.fromEntries(MATCH_SPEC.map((id) => [evCat(id), true]))
-  : MATCH_RESIST ? { Resist: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
+  : MATCH_RESIST ? { Resist: true } : SET_WA !== null ? { Weapon: true, Armor: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
 const DELTA = { Weapon: 0.4, Armor: 0.4, Stone: 0.2 };
 const CATS = ['Weapon', 'Armor', 'Acc', 'Stone', 'Resist', 'Potion', 'Book', ...(MATCH_SPEC || []).map(evCat)];
 const RESIST_SPEC = 196;
@@ -68,6 +88,9 @@ const STONE_SPEC = 191, MAX_LINES = 30, FULL = 99.99;
 const args = process.argv.slice(2);
 const write = args.includes('--write');
 const NOSPLIT = args.includes('--nosplit');
+// --tol=X: accept a table up to X off its target (noted in the report) instead of stopping
+const tolArg = args.find((a) => a.startsWith('--tol='));
+const TOL = tolArg ? parseFloat(tolArg.slice(6)) : 0.02;
 const [dataDir, repDir, workDir] = args.filter((a) => !a.startsWith('--'));
 if (!dataDir || !repDir || !workDir) { console.error('usage: node drop-delta.js <CLIENT/data> <report dir> <work dir> [--write] [--nosplit]'); process.exit(2); }
 
@@ -286,7 +309,7 @@ for (const t of T) {
   if (!(t.rolls > 0) || !(t.gen > 0)) { skipped.push([t.name, t.level, 'never fires']); continue; }
   const before = perCat(t, t.spec, t.gen);
   const want = {}, base = {};
-  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = MATCH_SPEC ? before[MATCH_TO] : MATCH_RESIST ? before.Stone : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
+  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = MATCH_SPEC ? before[MATCH_TO] : MATCH_RESIST ? before.Stone : SET_WA !== null ? waFor(t.name, c) : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
   const note = new Set();
 
   let gen = t.gen, L = build(t, gen, want, before, note);
@@ -345,10 +368,10 @@ for (const t of T) {
   const off = [];
   for (const c of Object.keys(SET)) if (back.spec.some((l) => l.cat === c)) {
     const d = after[c] - want[c];
-    if (Math.abs(d) > 0.02) { if (!NOSPLIT) throw new Error(`${t.name}: ${c} ${after[c]} not ${want[c]}`); off.push(`${c} off by ${d.toFixed(2)}`); }
+    if (Math.abs(d) > 0.02) { if (!NOSPLIT && !(Math.abs(d) <= TOL)) throw new Error(`${t.name}: ${c} ${after[c]} not ${want[c]}`); off.push(`${c} off by ${d.toFixed(2)}`); }
   }
   for (const o of off) note.add(o);
-  if (SET_STONE === null && !MATCH_RESIST && !MATCH_SPEC) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
+  if (SET_STONE === null && SET_WA === null && !MATCH_RESIST && !MATCH_SPEC) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
   const out = encode(lines.join(t.eol) + t.eol);
   if (plain(out).toString('latin1').replace(/ +$/, '') !== lines.join(t.eol) + t.eol) throw new Error('round trip failed: ' + t.name);
   const file = path.join(workDir, 'files', t.name);
