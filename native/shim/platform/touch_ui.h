@@ -244,6 +244,10 @@ extern "C" int  RanTouch_ConsumePhotoExit(void);
 //  whether the emote list is open (the button is lit).
 extern "C" int  RanTouch_ConsumePhotoEmote(void);
 extern "C" void RanTouch_SetPhotoEmoteOpen(int open);
+//  Its names button (under the emote one): a tap since the last call; and
+//  whether names are shown now (the button is lit, not struck through).
+extern "C" int  RanTouch_ConsumePhotoNames(void);
+extern "C" void RanTouch_SetPhotoNamesOn(int on);
 
 //  Rest screen (SOURCE MobileRestScreen.h): every touch is eaten; the first
 //  lift is a wake (ConsumeRestExit). The frame loops slow down while it is on.

@@ -1423,6 +1423,13 @@ int    g_photoEmotePtr = -1;
 bool   g_photoEmoteDown = false;
 bool   g_photoEmoteEdge = false;
 bool   g_photoEmoteOpen = false;     //  the list is up: the button lit
+//  Its names button, under the emote one (2026-10-31, the user: "some user
+//  wanted to hide or show the name"): the client keeps the choice and tells
+//  the pad, which lights the button while names are shown.
+int    g_photoNamesPtr = -1;
+bool   g_photoNamesDown = false;
+bool   g_photoNamesEdge = false;
+bool   g_photoNamesOn = false;
 
 //  Rest screen (2026-10-31, SOURCE MobileRestScreen.h): the client draws a
 //  black screen while the bot runs. Every finger is ours, so nothing reaches
@@ -1531,6 +1538,35 @@ void drawPhotoEmote() {
         const float a0 = 0.35f + (2.79f * i) / n, a1 = 0.35f + (2.79f * (i + 1)) / n;
         drawCapsule(c.x + R * cosf(a0), c.y + r * 0.02f + R * sinf(a0),
                     c.x + R * cosf(a1), c.y + r * 0.02f + R * sinf(a1), w, gold);
+    }
+}
+
+//  The names button: the same circle again, under the emote one.
+void photoNamesCircle(Vec2 &c, float &r) {
+    photoEmoteCircle(c, r);
+    c.y += r * 2.6f;
+}
+
+//  A name plate over a head and shoulders; struck through while names are hidden.
+void drawPhotoNames() {
+    Vec2 c; float r;
+    photoNamesCircle(c, r);
+    const float k = g_photoNamesDown ? 0.75f : 1.0f;
+    const float lit = g_photoNamesOn ? 1.0f : 0.0f;
+    discGrad(c.x, c.y, r, Col{0.08f + 0.20f * lit, 0.08f + 0.16f * lit, 0.10f, 0.66f * k},
+                          Col{0.04f + 0.14f * lit, 0.04f + 0.11f * lit, 0.05f, 0.58f * k});
+    drawRing(c.x, c.y, r - g_unit * 0.02f, r, 0.92f, 0.92f, 0.92f, 0.55f * k);
+    const Col gold = {0.96f, 0.84f, 0.48f, 0.95f * k};
+    //  the plate: a bar with a short line of "text" on it
+    drawCapsule(c.x - r * 0.40f, c.y - r * 0.40f, c.x + r * 0.40f, c.y - r * 0.40f, r * 0.13f, gold);
+    const Col ink = {0.10f, 0.09f, 0.08f, 0.95f * k};
+    drawCapsule(c.x - r * 0.24f, c.y - r * 0.40f, c.x + r * 0.24f, c.y - r * 0.40f, r * 0.035f, ink);
+    //  the head and shoulders under it
+    discGrad(c.x, c.y + r * 0.02f, r * 0.15f, gold, gold);
+    drawCapsule(c.x - r * 0.20f, c.y + r * 0.40f, c.x + r * 0.20f, c.y + r * 0.40f, r * 0.13f, gold);
+    if (!g_photoNamesOn) {
+        const Col red = {0.90f, 0.30f, 0.26f, 0.95f * k};
+        drawCapsule(c.x - r * 0.52f, c.y + r * 0.52f, c.x + r * 0.52f, c.y - r * 0.52f, r * 0.07f, red);
     }
 }
 
@@ -2030,6 +2066,7 @@ void RanTouch_SetActive(int active) {
     //  Leaving the world ends photo mode; the client sets it again if needed.
     if (!on) { g_photo = false; g_photoPtr = -1; g_photoDown = false; g_photoExit = false; }
     if (!on) { g_photoEmotePtr = -1; g_photoEmoteDown = false; g_photoEmoteEdge = false; g_photoEmoteOpen = false; }
+    if (!on) { g_photoNamesPtr = -1; g_photoNamesDown = false; g_photoNamesEdge = false; }
     if (!on) { g_rest = false; g_restDown = false; g_restExit = false; }
     //  Drop anything held, or a finger that was down when the world unloaded
     //  would leave the character walking forever.
@@ -2053,6 +2090,7 @@ extern "C" void RanTouch_SetPhotoMode(int on) {
     g_photo = b;
     g_photoPtr = -1; g_photoDown = false; g_photoExit = false;
     g_photoEmotePtr = -1; g_photoEmoteDown = false; g_photoEmoteEdge = false;
+    g_photoNamesPtr = -1; g_photoNamesDown = false; g_photoNamesEdge = false;
     //  Drop anything held, as when the pad goes away: a thumb on the stick
     //  would otherwise keep the character walking under the photo.
     g_stick.pointer = -1; g_stick.held = false;
@@ -2074,6 +2112,14 @@ extern "C" int RanTouch_ConsumePhotoEmote(void) {
 }
 
 extern "C" void RanTouch_SetPhotoEmoteOpen(int open) { g_photoEmoteOpen = open != 0; }
+
+extern "C" int RanTouch_ConsumePhotoNames(void) {
+    const bool b = g_photoNamesEdge;
+    g_photoNamesEdge = false;
+    return b ? 1 : 0;
+}
+
+extern "C" void RanTouch_SetPhotoNamesOn(int on) { g_photoNamesOn = on != 0; }
 
 extern "C" void RanTouch_SetRestMode(int on) {
     const bool b = on != 0;
@@ -2134,6 +2180,14 @@ int RanTouch_PointerDown(int id, float x, float y) {
         if (g_photoEmotePtr < 0 && len(x - c.x, y - c.y) <= r * 1.3f) {
             g_photoEmotePtr = id;
             g_photoEmoteDown = true;
+            Touch *tp = addTouch(id, x, y);
+            if (tp) tp->claimed = true;
+            return 1;
+        }
+        photoNamesCircle(c, r);
+        if (g_photoNamesPtr < 0 && len(x - c.x, y - c.y) <= r * 1.3f) {
+            g_photoNamesPtr = id;
+            g_photoNamesDown = true;
             Touch *tp = addTouch(id, x, y);
             if (tp) tp->claimed = true;
             return 1;
@@ -2474,6 +2528,14 @@ int RanTouch_PointerMove(int id, float x, float y) {
         if (tp) { tp->x = x; tp->y = y; }
         return 1;
     }
+    if (g_photo && id == g_photoNamesPtr) {
+        Vec2 c; float r;
+        photoNamesCircle(c, r);
+        g_photoNamesDown = len(x - c.x, y - c.y) <= r * 1.6f;
+        Touch *tp = findTouch(id);
+        if (tp) { tp->x = x; tp->y = y; }
+        return 1;
+    }
     Touch *t = findTouch(id);
     if (t) { t->x = x; t->y = y; }
 
@@ -2594,6 +2656,13 @@ int RanTouch_PointerUp(int id, float x, float y) {
         if (g_photoEmoteDown) g_photoEmoteEdge = true;
         g_photoEmotePtr = -1;
         g_photoEmoteDown = false;
+        removeTouch(id);
+        return 1;
+    }
+    if (g_photo && id == g_photoNamesPtr) {
+        if (g_photoNamesDown) g_photoNamesEdge = true;
+        g_photoNamesPtr = -1;
+        g_photoNamesDown = false;
         removeTouch(id);
         return 1;
     }
@@ -4116,6 +4185,7 @@ void RanTouch_Render(void) {
         g_drawAlpha = 1.0f;
         drawPhotoClose();
         drawPhotoEmote();
+        drawPhotoNames();
         emit();
         glDisable(GL_BLEND);
         glDisable(GL_DEPTH_TEST);

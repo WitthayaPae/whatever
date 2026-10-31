@@ -114,6 +114,9 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-31 — Photo mode names button (after release 823 was built; NOT in that patch yet)
+User: "in the photo mode can you do the btn option that show and hide name". Third round button under the emote smiley (touch_ui photoNamesCircle/drawPhotoNames: name plate over a head, red strike while hidden, lit while shown; RanTouch_ConsumePhotoNames / SetPhotoNamesOn). Client: CInnerInterface::m_bMobilePhotoNames (off by default like PC F12, kept until the game closes), MobilePhotoNamesFrame runs CNameDisplayMan alone (CUIMan::MobileUpdateOne: drops names of who left, applies the name type), MobilePhotoNamesRender draws it under the pad buttons (DxGameStage::Render photo branch). Shared code only, so Android + iOS both get it; iOS not run (no device). Verified on the test LDPlayer (emulator-5554, user OK this time): off -> on shows the name, on -> off hides, X exits normally, a tap on the button does not walk. PC GameClient2/Emulator/ServerAgent/ServerField built. Backups backups/photonames_20261031. To ship: rebuild the patch (and iOS CI) before the user uploads, or it goes in the next one.
+
 ## 2026-10-31 — Release 823 / APK 288 / iOS 1.1.101 (288) built, waiting for the user upload
 native/out/upload: 4 blobs 106.6 MB + ios/ + android/ + manifest. **minApk 287 / minIos 287 on purpose** (user OK: Play production 287 is in review; blocking it would block the reviewer and force a 288 submit that restarts the review). Raise both to 288 right after 287 is approved, then send 288 to Play. Data in the patch: GLogic.rcc (9/47 box, all trashable, user item edits, pet book text), Quest.rcc (Q110 MP), Gui.rcc (character page). Server needs GLogic.rcc + GLogicServer.rcc (drops v2 + Vulgar table) + Quest.rcc, then restart. SOURCE 662134d9, MOBILE 96b1266, iOS CI 41191061952 (binary has the new strings). Nothing sent to Play.
 
