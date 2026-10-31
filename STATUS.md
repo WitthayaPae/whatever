@@ -114,6 +114,9 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-10-31 — Release 823 / APK 288 / iOS 1.1.101 (288) built, waiting for the user upload
+native/out/upload: 4 blobs 106.6 MB + ios/ + android/ + manifest. **minApk 287 / minIos 287 on purpose** (user OK: Play production 287 is in review; blocking it would block the reviewer and force a 288 submit that restarts the review). Raise both to 288 right after 287 is approved, then send 288 to Play. Data in the patch: GLogic.rcc (9/47 box, all trashable, user item edits, pet book text), Quest.rcc (Q110 MP), Gui.rcc (character page). Server needs GLogic.rcc + GLogicServer.rcc (drops v2 + Vulgar table) + Quest.rcc, then restart. SOURCE 662134d9, MOBILE 96b1266, iOS CI 41191061952 (binary has the new strings). Nothing sent to Play.
+
 ## 2026-10-31 — Google Play: production 287 in review since ~10-27 (production access granted). User decision: change NOTHING on Play (no uploads to any track, no listing/App content edits, no open testing) until production is approved. Contact Play support if still in review after ~11-03.
 
 ## 2026-10-31 — RESUME HERE (paused by the user for other tasks)
