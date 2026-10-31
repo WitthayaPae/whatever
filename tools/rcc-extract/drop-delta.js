@@ -70,6 +70,18 @@ function waFor(name, cat) {
   const lo = waRange[0] + 0.02, hi = waRange[1] - 0.02;
   return Math.round((lo + (hi - lo) * (h / 4294967296)) * 1000) / 1000;
 }
+// --set-book=LO-HI (2026-11-01, the user: skill books 'same range like weapon and armor ~ 110 kills'):
+// each table's skill-book drop set to its own value in the range (hashed from the table name like
+// --set-wa). A table with no skill-book line keeps none.
+const bookArg = argv0.find((a) => a.startsWith('--set-book='));
+const bookRange = bookArg ? bookArg.slice(11).split('-').map(Number) : null;
+if (bookArg && !(bookRange.length === 2 && bookRange[1] - bookRange[0] > 0.04)) throw new Error('--set-book needs LO-HI');
+function bookFor(name) {
+  let h = 2166136261;
+  for (const ch of name + '|Book') { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  const lo = bookRange[0] + 0.02, hi = bookRange[1] - 0.02;
+  return Math.round((lo + (hi - lo) * (h / 4294967296)) * 1000) / 1000;
+}
 const specArg = argv0.find((a) => a.startsWith('--match-spec='));
 const MATCH_SPEC = specArg ? specArg.slice(13).split(',').map((x) => parseInt(x, 10)) : null;
 if (MATCH_SPEC && MATCH_SPEC.some((x) => !(x > 0 && x < 999))) throw new Error('--match-spec needs spec ids');
@@ -84,7 +96,7 @@ const svArg = argv0.find((a) => a.startsWith('--spec-value='));
 const SPEC_VALUE = svArg ? parseFloat(svArg.slice(13)) : null;
 if (svArg && !(SPEC_VALUE >= 0 && MATCH_SPEC)) throw new Error('--spec-value needs a number and --match-spec');
 const SET = MATCH_SPEC ? Object.fromEntries(MATCH_SPEC.map((id) => [evCat(id), true]))
-  : MATCH_RESIST ? { Resist: true } : SET_WA !== null ? { Weapon: true, Armor: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
+  : bookRange ? { Book: true } : MATCH_RESIST ? { Resist: true } : SET_WA !== null ? { Weapon: true, Armor: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
 const DELTA = { Weapon: 0.4, Armor: 0.4, Stone: 0.2 };
 const CATS = ['Weapon', 'Armor', 'Acc', 'Stone', 'Resist', 'Potion', 'Book', ...(MATCH_SPEC || []).map(evCat)];
 const RESIST_SPEC = 196;
@@ -315,7 +327,7 @@ for (const t of T) {
   if (!(t.rolls > 0) || !(t.gen > 0)) { skipped.push([t.name, t.level, 'never fires']); continue; }
   const before = perCat(t, t.spec, t.gen);
   const want = {}, base = {};
-  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = MATCH_SPEC ? (SPEC_VALUE !== null ? (before[c] > 0 ? SPEC_VALUE : 0) : before[MATCH_TO]) : MATCH_RESIST ? before.Stone : SET_WA !== null ? waFor(t.name, c) : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
+  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = bookRange ? bookFor(t.name) : MATCH_SPEC ? (SPEC_VALUE !== null ? (before[c] > 0 ? SPEC_VALUE : 0) : before[MATCH_TO]) : MATCH_RESIST ? before.Stone : SET_WA !== null ? waFor(t.name, c) : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
   const note = new Set();
 
   let gen = t.gen, L = build(t, gen, want, before, note);
@@ -377,7 +389,7 @@ for (const t of T) {
     if (Math.abs(d) > 0.02) { if (!NOSPLIT && !(Math.abs(d) <= TOL)) throw new Error(`${t.name}: ${c} ${after[c]} not ${want[c]}`); off.push(`${c} off by ${d.toFixed(2)}`); }
   }
   for (const o of off) note.add(o);
-  if (SET_STONE === null && SET_WA === null && !MATCH_RESIST && !MATCH_SPEC) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
+  if (SET_STONE === null && SET_WA === null && !MATCH_RESIST && !MATCH_SPEC && !bookRange) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
   const out = encode(lines.join(t.eol) + t.eol);
   if (plain(out).toString('latin1').replace(/ +$/, '') !== lines.join(t.eol) + t.eol) throw new Error('round trip failed: ' + t.name);
   const file = path.join(workDir, 'files', t.name);
