@@ -114,6 +114,18 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-11-01 — Gacha open announcement (NOT in release 823; needs new ServerField + Gui.rcc on the server)
+
+User: announce when a player opens a gacha box, like the boss drop, at the top of the screen like the Tyranny notice, with a switch to turn it off, and no effect on other features. Asked which opens: user chose "Every gacha open" (boxes whose name has กาชา, including the 98% เกลือ result).
+
+- **Server** (GLCharInvenMsg.cpp MsgReqInvenRandomBoxOpen, after a successful open): box name contains CP874 "กาชา" -> SNET_SERVER_GENERALCHAT bNotify=TRUE, iColor=COLOR_GACHA (9, new enum in GLContrlServerMsg.h), SENDTOAGENT. Text servertext GACHA_OPEN_ANNOUNCE "[กาชา] %s เปิด %s ได้รับ %s" (silent if the key is missing). Boxes today: 1997/5, 1997/7, 1997/12 (2% prize / 98% เกลือ), 1997/11 vehicle box, 1000/25 black dragon box.
+- **Client** (shared, Android + iOS + PC): COLOR_GACHA -> chat line + 8 s gold line in EXTRA_NOTICE (CInnerInterface::ShowGachaNotice / CExtraNotice::AddTextLow). The gacha line never replaces a Tyranny/School Wars/CTF notice still on screen. RANPARAM::bGachaNotice (default on) off = neither. Older clients (287/288 builds) show it as a plain chat line (default case).
+- **Setting**: mobile Settings > เกม, new switch "แสดงประกาศเปิดกาชา" (SW_GACHA, after แสดงเลขไอดีหลังชื่อ; reset button one row down), saved in option.ini (bGachaNotice). PC has no switch (always on).
+- **Gui.rcc** repacked: servertext.xml + servertext_en.xml (new key) and uiinnercfg03.xml EXTRA_NOTICE / EXTRA_NOTICE_TEXT width 500 -> 800 (the gacha line wrapped mid-word; PvP notices get the same wider box). Backups: backups/gacha_announce_20261101/.
+- **Verified** on the test LDPlayer (emulator-5554) with a temporary x86_64-only hook feeding a fake message through DxGameStage::MsgProcess (removed; both libs checked for the string, clean APK reinstalled): top line + chat line; one line after widening; a Tyranny-style notice stays when a gacha line arrives (chat still gets it); switch off = nothing shown while a plain server line still shows; off survives a restart; on again shows it.
+- **Not verified**: the server side live (needs the new ServerField; built OK with MSBuild together with MiniA, Emulator, ServerAgent); iOS (no iPhone; shared code).
+- **Deploy**: server ServerField.exe (+ ServerAgent.exe) from SOURCE/_Bin/Tool and CLIENT/data/gui/Gui.rcc; clients get Gui.rcc + new libs in the next patch. SOURCE 2ce8a925.
+
 ## 2026-10-31 — Photo mode names button (after release 823 was built; NOT in that patch yet)
 User: "in the photo mode can you do the btn option that show and hide name". Third round button under the emote smiley (touch_ui photoNamesCircle/drawPhotoNames: name plate over a head, red strike while hidden, lit while shown; RanTouch_ConsumePhotoNames / SetPhotoNamesOn). Client: CInnerInterface::m_bMobilePhotoNames (off by default like PC F12, kept until the game closes), MobilePhotoNamesFrame runs CNameDisplayMan alone (CUIMan::MobileUpdateOne: drops names of who left, applies the name type), MobilePhotoNamesRender draws it under the pad buttons (DxGameStage::Render photo branch). Shared code only, so Android + iOS both get it; iOS not run (no device). Verified on the test LDPlayer (emulator-5554, user OK this time): off -> on shows the name, on -> off hides, X exits normally, a tap on the button does not walk. PC GameClient2/Emulator/ServerAgent/ServerField built. Backups backups/photonames_20261031. To ship: rebuild the patch (and iOS CI) before the user uploads, or it goes in the next one.
 
