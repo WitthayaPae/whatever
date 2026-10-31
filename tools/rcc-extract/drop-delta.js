@@ -77,6 +77,12 @@ const evCat = (id) => 'Spec' + id;
 // --match-to: which category the --match-spec lines copy (default the upgrade stones)
 const toArg = argv0.find((a) => a.startsWith('--match-to='));
 const MATCH_TO = toArg ? toArg.slice(11) : 'Stone';
+// --spec-value=X (2026-10-31, the user: event feather + shard 'together 3.0'): with --match-spec,
+// set each listed spec to X per 100 kills instead of copying a category. Only where the
+// table already gives that spec something, so tables without event drops keep none.
+const svArg = argv0.find((a) => a.startsWith('--spec-value='));
+const SPEC_VALUE = svArg ? parseFloat(svArg.slice(13)) : null;
+if (svArg && !(SPEC_VALUE >= 0 && MATCH_SPEC)) throw new Error('--spec-value needs a number and --match-spec');
 const SET = MATCH_SPEC ? Object.fromEntries(MATCH_SPEC.map((id) => [evCat(id), true]))
   : MATCH_RESIST ? { Resist: true } : SET_WA !== null ? { Weapon: true, Armor: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
 const DELTA = { Weapon: 0.4, Armor: 0.4, Stone: 0.2 };
@@ -309,7 +315,7 @@ for (const t of T) {
   if (!(t.rolls > 0) || !(t.gen > 0)) { skipped.push([t.name, t.level, 'never fires']); continue; }
   const before = perCat(t, t.spec, t.gen);
   const want = {}, base = {};
-  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = MATCH_SPEC ? before[MATCH_TO] : MATCH_RESIST ? before.Stone : SET_WA !== null ? waFor(t.name, c) : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
+  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = MATCH_SPEC ? (SPEC_VALUE !== null ? (before[c] > 0 ? SPEC_VALUE : 0) : before[MATCH_TO]) : MATCH_RESIST ? before.Stone : SET_WA !== null ? waFor(t.name, c) : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
   const note = new Set();
 
   let gen = t.gen, L = build(t, gen, want, before, note);
