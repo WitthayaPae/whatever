@@ -824,12 +824,18 @@ int g_diagDraws = 0, g_diagUI = 0, g_diagUpload = 0;
 //  -1 leaves every draw alone.
 int g_drawLimit = -1;
 int g_frameDraw = 0;
+//  bigfx: streaming ring wraps (orphans) this frame, and the draw they fell on.
+int g_ringWrapsCur = 0, g_ringWrapDrawCur = -1, g_ringWrapsPrev = 0, g_ringWrapDrawPrev = -1;
+unsigned g_ringCapNote = 0;
 //  "ghostprobe" (re-arm by deleting and touching the file): for the next few
 //  frames, after every on-screen draw read a 32x32 block of the frame at
 //  g_ghostX/Y (fractions of the viewport, from the bottom left) and log each
 //  draw that changes it - which draw really puts pixels there, measured on the
 //  GPU rather than computed. Measurement only; it stalls the pipeline per draw.
 int   g_ghostProbe = 0;
+bool  g_bigFx = false;              //  "bigfx" diagnostic, see bigFxCheck
+int   g_bigFxFrame = 0;              //  frames since start, for matching bigfx lines
+int   g_bigFxGen = 0;                //  bumped on each arming: the catcher forgets what it has seen
 bool  g_ghostLastValid = false;
 float g_ghostLast[4] = { 0, 0, 0, 0 };
 float g_ghostX = 0.378f, g_ghostY = 0.421f;
@@ -1511,6 +1517,10 @@ extern "C" void RanGLR_RefreshDiagnostics(void) {
         }
     }
     {
+        const bool on = RanPlat_DiagExists("bigfx") != 0;
+        if (on != g_bigFx) { g_bigFx = on; if (on) ++g_bigFxGen; LOGI("diagnostic: bigfx %s", on ? "on" : "off"); }
+    }
+    {
         static bool s_ghostArmed = false;
         const bool on = (RanPlat_DiagExists("ghostprobe"));
         if (on != s_ghostArmed) {
@@ -2150,6 +2160,8 @@ static void rtClearDepthNow(void) {
 //  to memory (Apple, OpenGL ES guide: invalidate unneeded attachments when
 //  switching framebuffers). "nortdepthfix" restores clear-at-bind.
 static void rtLeave(void) {
+    if (RanPlat_DiagExists("rtfinish")) glFinish();      //  bigfx A/B: GPU done with this pass before anything reuses it
+
     if (!g_rtActive || !g_rtDepthPending) return;
     const GLenum att = GL_DEPTH_ATTACHMENT;
     glInvalidateFramebuffer(GL_FRAMEBUFFER, 1, &att);
@@ -2663,9 +2675,11 @@ static void noteClear(DWORD flags) {
     }
 }
 
+void RanGLR_FlashNoteClear(unsigned flags, unsigned color, int rt);
 extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil) {
     if (!g_inited) return;
     if (g_clearLog) noteClear(flags);
+    RanGLR_FlashNoteClear((unsigned)flags, (unsigned)color, g_rtActive ? 1 : 0);
     //  The client clears the frame once at the top of the scene, which is the
     //  only frame boundary visible from this layer.
     if (!g_rtActive && (flags & D3DCLEAR_TARGET)) {
@@ -2673,6 +2687,7 @@ extern "C" void RanGLR_Clear(DWORD flags, D3DCOLOR color, float z, DWORD stencil
         if (g_ghostProbe > 0) --g_ghostProbe;
         g_ghostLastValid = false;
         g_frameDraw = 0;
+        ++g_bigFxFrame;
         g_frameClearedColor = true;
     }
     //  A render target that still owes its per-frame depth clear: one clear
@@ -3278,6 +3293,11 @@ struct RingBuffer {
 
     //  True for the "streamsub" ring: always the glBufferSubData path.
     bool noPersistent;
+    //  Without persistent mapping the ring rotates through three fixed stores
+    //  (see the wrap below); each keeps the capacity it was last given.
+    GLuint  pool[3];
+    GLsizei poolCap[3];
+    int     poolIdx;
 
 #if defined(__APPLE__)
     //  Apple: no persistent mapping, so the store used to be re-specified
@@ -3323,7 +3343,7 @@ struct RingBuffer {
 
     RingBuffer(GLenum t, bool noPersist = false)
         : buffer(0), target(t), capacity(0), cursor(0), mapped(NULL), lapFence(0),
-          noPersistent(noPersist)
+          noPersistent(noPersist), poolIdx(0)
 #if defined(__APPLE__)
           , curHalfP(0), curHalfGL(0)
 #endif
@@ -3331,6 +3351,8 @@ struct RingBuffer {
 #if defined(__APPLE__)
         halfFence[0] = halfFence[1] = 0;
 #endif
+        pool[0] = pool[1] = pool[2] = 0;
+        poolCap[0] = poolCap[1] = poolCap[2] = 0;
     }
 
     //  Immutable storage, mapped once. Only ever called for a fresh name.
@@ -3536,19 +3558,51 @@ struct RingBuffer {
             return offset;
         }
 #endif
+        if (!pool[poolIdx]) pool[poolIdx] = buffer;
         if (size > capacity || capacity == 0) {
             capacity = size * 4;
             if (capacity < (8 << 20)) capacity = 8 << 20;
             glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+            poolCap[poolIdx] = capacity;
             ++g_callsBuffer;
             cursor = 0;
+            g_ringCapNote = (unsigned)capacity;
         } else if (cursor + size > capacity) {
-            //  Wrapped: tell the driver the old contents are dead, so it hands
-            //  back fresh memory instead of waiting for the draws that read
-            //  the old contents to finish.
-            glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
-            ++g_callsBuffer;
+            //  Wrapped. Re-specifying the same name with glBufferData(NULL)
+            //  is the textbook way to get fresh memory without waiting for
+            //  the draws that read the old contents - and on LDPlayer's GL it
+            //  is not reliable: a wrap late in a frame was followed, in 4 of 6
+            //  measured cases (chance: 1 in 12), by one frame in which the
+            //  first draws written after the wrap - the sky, additive, no
+            //  depth test - came out as a full-screen bright wash (the "light
+            //  flicker when players use skills", prison map, 2026-11-02).
+            //  Forcing the GPU to catch up every 40 draws stopped it entirely.
+            //  So the ring takes a genuinely new buffer name at every wrap and
+            //  the old one is deleted a few frames later; no driver has to
+            //  rename anything behind the scenes. "ringsamename" puts the
+            //  re-specify back, to compare.
+            //  Three stores in rotation, allocated once: a store is written
+            //  again two laps (two dozen frames) after its last draw, which
+            //  the GPU finished long ago, so nothing is re-specified and
+            //  nothing is freed. (A first version took a new name per wrap and
+            //  deleted the old ones; that churn crashed LDPlayer itself.)
+            if (!RanPlat_DiagExists("ringsamename")) {
+                poolIdx = (poolIdx + 1) % 3;
+                if (!pool[poolIdx]) glGenBuffers(1, &pool[poolIdx]);
+                buffer = pool[poolIdx];
+                if (target == GL_ARRAY_BUFFER) { g_gl.arrayBuffer = 0; bindArray(buffer); }
+                else                           { g_gl.elementBuffer = 0; bindElements(buffer); }
+                if (poolCap[poolIdx] != capacity) {
+                    glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+                    poolCap[poolIdx] = capacity;
+                    ++g_callsBuffer;
+                }
+            } else {
+                glBufferData(target, capacity, NULL, GL_STREAM_DRAW);
+                ++g_callsBuffer;
+            }
             cursor = 0;
+            ++g_ringWrapsCur; g_ringWrapDrawCur = g_frameDraw;
         }
 
         const GLintptr offset = cursor;
@@ -3883,6 +3937,236 @@ static void logDrawGroups() {
     g_dgFrames = 0;
 }
 
+//  "bigfx" (diagnostic): a blended world draw that covers a third of the screen
+//  or more is logged once per kind (texture, vertex count, fvf, effect file),
+//  with its texture name, boxes and call stack, then counted. The sky and other
+//  big draws that happen every frame show as one line each with a high count; a
+//  draw that blows up for one frame shows as a new kind with a count of 1.
+//  Measurement only: one CPU transform of every blended world draw.
+static const char *g_ranFxName = NULL;
+extern "C" void RanDiag_SetFx(const char *name) { g_ranFxName = name; }
+static const char *notedTexName(unsigned gl);
+extern "C" void RanDiag_Backtrace(char *out, size_t cap);
+static void bigFxCheck(const void *vp, UINT vcount, UINT stride, DWORD fvf,
+                       unsigned glTexture, const float *mvp, UINT primCount, DWORD primType) {
+    if (!vp || !mvp || vcount == 0 || stride < 12) return;
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+    float ox0 = 1e30f, oy0 = 1e30f, oz0 = 1e30f, ox1 = -1e30f, oy1 = -1e30f, oz1 = -1e30f;
+    int behind = 0, front = 0;
+    const UINT n = vcount < 20000 ? vcount : 20000;
+    for (UINT q = 0; q < n; ++q) {
+        const float *v = (const float *)((const BYTE *)vp + (size_t)q * stride);
+        if (v[0] < ox0) ox0 = v[0]; if (v[0] > ox1) ox1 = v[0];
+        if (v[1] < oy0) oy0 = v[1]; if (v[1] > oy1) oy1 = v[1];
+        if (v[2] < oz0) oz0 = v[2]; if (v[2] > oz1) oz1 = v[2];
+        float c[4];
+        for (int r = 0; r < 4; ++r) c[r] = v[0] * mvp[r] + v[1] * mvp[4 + r] + v[2] * mvp[8 + r] + mvp[12 + r];
+        if (c[3] <= 1e-4f) { ++behind; continue; }
+        ++front;
+        float nx = c[0] / c[3], ny = c[1] / c[3];
+        if (nx < -1.f) nx = -1.f; if (nx > 1.f) nx = 1.f;
+        if (ny < -1.f) ny = -1.f; if (ny > 1.f) ny = 1.f;
+        if (nx < x0) x0 = nx; if (nx > x1) x1 = nx;
+        if (ny < y0) y0 = ny; if (ny > y1) y1 = ny;
+    }
+    if (!front) return;
+    const float area = (x1 - x0) * (y1 - y0) * 0.25f;
+    if (area < 0.33f) return;
+    struct Key { unsigned tex; UINT vc; DWORD fvf; const char *fx; };
+    struct Seen { Key k; unsigned count; int firstFrame; int lastFrame; };
+    static std::vector<Seen> s_seen;
+    static int s_gen = -1;
+    if (s_gen != g_bigFxGen) { s_gen = g_bigFxGen; s_seen.clear(); }
+    for (size_t i = 0; i < s_seen.size(); ++i) {
+        Seen &e = s_seen[i];
+        if (e.k.tex == glTexture && e.k.vc == vcount && e.k.fvf == fvf && e.k.fx == g_ranFxName) {
+            ++e.count;
+            //  Rare kinds (in under a fifth of the frames since first seen) are
+            //  logged at every occurrence, so a one-frame flash in a recording
+            //  can be matched to exactly what was drawn in that frame.
+            const int span = g_bigFxFrame - e.firstFrame + 1;
+            if (e.lastFrame != g_bigFxFrame && (float)e.count < 0.2f * (float)span)
+                LOGI("bigfx RARE frame %d kind %u screen %.0f%% ndc (%.2f,%.2f)-(%.2f,%.2f) behind %d obj (%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f)",
+                     g_bigFxFrame, (unsigned)i, area * 100.f, x0, y0, x1, y1, behind, ox0, oy0, oz0, ox1, oy1, oz1);
+            e.lastFrame = g_bigFxFrame;
+            if ((e.count % 500) == 0) LOGI("bigfx kind %u seen %u times", (unsigned)i, e.count);
+            return;
+        }
+    }
+    Seen e; e.k.tex = glTexture; e.k.vc = vcount; e.k.fvf = fvf; e.k.fx = g_ranFxName; e.count = 1; e.firstFrame = e.lastFrame = g_bigFxFrame;
+    s_seen.push_back(e);
+    char who[768];
+    RanDiag_Backtrace(who, sizeof(who));
+    const char *tn = notedTexName(glTexture);
+    LOGI("bigfx frame %d draw %d vp %p", g_bigFxFrame, g_frameDraw, vp);
+    LOGI("bigfx kind %u NEW: screen %.0f%% tex %u %s fx %s prim %u type %lu vc %u fvf %04lx "
+         "blend %lu(%lu,%lu) ndc (%.2f,%.2f)-(%.2f,%.2f) behind %d/%u "
+         "obj (%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f) mvp row3 (%.1f,%.1f,%.1f,%.1f)",
+         (unsigned)(s_seen.size() - 1), area * 100.f, glTexture, tn ? tn : "?",
+         g_ranFxName ? g_ranFxName : "-", primCount, (unsigned long)primType, vcount, (unsigned long)fvf,
+         (unsigned long)g_dsBlend, (unsigned long)g_dsSrc, (unsigned long)g_dsDst,
+         x0, y0, x1, y1, behind, n, ox0, oy0, oz0, ox1, oy1, oz1,
+         mvp[12], mvp[13], mvp[14], mvp[15]);
+    LOGI("bigfx kind %u from:%s", (unsigned)(s_seen.size() - 1), who);
+}
+
+//  The bigfx catcher for pre-transformed (screen-space) draws: a blended one
+//  covering 60% of the frame or more. Same reporting as bigFxCheck.
+static void bigFxCheckRhw(const void *vp, UINT vcount, UINT stride, DWORD fvf, unsigned glTexture,
+                          UINT primCount, DWORD primType) {
+    if (!vp || vcount == 0 || stride < 16) return;
+    const float W = (float)curWidth(), H = (float)curHeight();
+    if (W < 1.f || H < 1.f) return;
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f, z0 = 1e30f, z1 = -1e30f;
+    const UINT n = vcount < 4096 ? vcount : 4096;
+    for (UINT q = 0; q < n; ++q) {
+        const float *v = (const float *)((const BYTE *)vp + (size_t)q * stride);
+        if (v[0] < x0) x0 = v[0]; if (v[0] > x1) x1 = v[0];
+        if (v[1] < y0) y0 = v[1]; if (v[1] > y1) y1 = v[1];
+        if (v[2] < z0) z0 = v[2]; if (v[2] > z1) z1 = v[2];
+    }
+    const float cx0 = x0 < 0 ? 0 : x0, cy0 = y0 < 0 ? 0 : y0, cx1 = x1 > W ? W : x1, cy1 = y1 > H ? H : y1;
+    if (cx1 <= cx0 || cy1 <= cy0) return;
+    const float area = (cx1 - cx0) * (cy1 - cy0) / (W * H);
+    if (area < 0.6f) return;
+    struct Seen { unsigned tex; UINT vc; DWORD fvf; unsigned count; int firstFrame; int lastFrame; };
+    static std::vector<Seen> s_seen;
+    static int s_gen = -1;
+    if (s_gen != g_bigFxGen) { s_gen = g_bigFxGen; s_seen.clear(); }
+    for (size_t i = 0; i < s_seen.size(); ++i) {
+        Seen &e = s_seen[i];
+        if (e.tex == glTexture && e.vc == vcount && e.fvf == fvf) {
+            ++e.count;
+            const int span = g_bigFxFrame - e.firstFrame + 1;
+            if (e.lastFrame != g_bigFxFrame && (float)e.count < 0.2f * (float)span)
+                LOGI("bigfx RARE rhw frame %d kind %u screen %.0f%% z %.3f-%.3f ztest %d", g_bigFxFrame, (unsigned)i,
+                     area * 100.f, z0, z1, (int)g_gl.depthTest);
+            e.lastFrame = g_bigFxFrame;
+            return;
+        }
+    }
+    Seen e = { glTexture, vcount, fvf, 1, g_bigFxFrame, g_bigFxFrame };
+    s_seen.push_back(e);
+    char who[768];
+    RanDiag_Backtrace(who, sizeof(who));
+    const char *tn = notedTexName(glTexture);
+    LOGI("bigfx rhw kind %u NEW frame %d: screen %.0f%% tex %u %s prim %u type %lu vc %u fvf %04lx blend %lu(%lu,%lu) "
+         "box (%.0f,%.0f)-(%.0f,%.0f) z %.3f-%.3f ztest %d zwrite %d",
+         (unsigned)(s_seen.size() - 1), g_bigFxFrame, area * 100.f, glTexture, tn ? tn : "?", primCount,
+         (unsigned long)primType, vcount, (unsigned long)fvf, (unsigned long)g_dsBlend, (unsigned long)g_dsSrc,
+         (unsigned long)g_dsDst, x0, y0, x1, y1, z0, z1, (int)g_gl.depthTest, (int)g_gl.depthMask);
+    LOGI("bigfx rhw kind %u from:%s", (unsigned)(s_seen.size() - 1), who);
+}
+
+//  bigfx flash probe: a short summary of every draw in the frame; at the end of
+//  the frame a few sky pixels are read back, and when they jump bright for one
+//  frame the summaries of that frame and the one before are written out.
+struct FlashDraw { int no; unsigned tex; unsigned vc; unsigned fvf; unsigned char rhw, blend, rt, ztest; unsigned short src, dst; float area; int behind; char fx[40]; };
+static std::vector<FlashDraw> g_flashCur, g_flashPrev;
+//  Sky brightness read back every g_flashStep draws (bigfx): which draws of a
+//  flash frame brightened the sky, measured on the GPU.
+struct FlashLum { int no; float lum; };
+static std::vector<FlashLum> g_flashLumCur, g_flashLumPrev;
+static int g_flashStep = 40;
+static unsigned g_flashClearsCur = 0, g_flashClearsPrev = 0, g_flashClearFlagsCur = 0, g_flashClearFlagsPrev = 0;
+static unsigned g_flashClearColorCur = 0, g_flashClearColorPrev = 0;
+static float flashReadSky(void) {
+    GLint vp[4] = { 0, 0, 0, 0 };
+    glGetIntegerv(GL_VIEWPORT, vp);
+    float lum = 0.f;
+    const float px[4] = { 0.20f, 0.35f, 0.50f, 0.65f };
+    for (int i = 0; i < 4; ++i) {
+        unsigned char rgba[4] = { 0, 0, 0, 0 };
+        glReadPixels(vp[0] + (GLint)(vp[2] * px[i]), vp[1] + (GLint)(vp[3] * 0.80f), 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        lum += (rgba[0] + rgba[1] + rgba[2]) / 3.f;
+    }
+    return lum / 4.f;
+}
+void RanGLR_FlashNoteClear(unsigned flags, unsigned color, int rt) {
+    if (!g_bigFx || rt) return;
+    ++g_flashClearsCur; g_flashClearFlagsCur |= flags;
+    if (flags & 1 /*D3DCLEAR_TARGET*/) g_flashClearColorCur = color;
+}
+static float flashArea(const void *vp, UINT vcount, UINT stride, DWORD fvf, const float *mvp, int *pBehind) {
+    if (pBehind) *pBehind = 0;
+    if (!vp || !vcount || stride < 12) return -1.f;
+    const bool rhw = (fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW;
+    const float W = (float)curWidth(), H = (float)curHeight();
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f; int front = 0;
+    const UINT n = vcount < 512 ? vcount : 512;
+    for (UINT q = 0; q < n; ++q) {
+        const float *v = (const float *)((const BYTE *)vp + (size_t)q * stride);
+        float nx, ny;
+        if (rhw) { nx = v[0] / W * 2.f - 1.f; ny = v[1] / H * 2.f - 1.f; }
+        else {
+            if (!mvp) return -1.f;
+            float c[4];
+            for (int r = 0; r < 4; ++r) c[r] = v[0] * mvp[r] + v[1] * mvp[4 + r] + v[2] * mvp[8 + r] + mvp[12 + r];
+            if (c[3] <= 1e-4f) { if (pBehind) ++*pBehind; continue; }
+            nx = c[0] / c[3]; ny = c[1] / c[3];
+        }
+        ++front;
+        if (nx < -1.f) nx = -1.f; if (nx > 1.f) nx = 1.f;
+        if (ny < -1.f) ny = -1.f; if (ny > 1.f) ny = 1.f;
+        if (nx < x0) x0 = nx; if (nx > x1) x1 = nx;
+        if (ny < y0) y0 = ny; if (ny > y1) y1 = ny;
+    }
+    return front ? (x1 - x0) * (y1 - y0) * 0.25f : 0.f;
+}
+extern "C" void RanGLR_FlashProbe(void) {
+    if (!g_bigFx) { g_flashCur.clear(); g_flashPrev.clear(); return; }
+    static float s_last = -1.f;
+    const float lum = flashReadSky();
+    {
+        FILE *f = RanPlat_DiagExists("flashstep") ? RanPlat_DiagOpen("flashstep") : NULL;
+        if (f) { int v = 0; if (fscanf(f, "%d", &v) == 1 && v > 0) g_flashStep = v; fclose(f); }
+    }
+    if (s_last >= 0.f && lum - s_last > 60.f) {
+        LOGI("FLASH frame %d: sky %.0f -> %.0f, %u draws (previous frame %u); clears %u flags %x; ring wraps this frame %d (at draw %d), previous frame %d (at draw %d), ring %u MB",
+             g_bigFxFrame, s_last, lum, (unsigned)g_flashCur.size(), (unsigned)g_flashPrev.size(),
+             g_flashClearsCur, g_flashClearFlagsCur, g_ringWrapsCur, g_ringWrapDrawCur, g_ringWrapsPrev, g_ringWrapDrawPrev, g_ringCapNote >> 20);
+        //  The sky brightness after every g_flashStep-th draw, both frames.
+        for (int l = 0; l < 2; ++l) {
+            const std::vector<FlashLum> &L = l ? g_flashLumCur : g_flashLumPrev;
+            char line[900]; int at = 0;
+            at += snprintf(line + at, sizeof(line) - at, "FLASH sky %s:", l ? "cur " : "prev");
+            for (size_t i = 0; i < L.size() && at < (int)sizeof(line) - 16; ++i)
+                at += snprintf(line + at, sizeof(line) - at, " %d:%.0f", L[i].no, L[i].lum);
+            LOGI("%s", line);
+        }
+        //  Every draw of the bright frame with no match in the frame before
+        //  (texture, vertex count, format, target, blend), and every draw with
+        //  vertices behind the camera - those can cover the screen whatever
+        //  their visible corners say.
+        std::vector<char> used(g_flashPrev.size(), 0);
+        for (size_t i = 0; i < g_flashCur.size(); ++i) {
+            const FlashDraw &d = g_flashCur[i];
+            bool matched = false;
+            for (size_t j = 0; j < g_flashPrev.size() && !matched; ++j) {
+                const FlashDraw &e = g_flashPrev[j];
+                if (!used[j] && e.tex == d.tex && e.vc == d.vc && e.fvf == d.fvf && e.rt == d.rt && e.blend == d.blend &&
+                    e.src == d.src && e.dst == d.dst && e.ztest == d.ztest) { used[j] = 1; matched = true; }
+            }
+            if (matched && d.behind == 0) continue;
+            const char *tn = notedTexName(d.tex);
+            LOGI("FLASH %s #%d tex %u %s fx %s vc %u fvf %04x rhw %d rt %d blend %d(%u,%u) ztest %d area %.0f%% behind %d",
+                 matched ? "behind" : "NEW   ", d.no, d.tex, tn ? tn : "?", d.fx, d.vc, d.fvf, d.rhw, d.rt,
+                 d.blend, d.src, d.dst, d.ztest, d.area * 100.f, d.behind);
+        }
+    }
+    s_last = lum;
+    g_flashPrev.swap(g_flashCur);
+    g_flashCur.clear();
+    g_flashLumPrev.swap(g_flashLumCur);
+    g_flashLumCur.clear();
+    g_flashClearsPrev = g_flashClearsCur; g_flashClearFlagsPrev = g_flashClearFlagsCur; g_flashClearColorPrev = g_flashClearColorCur;
+    g_flashClearsCur = 0; g_flashClearFlagsCur = 0; g_flashClearColorCur = 0;
+    g_ringWrapsPrev = g_ringWrapsCur; g_ringWrapDrawPrev = g_ringWrapDrawCur;
+    g_ringWrapsCur = 0; g_ringWrapDrawCur = -1;
+    //  Not a flash: still say when the ring wrapped, so wraps without a flash count too.
+    if (g_ringWrapsPrev) LOGI("RINGWRAP frame %d: %d wraps, last at draw %d", g_bigFxFrame, g_ringWrapsPrev, g_ringWrapDrawPrev);
+}
+
 static void drawInternal(DWORD primType, UINT primCount, const void *verts,
                          UINT stride, DWORD fvf, unsigned glTexture,
                          const float *mvp, const void *indices, UINT indexBits,
@@ -3966,6 +4250,36 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
     }
 
     ++g_frameDraw;
+    if (g_bigFx && !g_rtActive && g_gl.blendEnabled && g_vertexBlend == 0 &&
+        (fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW) {
+        bigFxCheck(verts ? verts : (glVB ? g_diagVerts : NULL),
+                   vertexCount ? vertexCount :
+                   (primType == D3DPT_TRIANGLELIST ? primCount * 3 :
+                    (primType == D3DPT_TRIANGLESTRIP || primType == D3DPT_TRIANGLEFAN) ? primCount + 2 : 0),
+                   stride, fvf, glTexture, mvp, primCount, primType);
+    }
+    if (g_bigFx && !g_rtActive && g_gl.blendEnabled &&
+        (fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW) {
+        bigFxCheckRhw(verts ? verts : (glVB ? g_diagVerts : NULL),
+                      vertexCount ? vertexCount :
+                      (primType == D3DPT_TRIANGLELIST ? primCount * 3 :
+                       (primType == D3DPT_TRIANGLESTRIP || primType == D3DPT_TRIANGLEFAN) ? primCount + 2 : 0),
+                      stride, fvf, glTexture, primCount, primType);
+    }
+    if (g_bigFx && g_flashCur.size() < 20000) {
+        FlashDraw d;
+        d.no = g_frameDraw; d.tex = glTexture; d.fvf = (unsigned)fvf;
+        d.vc = vertexCount ? vertexCount : primCount;
+        d.rhw = (fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW; d.blend = g_gl.blendEnabled ? 1 : 0;
+        d.rt = g_rtActive ? 1 : 0; d.ztest = g_gl.depthTest > 0 ? 1 : 0;
+        d.src = (unsigned short)g_dsSrc; d.dst = (unsigned short)g_dsDst;
+        const UINT nv = vertexCount ? vertexCount :
+            (primType == D3DPT_TRIANGLELIST ? primCount * 3 :
+             (primType == D3DPT_TRIANGLESTRIP || primType == D3DPT_TRIANGLEFAN) ? primCount + 2 : 0);
+        d.behind = 0; snprintf(d.fx, sizeof(d.fx), "%s", g_ranFxName ? g_ranFxName : "-");
+        d.area = (g_vertexBlend == 0) ? flashArea(verts ? verts : (glVB ? g_diagVerts : NULL), nv, stride, fvf, mvp, &d.behind) : -1.f;
+        g_flashCur.push_back(d);
+    }
     if (g_drawLog > 0) {
         //  Everything that decides what a draw costs to fill: how many pixels it
         //  can touch, and whether it can be rejected early.
@@ -4801,6 +5115,10 @@ static void drawInternal(DWORD primType, UINT primCount, const void *verts,
         ++g_callsDraw;
     }
 
+    if (g_bigFx && !g_rtActive && g_flashStep > 0 && (g_frameDraw % g_flashStep) == 0 && g_flashLumCur.size() < 400) {
+        FlashLum fl; fl.no = g_frameDraw; fl.lum = flashReadSky();
+        g_flashLumCur.push_back(fl);
+    }
     if (g_ghostProbe > 0 && g_ghostProbe < 4 && (!g_rtActive || g_rtW > 600)) {
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
@@ -5071,10 +5389,11 @@ extern "C" void RanGLR_UpdateBufferRangeUnsync(unsigned buffer, int isIndex, uns
     const double t0 = nowSeconds();
     const GLenum target = isIndex ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
     if (isIndex) bindElements(buffer); else bindArray(buffer);
+    const bool syncVb = RanPlat_DiagExists("syncvb") != 0;    //  bigfx A/B: the blocking write instead
     if (g_ranGLTOn) {
         //  The map answers with a pointer, so the whole write goes over.
-        RanGLT_PostData(data, size, [target, offset, size](const void *p) {
-            void *d = ::glMapBufferRange(target, (GLintptr)offset, (GLsizeiptr)size,
+        RanGLT_PostData(data, size, [target, offset, size, syncVb](const void *p) {
+            void *d = syncVb ? NULL : ::glMapBufferRange(target, (GLintptr)offset, (GLsizeiptr)size,
                                          GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT |
                                          GL_MAP_INVALIDATE_RANGE_BIT);
             if (d) { memcpy(d, p, size); ::glUnmapBuffer(target); }
@@ -5087,7 +5406,7 @@ extern "C" void RanGLR_UpdateBufferRangeUnsync(unsigned buffer, int isIndex, uns
         if (isIndex) g_gl.elementBuffer = 0xFFFFFFFFu;
         return;
     }
-    void *dst = glMapBufferRange(target, (GLintptr)offset, (GLsizeiptr)size,
+    void *dst = syncVb ? NULL : glMapBufferRange(target, (GLintptr)offset, (GLsizeiptr)size,
                                  GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT |
                                  GL_MAP_INVALIDATE_RANGE_BIT);
     if (dst) {
@@ -5940,7 +6259,7 @@ extern "C" void RanGLR_UpdateTextureRect(unsigned tex, int x, int y, int w, int 
 extern "C" int RanGLR_TexturesCompressed(void) { return haveS3TC() ? 1 : 0; }
 
 extern "C" void RanGLR_DiagArm(int n) { g_diagDraws = n; }
-extern "C" int  RanGLR_DiagArmed(void) { return g_diagDraws > 0 ? 1 : 0; }
+extern "C" int  RanGLR_DiagArmed(void) { return (g_diagDraws > 0 || g_bigFx) ? 1 : 0; }
 extern "C" void RanGLR_DiagVerts(const void *p) { g_diagVerts = p; }
 extern "C" void RanGLR_DiagIndices(const void *p, UINT bits) {
     g_diagIndices = p;
@@ -6281,6 +6600,11 @@ extern "C" void RanGLR_DeleteTexture(unsigned tex) {
 namespace {
 struct NotedTex { unsigned gl; std::string name; };
 std::vector<NotedTex> g_notedTex;
+}
+
+static const char *notedTexName(unsigned gl) {
+    for (size_t i = 0; i < g_notedTex.size(); ++i) if (g_notedTex[i].gl == gl) return g_notedTex[i].name.c_str();
+    return NULL;
 }
 
 extern "C" void RanD3D_NoteTexture(unsigned glTex, const char *name) {

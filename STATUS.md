@@ -115,6 +115,18 @@ the patch ships a needless APK bump).
 ---
 
 
+
+## 2026-11-02 — "Light flickers when players use skills" (LDPlayer): streaming ring wrap, FIXED (built, NOT in a patch)
+
+User report: the map "flicks the light" in the prison map during fights. Measured on LDPlayer-1 (user's own fight) and the test LDPlayer (user's account):
+- The flash is ONE frame of a full-screen bright wash (sky 85 -> 255, near monsters +145, ground +70), 3-20 times a minute in a fight, never on an empty map.
+- Ruled out by measurement: fog/thunder (fog colour never changed at a flash), everything after the texture fetch (`plainfs` on, flashes stayed), render-target reuse (`rtfinish`), the unsync VB write (`syncvb`), a per-frame glFinish (`framefinish`: 21 flashes). The flash frame draws the same list as the frame before (full per-draw diff).
+- Decisive: reading one sky pixel back every 40 draws (GPU kept within 40 draws of the CPU) stopped it completely. Then: the non-persistent streaming ring (`RingBuffer::write`, 8 MB, re-specified with glBufferData(NULL) at every wrap, every ~11 frames in a fight) - 4 of 6 flashes had a wrap late in the previous frame (chance 1 in 12). LDPlayer's GL does not reliably hand out fresh memory for the re-specify, so the first draws written after the wrap (the sky: additive, no z-test) read garbage for a frame.
+- Fix (`gl_render.cpp`): the ring rotates through three stores allocated once; a store is rewritten two laps after its last draw. Nothing re-specified, nothing freed. A/B on the test LDPlayer, user playing: fix 0 flashes / 1403 wraps (3 windows) vs old behaviour 7 / 887. Recording agrees (visible flashes only in the old-behaviour windows). A first version that took a new buffer name per wrap and deleted old ones **crashed LDPlayer-1 itself** - do not do that.
+- Real phones have persistent mapping and use the fenced path, so they never had this; iOS has its own halves path. Shared shim: both platforms get the rotation when persistent mapping is missing.
+- Diagnostics kept, all behind files in the data root: `bigfx` (FLASH probe + per-kind big-draw log + RINGWRAP), `flashstep N`, `ringsamename` (old wrap), `framefinish`, `rtfinish`, `syncvb`; SOURCE: `RanDiag_SetFx` names the effect file during DxEffSingleGroup::Render, trail measurements in DxEffCharBlur (bigfx only).
+- LDPlayer-1 still has the crashing test build (288, rename-per-wrap) installed: reinstall before the user opens the game there.
+
 ## 2026-11-01 — iOS no sound + bot button tap/hold (built, NOT in a patch)
 
 - **iOS no sound (iPhone/iPad).** Crash-report logs (iPad6,4, iPad7,11, iPad11,2, iPhone14,5 ...) show the mixer playing (peak ~20000/32767, BGM at -400) while players heard nothing: the AVAudioSession was Ambient, which the ring/silent switch and iPad Control Center silent mode mute. `audio_audioqueue.mm`: Playback + MixWithOthers in front too (game volume settings and volume keys still apply, other apps' music keeps playing); AudioQueue restarted when an interruption (call, Siri, alarm) ends; queue rebuilt after a media-services reset. Android: 20 Android reports checked, every sink OK - no change needed (Android has no silent switch on media). Not compiled yet (iOS CI at next release), not run on an iPhone/iPad.

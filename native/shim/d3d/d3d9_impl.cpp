@@ -2538,9 +2538,16 @@ public:
         UINT base = baseSrc;
         const unsigned glVB = vb->GlBufferFor(base, &base);
         if (glVB) {
+            //  A count for the diagnostics that read the vertices (bigfx): a
+            //  strip or fan uses prims + 2, a list three a prim.
+            const UINT nDiag = (Type == D3DPT_TRIANGLELIST) ? PrimitiveCount * 3 : PrimitiveCount + 2;
+            const bool bDiag = RanGLR_DiagArmed() &&
+                (size_t)baseSrc + (size_t)nDiag * m_stream0Stride <= vb->m_data.size();
+            if (bDiag) RanGLR_DiagVerts(vb->m_data.data() + baseSrc);
             RanGLR_DrawVBO(Type, PrimitiveCount, glVB, base, m_stream0Stride,
                            m_fvf ? m_fvf : vb->m_fvf, boundGlTexture(), mvp,
                            0, 0, 0, 0, 0);
+            RanGLR_DiagVerts(NULL);
         } else {
             RanGLR_Draw(Type, PrimitiveCount, vb->m_data.data() + baseSrc,
                         m_stream0Stride, m_fvf ? m_fvf : vb->m_fvf, boundGlTexture(), mvp,
@@ -2586,6 +2593,7 @@ public:
             RanGLR_DrawVBO(Type, PrimitiveCount, glVB, vbBase, m_stream0Stride,
                            m_fvf ? m_fvf : vb->m_fvf, boundGlTexture(), mvp,
                            glIB, ibBase, idxBits, idxCount, MinVertexIndex + NumVertices);
+            RanGLR_DiagVerts(NULL);         //  never left pointing at this buffer for the next draw
         } else {
             RanGLR_Draw(Type, PrimitiveCount, vb->m_data.data() + vbSrc,
                         m_stream0Stride, m_fvf ? m_fvf : vb->m_fvf, boundGlTexture(), mvp,

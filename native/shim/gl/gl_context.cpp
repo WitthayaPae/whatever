@@ -590,6 +590,7 @@ extern "C" int RanGLR_FrameDrawCount(void);
 
 extern "C" unsigned RanGL_FrameIndex(void) { return g_frameIndex; }
 
+extern "C" void RanGLR_FlashProbe(void);   //  gl_render.cpp, bigfx diagnostic
 extern "C" void RanGL_Present(void) {
     if (!g_ready) return;
     ++g_frameIndex;
@@ -646,6 +647,10 @@ extern "C" void RanGL_Present(void) {
     //  say so: a tiled GPU otherwise writes both back out to memory at the end
     //  of every render pass. At 2560x1600 that is 16 MB of pure waste a frame.
     {
+        //  bigfx diagnostic: read the sky back and report a one-frame flash.
+        RanGLR_FlashProbe();
+    }
+    {
         const GLenum unwanted[] = { GL_DEPTH, GL_STENCIL };
         glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, unwanted);
     }
@@ -655,6 +660,7 @@ extern "C" void RanGL_Present(void) {
     //  No surface: the window is gone and this frame has nowhere to go. Swapping
     //  anyway is what filled the log with BAD_SURFACE while the browser was up.
     if (g_surface == EGL_NO_SURFACE) return;
+    if (RanPlat_DiagExists("framefinish")) glFinish();     //  bigfx A/B: the GPU never runs a frame behind
     if (!eglSwapBuffers(g_display, g_surface)) {
         EGLint e = eglGetError();
         // A lost surface is normal on rotate/background; the app layer recreates it.
