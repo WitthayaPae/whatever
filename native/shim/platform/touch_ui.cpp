@@ -266,6 +266,12 @@ const int kBtnFist = 12;
 const int kBtnBot = 13;
 bool  g_botShow = false;
 float g_botLeft = 0.0f;			//  0..1 of today's allowance left
+//  Tap or hold (2026-11-01): a tap starts or stops the bot, a hold opens its
+//  settings. The tap is sent on release, and only when the hold did not fire.
+const float kBotHoldSec = 0.5f;
+float g_botHoldT = -1.0f;			//  seconds held, -1 when not held
+bool  g_botHoldFired = false;
+bool  g_botHoldEdge = false;		//  read by RanTouch_ConsumeBotHold
 bool buttonHidden(int slot);
 
 //  The ride button is placed by the client, not by layout(): it lives beside
@@ -2464,7 +2470,9 @@ int RanTouch_PointerDown(int id, float x, float y) {
         if (b.pointer < 0 && hit(b.centre, b.radius, x, y)) {
             b.pointer = id;
             b.down = true;
-            b.pressedEdge = true;
+            //  The bot button answers on release (a tap) or after a hold.
+            if (b.slot == kSlotBot) { g_botHoldT = 0.0f; g_botHoldFired = false; }
+            else b.pressedEdge = true;
             if (t) t->claimed = true;
             if (b.slot == kSlotAttack) botNoteTap(x, y);
             return 1;
@@ -2718,6 +2726,9 @@ int RanTouch_PointerUp(int id, float x, float y) {
     }
     for (int i = 0; i < kButtonCount; ++i) {
         if (g_buttons[i].pointer == id) {
+            if (g_buttons[i].slot == kSlotBot && g_botHoldT >= 0.0f && !g_botHoldFired)
+                g_buttons[i].pressedEdge = true;        //  a tap
+            if (g_buttons[i].slot == kSlotBot) { g_botHoldT = -1.0f; g_botHoldFired = false; }
             g_buttons[i].pointer = -1;
             g_buttons[i].down = false;
             claimed = 1;
@@ -2734,6 +2745,16 @@ int RanTouch_PointerUp(int id, float x, float y) {
 const float kSkillPressTime = 0.20f;
 
 void RanTouch_Frame(float dt) {
+    //  The bot button's hold. Dropped if the press went away by any other road
+    //  (overlay switched off, editor) so no tap or hold fires late.
+    {
+        const Button &bb = g_buttons[kBtnBot];
+        if (!bb.down || bb.pointer < 0) { g_botHoldT = -1.0f; g_botHoldFired = false; }
+        else if (g_botHoldT >= 0.0f && !g_botHoldFired) {
+            g_botHoldT += dt;
+            if (g_botHoldT >= kBotHoldSec) { g_botHoldFired = true; g_botHoldEdge = true; }
+        }
+    }
     for (int i = 0; i < g_skillCircleCount; ++i) {
         SkillCircle &c = g_skillCircles[i];
         if (c.press < 0.0f) continue;
@@ -4137,6 +4158,20 @@ static void renderMenuAlert() {
     }
 }
 
+//  Holding the bot button with the bot off: a gold ring fills until the bot
+//  settings open. Drawn live like the alert above - it changes every frame.
+static void renderBotHold() {
+    if (!g_botShow || g_edit || g_botHoldT <= 0.08f || g_botHoldFired) return;
+    const Button &bb = g_buttons[kBtnBot];
+    if (bb.toggled) return;
+    float f = g_botHoldT / kBotHoldSec;
+    if (f > 1.0f) f = 1.0f;
+    g_drawAlpha = 1.0f;
+    segRing(bb.centre.x, bb.centre.y, bb.radius * 1.28f, bb.radius * 1.42f, 24, f,
+            rgba(1.0f, 0.80f, 0.31f, 1.0f), rgba(0.0f, 0.0f, 0.0f, 1.0f), 1.0f, 0.35f);
+    emit();
+}
+
 void RanTouch_Render(void) {
     ageActivity();
     if (!g_inited || !g_active || !g_prog || g_dim <= 0.0f) return;
@@ -4500,6 +4535,7 @@ void RanTouch_Render(void) {
     }
 
     renderMenuAlert();
+    renderBotHold();
 
     //  The skill slots get the painted bezel too - it was in the sheet from the
     //  start and only the potion row was using it.
@@ -4906,6 +4942,12 @@ extern "C" void RanTouch_SetLobbyPinch(int on) {
 
 extern "C" int RanTouch_IsPinching(void) {
     return (g_pinch.a >= 0 && g_pinch.b >= 0) ? 1 : 0;
+}
+
+extern "C" int RanTouch_ConsumeBotHold(void) {
+    if (!g_botHoldEdge) return 0;
+    g_botHoldEdge = false;
+    return (g_inited && g_active) ? 1 : 0;
 }
 
 extern "C" int RanTouch_ConsumeButton(int *outSlot) {

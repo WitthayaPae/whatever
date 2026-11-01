@@ -70,6 +70,9 @@ extern "C" int RanTouch_ConsumeButton(int *outSlot);
 //  (RanTouch_SetBot); lit while hunting, with a ring of today's time left.
 #define RANTOUCH_SLOT_BOT         (-14)
 extern "C" void RanTouch_SetBot(int show, float leftFrac);
+//  1 once after the bot button was held for half a second (the bot settings).
+//  A short press comes through RanTouch_ConsumeButton as RANTOUCH_SLOT_BOT, on release.
+extern "C" int  RanTouch_ConsumeBotHold(void);
 
 //  Where the client put its quick-skill slots, as fractions of the surface, so
 //  the overlay can draw a round rim over each one.

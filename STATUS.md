@@ -114,6 +114,12 @@ the patch ships a needless APK bump).
 
 ---
 
+
+## 2026-11-01 — iOS no sound + bot button tap/hold (built, NOT in a patch)
+
+- **iOS no sound (iPhone/iPad).** Crash-report logs (iPad6,4, iPad7,11, iPad11,2, iPhone14,5 ...) show the mixer playing (peak ~20000/32767, BGM at -400) while players heard nothing: the AVAudioSession was Ambient, which the ring/silent switch and iPad Control Center silent mode mute. `audio_audioqueue.mm`: Playback + MixWithOthers in front too (game volume settings and volume keys still apply, other apps' music keeps playing); AudioQueue restarted when an interruption (call, Siri, alarm) ends; queue rebuilt after a media-services reset. Android: 20 Android reports checked, every sink OK - no change needed (Android has no silent switch on media). Not compiled yet (iOS CI at next release), not run on an iPhone/iPad.
+- **Bot button:** tap = start / stop (start uses the saved range, same agent request as the window's Start); hold 0.5 s with the bot off = bot window (range slider + ring); hold while running = nothing. A gold ring fills round the button while held (`touch_ui.cpp` renderBotHold, live draw). Gold range ring stays on the ground round the hunt spot the whole time the bot runs (`GLCharacter::MobileRangeFrame`). Touch: `RanTouch_ConsumeBotHold`, the bot slot's tap now comes on release. Shared shim + SOURCE: Android + iOS. Verified on test LDPlayer (emulator-5554, huntfake, removed after): hold opens window, tap starts (ring still shown 8 s later), hold while running does nothing, tap stops. arm64 + x86_64 0 errors; MiniA, Emulator, ServerAgent, ServerField built. Backups backups/botbtn_20261101.
+
 ## 2026-11-01 — Chat: area channel removed from the mobile pickers (next app)
 
 User: remove the chat channel area (regional) from mobile. SOURCE 1d6fa6fe: CMobileChatChannelBar::RowShown skips the area row in the send picker (front of the input) and the view picker (end of the input); picker sizes use ShownCount. ^ typed by hand still works. Follow-up SOURCE cfe9ed49: also gone from the quick chat editor's channel picker (MobileToolPanel) and the All-page show/hide pills (ChatShowFlag); saved ^ macro lines keep working. Code, so it ships with the next app (289), Android and iOS from the same shared file.
