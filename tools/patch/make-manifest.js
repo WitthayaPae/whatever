@@ -174,6 +174,22 @@ const minIos = minIosArg ? parseInt(minIosArg, 10) : null;
     is lives inside, in versionCode and versionName.                           */
 const apkArg = arg('apk', path.join(ROOT, 'MOBILE/native/out/RanMobile.apk'));
 const noApk = argv.includes('--no-apk');
+/*  --keep-apk (2026-11-01, a data-only patch for the app already out): offer exactly the APK the
+ *  previous manifest offered, without needing its file. Nothing new for the launcher to install,
+ *  the android/ page is left alone. Pair it with --min-apk / --min-ios.                       */
+const keepApk = argv.includes('--keep-apk');
+/*  --ship <manifest path>=<file> (repeatable): ship this file's content under that path instead of
+ *  CLIENT's copy (2026-11-01: a Gui.rcc without the new character page, for the 287 app, while
+ *  CLIENT keeps the full one for the next app release).                                       */
+const SHIP_OVERRIDE = new Map();
+argv.forEach((a, i) => {
+  if (a !== '--ship') return;
+  const v = argv[i + 1] || '', k = v.indexOf('=');
+  if (k <= 0) throw new Error('--ship needs <path>=<file>');
+  const file = path.resolve(v.slice(k + 1));
+  if (!fs.existsSync(file)) throw new Error('--ship: ' + file + ' not found');
+  SHIP_OVERRIDE.set(v.slice(0, k).replace(/\\/g, '/'), file);
+});
 
 /*  The previous manifest, if this store has been built before. It is what the
     new version number is derived from, and what decides whether anything
@@ -398,6 +414,7 @@ for (const item of SHIP) {
   if (item.file) {
     if (excluded(path.basename(item.file))) continue;
     if (item.src) SRC.set(item.file, path.join(ROOT, item.src));
+    if (SHIP_OVERRIDE.has(item.file)) { SRC.set(item.file, SHIP_OVERRIDE.get(item.file)); console.log('  ship   : ' + item.file + ' from ' + SHIP_OVERRIDE.get(item.file)); }
     if (!fs.existsSync(srcOf(item.file))) {
       console.error('  ! missing file: ' + item.file);
       continue;
@@ -411,6 +428,7 @@ for (const item of SHIP) {
   }
 }
 
+for (const p of SHIP_OVERRIDE.keys()) if (!SRC.has(p)) throw new Error('--ship: ' + p + ' is not a shipped file');
 let PACKED_DUP = new Set();
 {
   const drop = packDuplicates(wanted);
@@ -453,6 +471,11 @@ files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
    same file the APK's versionCode comes from, so they cannot drift.           */
 const apk = (() => {
   if (noApk) return null;
+  if (keepApk) {
+    if (!PREV || !PREV.apk) throw new Error('--keep-apk: the previous manifest offers no APK');
+    console.log('apk      : kept from the previous manifest - versionCode ' + PREV.apk.versionCode + ' (no new APK)');
+    return Object.assign({}, PREV.apk, { kept: true });
+  }
   if (!fs.existsSync(apkArg)) {
     console.log('apk      : ' + apkArg + ' not found - no APK offered');
     return null;
@@ -506,7 +529,7 @@ const apk = (() => {
    the same APK under a fixed name, a download page (android-install.html) and
    version.json, which is what tells a later run whether android/ has been
    uploaded (see ANDROID_MARK). Rewritten only when the APK changes.           */
-if (apk) {
+if (apk && !apk.kept) {
   const AND_DIR = path.join(OUT, 'android');
   fs.mkdirSync(AND_DIR, { recursive: true });
   const verPath = path.join(AND_DIR, 'version.json');
@@ -659,7 +682,7 @@ if (minIosOut !== null) manifest.minIos = minIosOut;
     }
   }
 }
-if (apk) manifest.apk = apk;
+if (apk) { manifest.apk = Object.assign({}, apk); delete manifest.apk.kept; }
 fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 1));
 
 /* ------------------------------------------------------------------- sign

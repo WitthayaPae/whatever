@@ -114,6 +114,17 @@ the patch ships a needless APK bump).
 
 ---
 
+## 2026-11-01 — Patch 823 = DATA ONLY for app 287 (built, waiting for the user upload)
+
+User: "patch the things in this current patch without publish the app", then "build the patch data in the current 287". Play stays frozen (no app anywhere).
+
+- **out/upload** = 3 blobs 58.7 MB + manifest.json + manifest.sig, version 823 on top of live 822. apk entry identical to live (287, f7b9d996), minApk 287, minIos 287. No android/ or ios/ in the upload.
+- Changed: data/glogic/GLogic.rcc (trash-all, pet book desc, item.isf edits, Vulgar Leader crow.mnsf), data/glogic/quest/Quest.rcc (00095.qst), data/gui/Gui.rcc = **store-release/patch823_data287/Gui.rcc**: CLIENT's Gui.rcc with _inner_ingame_web.xml, gameword.xml, gameword_en.xml put back to the 822 copies (the new character page would mislabel top-up points as online points and shift buttons on the 287 app). So 823 carries the gacha servertext + wider EXTRA_NOTICE only. CLIENT/data/gui/Gui.rcc keeps the full version for the next app.
+- Made with make-manifest.js directly (new options --keep-apk, --ship <path>=<file>), store started from the live 822 manifest; out/ios and out/android (the unpublished 288) were moved aside during the run and put back.
+- **The unpublished APK-288 release 823 is replaced.** Its upload set and manifest are in store-release/hold_823_app288_unpublished/. The next app release must be rebuilt (MAKE-PATCH: code changed, so it bumps versionCode to 289, rebuilds iOS through CI) and must ship CLIENT's full Gui.rcc (new character page). minApk/minIos rise then.
+- **Server files** in store-release/patch823_data287/server/: ServerField.exe + ServerAgent.exe (gacha announce; 287 clients see it as a chat line), data/glogic/GLogic.rcc, data/glogic/quest/Quest.rcc, data/glogicserver/GLogicServer.rcc (drop v9 = perfect 2026-11-01), data/gui/Gui.rcc (same 287-safe one; servertext for the gacha line).
+- Not verified on a device: no 287 install here to try the new data on (test LDPlayer has 288, LDPlayer-1 is the user's). Checked offline: no loader code changed since 287 (SOURCE log), every entry diffed against 822.
+
 ## 2026-11-01 — Gacha open announcement (NOT in release 823; needs new ServerField + Gui.rcc on the server)
 
 User: announce when a player opens a gacha box, like the boss drop, at the top of the screen like the Tyranny notice, with a switch to turn it off, and no effect on other features. Asked which opens: user chose "Every gacha open" (boxes whose name has กาชา, including the 98% เกลือ result).
