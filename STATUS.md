@@ -116,7 +116,7 @@ the patch ships a needless APK bump).
 
 ## 2026-11-01 — Chat: area channel removed from the mobile pickers (next app)
 
-User: remove the chat channel area (regional) from mobile. SOURCE 1d6fa6fe: CMobileChatChannelBar::RowShown skips the area row in the send picker (front of the input) and the view picker (end of the input); picker sizes use ShownCount. ^ typed by hand still works. Code, so it ships with the next app (289), Android and iOS from the same shared file.
+User: remove the chat channel area (regional) from mobile. SOURCE 1d6fa6fe: CMobileChatChannelBar::RowShown skips the area row in the send picker (front of the input) and the view picker (end of the input); picker sizes use ShownCount. ^ typed by hand still works. Follow-up SOURCE cfe9ed49: also gone from the quick chat editor's channel picker (MobileToolPanel) and the All-page show/hide pills (ChatShowFlag); saved ^ macro lines keep working. Code, so it ships with the next app (289), Android and iOS from the same shared file.
 - Built: arm64 + x86_64 clean, PC MiniA/Emulator/ServerAgent/ServerField clean. Installed on the test LDPlayer, but NOT seen on screen: the client sat on server select (server unreachable from the dev PC, as earlier). iOS not verified (no iPhone; CI on the next release).
 
 ## 2026-11-01 — Patch 823 = DATA ONLY for app 287 (built, waiting for the user upload)
