@@ -95,7 +95,17 @@ const MATCH_TO = toArg ? toArg.slice(11) : 'Stone';
 const svArg = argv0.find((a) => a.startsWith('--spec-value='));
 const SPEC_VALUE = svArg ? parseFloat(svArg.slice(13)) : null;
 if (svArg && !(SPEC_VALUE >= 0 && MATCH_SPEC)) throw new Error('--spec-value needs a number and --match-spec');
-const SET = MATCH_SPEC ? Object.fromEntries(MATCH_SPEC.map((id) => [evCat(id), true]))
+// --stone-from=<old GLogicServer.rcc> [--stone-above=X] (2026-11-01, the user: stones from level 51
+// "make it back to the one before"): each table's upgrade and resist stones set back to what the
+// same table gave in the old file. Only tables whose stones now give more than X per 100 kills
+// (default 0.5), so the low-level tables (0.01 / 0.15) stay as they are.
+const sfArg = argv0.find((a) => a.startsWith('--stone-from='));
+const STONE_FROM = sfArg ? sfArg.slice(13) : null;
+const saArg = argv0.find((a) => a.startsWith('--stone-above='));
+const STONE_ABOVE = saArg ? parseFloat(saArg.slice(14)) : 0.5;
+if (STONE_FROM && !fs.existsSync(STONE_FROM)) throw new Error('--stone-from file not found');
+const SET = STONE_FROM ? { Stone: true, Resist: true }
+  : MATCH_SPEC ? Object.fromEntries(MATCH_SPEC.map((id) => [evCat(id), true]))
   : bookRange ? { Book: true } : MATCH_RESIST ? { Resist: true } : SET_WA !== null ? { Weapon: true, Armor: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
 const DELTA = { Weapon: 0.4, Armor: 0.4, Stone: 0.2 };
 const CATS = ['Weapon', 'Armor', 'Acc', 'Stone', 'Resist', 'Potion', 'Book', ...(MATCH_SPEC || []).map(evCat)];
@@ -321,13 +331,24 @@ function build(t, gen, want, before, note) {
   return total() <= FULL + 1e-9 ? L : null;
 }
 
+const OLD = STONE_FROM ? new RccArchive(STONE_FROM) : null;
 const report = [], changed = [], skipped = [];
 fs.mkdirSync(path.join(workDir, 'files'), { recursive: true });
 for (const t of T) {
   if (!(t.rolls > 0) || !(t.gen > 0)) { skipped.push([t.name, t.level, 'never fires']); continue; }
   const before = perCat(t, t.spec, t.gen);
+  let ref = null;
+  if (STONE_FROM) {
+    if (!(before.Stone > STONE_ABOVE)) { skipped.push([t.name, t.level, 'stones at or below ' + STONE_ABOVE]); continue; }
+    const rn = OLD.list().find((n) => n.toLowerCase() === t.k);
+    if (!rn) { skipped.push([t.name, t.level, 'not in the old file']); continue; }
+    const rl = plain(OLD.read(rn)).toString('latin1').replace(/\0+$/, '').split(/\r?\n/);
+    const rt = parse(rl);
+    ref = rt.rolls > 0 && rt.gen > 0 ? perCat(rt, rt.spec, rt.gen) : null;
+    if (!ref) { skipped.push([t.name, t.level, 'old table never fires']); continue; }
+  }
   const want = {}, base = {};
-  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = bookRange ? bookFor(t.name) : MATCH_SPEC ? (SPEC_VALUE !== null ? (before[c] > 0 ? SPEC_VALUE : 0) : before[MATCH_TO]) : MATCH_RESIST ? before.Stone : SET_WA !== null ? waFor(t.name, c) : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
+  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = ref ? ref[c] : bookRange ? bookFor(t.name) : MATCH_SPEC ? (SPEC_VALUE !== null ? (before[c] > 0 ? SPEC_VALUE : 0) : before[MATCH_TO]) : MATCH_RESIST ? before.Stone : SET_WA !== null ? waFor(t.name, c) : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
   const note = new Set();
 
   let gen = t.gen, L = build(t, gen, want, before, note);
@@ -389,7 +410,7 @@ for (const t of T) {
     if (Math.abs(d) > 0.02) { if (!NOSPLIT && !(Math.abs(d) <= TOL)) throw new Error(`${t.name}: ${c} ${after[c]} not ${want[c]}`); off.push(`${c} off by ${d.toFixed(2)}`); }
   }
   for (const o of off) note.add(o);
-  if (SET_STONE === null && SET_WA === null && !MATCH_RESIST && !MATCH_SPEC && !bookRange) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
+  if (SET_STONE === null && SET_WA === null && !MATCH_RESIST && !MATCH_SPEC && !bookRange && !STONE_FROM) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
   const out = encode(lines.join(t.eol) + t.eol);
   if (plain(out).toString('latin1').replace(/ +$/, '') !== lines.join(t.eol) + t.eol) throw new Error('round trip failed: ' + t.name);
   const file = path.join(workDir, 'files', t.name);
