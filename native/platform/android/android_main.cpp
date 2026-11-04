@@ -535,6 +535,49 @@ Java_com_ran_launcher_RanActivity_nativeBackspace(JNIEnv *, jclass) {
     RanIME_Backspace();
 }
 
+//  The edit buffer as the keyboard's field mirrors it (2026-11-02): its text,
+//  where the caret is, and moving the caret - so the keyboard's cursor slide
+//  moves the client's caret. One UTF-16 unit per buffer byte (shell_mobile.cpp
+//  RanIME_TextUtf8), so the indices need no conversion.
+extern "C" int  RanIME_TextUtf8(char *out, int cap);
+extern "C" int  RanIME_Caret(void);
+extern "C" void RanIME_SetCaret(int n);
+extern "C" int  RanIME_IsSecure(void);
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_ran_launcher_RanActivity_nativeImeText(JNIEnv *env, jclass) {
+    static char buf[4096];
+    RanIME_TextUtf8(buf, (int)sizeof(buf));
+    return env->NewStringUTF(buf);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_ran_launcher_RanActivity_nativeImeCaret(JNIEnv *, jclass) { return RanIME_Caret(); }
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_ran_launcher_RanActivity_nativeImeSetCaret(JNIEnv *, jclass, jint n) { RanIME_SetCaret((int)n); }
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_ran_launcher_RanActivity_nativeImeSecure(JNIEnv *, jclass) { return RanIME_IsSecure() ? JNI_TRUE : JNI_FALSE; }
+
+//  A long press on the box being typed into (UIEditBox.cpp RanUI_PasteHoldAt):
+//  RanActivity.ranShowPaste puts a small Paste button there. In window pixels,
+//  as the activity lays out its views; the client works in pixels / InputScale.
+extern "C" void RanPlat_ShowPasteMenu(int x, int y) {
+    if (!g_app) return;
+    JNIEnv *env = NULL;
+    if (g_app->activity->vm->AttachCurrentThread(&env, NULL) != JNI_OK || !env) return;
+    jobject act = g_app->activity->clazz;
+    jclass  cAct = env->GetObjectClass(act);
+    jmethodID m = env->GetMethodID(cAct, "ranShowPaste", "(II)V");
+    if (m) {
+        const float s = RanGL_InputScale();
+        env->CallVoidMethod(act, m, (jint)(x * s), (jint)(y * s));
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    g_app->activity->vm->DetachCurrentThread();
+}
+
 //  How much of the bottom of the window the soft keyboard covers, in
 //  thousandths of the window height.
 //
@@ -844,6 +887,20 @@ bool      g_pumpBlocking = false;
 pthread_t g_loopThread;
 bool      g_loopThreadSet = false;
 
+extern "C" void RanGL_FixTouch(int winW, int winH, float *x, float *y);
+
+//  One pointer of a motion event, in client pixels: panel pixels put back into
+//  the frame if the window changed size (RanGL_FixTouch), then divided by the
+//  input scale.
+static void touchPoint(AInputEvent *event, size_t i, float scale, int &ox, int &oy) {
+    float x = AMotionEvent_getX(event, i);
+    float y = AMotionEvent_getY(event, i);
+    if (g_app && g_app->window)
+        RanGL_FixTouch(ANativeWindow_getWidth(g_app->window), ANativeWindow_getHeight(g_app->window), &x, &y);
+    ox = (int)(x / scale);
+    oy = (int)(y / scale);
+}
+
 // Touch becomes a mouse button. The pointer is moved before the press because
 // the UI hit-tests using the current position and a touch delivers both at the
 // same instant.
@@ -877,16 +934,16 @@ int32_t onInputEvent(android_app *app, AInputEvent *event) {
         //  panel and the display scales it, so undo that here.
         //  Fractional on phones (RanGL_ChooseUIScale), so divide in float.
         const float scale = RanGL_InputScale();
-        const int x = (int)(AMotionEvent_getX(event, 0) / scale);
-        const int y = (int)(AMotionEvent_getY(event, 0) / scale);
+        int x = 0, y = 0;
+        touchPoint(event, 0, scale, x, y);
         //  Pointer ids keep fingers distinct, so the stick and a button can
         //  be held at once - which is the entire point of the layout.
         const int32_t idx = (AMotionEvent_getAction(event) &
                              AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >>
                             AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
         const int pid = (int)AMotionEvent_getPointerId(event, idx);
-        const int px = (int)(AMotionEvent_getX(event, idx) / scale);
-        const int py = (int)(AMotionEvent_getY(event, idx) / scale);
+        int px = 0, py = 0;
+        touchPoint(event, (size_t)idx, scale, px, py);
 
         switch (action) {
             case AMOTION_EVENT_ACTION_DOWN:
@@ -906,8 +963,8 @@ int32_t onInputEvent(android_app *app, AInputEvent *event) {
                 bool claimedAny = false;
                 for (size_t i = 0; i < count; ++i) {
                     const int mid = (int)AMotionEvent_getPointerId(event, i);
-                    const int mx = (int)(AMotionEvent_getX(event, i) / scale);
-                    const int my = (int)(AMotionEvent_getY(event, i) / scale);
+                    int mx = 0, my = 0;
+                    touchPoint(event, i, scale, mx, my);
                     if (RanTouch_PointerMove(mid, (float)mx, (float)my)) { claimedAny = true; continue; }
                     RanGesture_Move(mx, my);
                 }
@@ -1321,8 +1378,12 @@ extern "C" void android_main(android_app *app) {
                     LOGI("frame loop paced at %d Hz%s", s_hz,
                          s_hz ? "" : " (uncapped - pacehz 0)");
                 }
-                if (s_hz > 0) {
-                    const int64_t period = 1000 / s_hz;
+                //  The rest screen (SOURCE MobileRestScreen.h) draws a black
+                //  frame and a few lines of text: 10 Hz is plenty for that and
+                //  for the bot, which steps on elapsed time like everything else.
+                const int hz = RanTouch_IsRestMode() ? 10 : s_hz;
+                if (hz > 0) {
+                    const int64_t period = 1000 / hz;
                     const int64_t now = nowMs();
                     if (s_next && now < s_next) {
                         struct timespec ts;

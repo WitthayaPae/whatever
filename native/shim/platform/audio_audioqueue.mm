@@ -20,6 +20,9 @@
 #define LOGI(...) RanPlat_Log(RANLOG_INFO,  "RanAudio", __VA_ARGS__)
 #define LOGE(...) RanPlat_Log(RANLOG_ERROR, "RanAudio", __VA_ARGS__)
 
+extern "C" int  RanAudioSink_Start ( void );
+extern "C" void RanAudioSink_KeepAlive ( int on );
+
 namespace {
 
 //  The same 20 ms as Android, for the same reason: short enough that a sound
@@ -48,21 +51,68 @@ void queueCallback ( void *, AudioQueueRef q, AudioQueueBufferRef buf )
     AudioQueueEnqueueBuffer ( q, buf, 0, NULL );
 }
 
+void setGameCategory ()
+{
+    NSError *err = nil;
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback
+                                     withOptions:AVAudioSessionCategoryOptionMixWithOthers
+                                           error:&err];
+    if (err) LOGE ( "audio session category: %s", err.localizedDescription.UTF8String );
+}
+
+//  A call, Siri, an alarm or another app taking the audio stops the queue, and
+//  iOS does not start it again by itself: the game stayed silent until it was
+//  restarted. Started again when the interruption ends, and after the media
+//  server resets (the session and queue are dead then - built anew).
+void restartQueue ( const char *why )
+{
+    if (!g_queue) return;
+    NSError *err = nil;
+    [[AVAudioSession sharedInstance] setActive:YES error:&err];
+    const OSStatus st = AudioQueueStart ( g_queue, NULL );
+    LOGI ( "audio restarted (%s): session %s, queue %d", why,
+           err ? err.localizedDescription.UTF8String : "ok", (int) st );
+}
+
+void watchSession ()
+{
+    static bool s_watching = false;
+    if (s_watching) return;
+    s_watching = true;
+    NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+    [nc addObserverForName:AVAudioSessionInterruptionNotification object:nil queue:nil
+                usingBlock:^(NSNotification *n) {
+        const NSUInteger type = [n.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
+        if (type == AVAudioSessionInterruptionTypeBegan) { LOGI ( "audio interrupted" ); return; }
+        restartQueue ( "interruption ended" );
+    }];
+    [nc addObserverForName:AVAudioSessionMediaServicesWereResetNotification object:nil queue:nil
+                usingBlock:^(NSNotification *) {
+        LOGI ( "audio media services reset - rebuilding the queue" );
+        if (g_queue) { AudioQueueDispose ( g_queue, true ); g_queue = NULL; }
+        g_running = false;
+        RanAudioSink_Start ();
+        if (g_silent) RanAudioSink_KeepAlive ( 1 );
+    }];
+}
+
 } // namespace
 
 extern "C" int RanAudioSink_Start ( void )
 {
     if (g_running) return 1;
 
-    //  Ambient, and not mixable-with-others by default: this is a game, it owns
-    //  the output while it is in front. The category also decides what the
-    //  silent switch does - ambient respects it, which is what a player
-    //  expects from a game they muted with the hardware switch.
+    //  Playback, mixable with others (2026-11-01). It was Ambient, which goes
+    //  silent with the ring/silent switch or Control Center's silent mode:
+    //  players on iPhones and iPads reported no sound while the mixer was
+    //  measurably playing (crash-report logs, peak ~20000/32767 on iPad6,4,
+    //  iPad7,11, iPad11,2). The game's own sound settings and the volume
+    //  buttons still mute it; another app's music keeps playing under it.
     NSError *err = nil;
-    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryAmbient error:&err];
-    if (err) LOGE ( "audio session category: %s", err.localizedDescription.UTF8String );
+    setGameCategory ();
     [[AVAudioSession sharedInstance] setActive:YES error:&err];
     if (err) LOGE ( "audio session activate: %s", err.localizedDescription.UTF8String );
+    watchSession ();
 
     AudioStreamBasicDescription fmt;
     memset ( &fmt, 0, sizeof(fmt) );
@@ -109,7 +159,7 @@ extern "C" int RanAudioSink_Start ( void )
 //  In the background: keep the queue playing silence under the Playback
 //  category (mixable, so other apps' sound is untouched), which with
 //  UIBackgroundModes=audio keeps the process running. Back in front: the game's
-//  own Ambient category and its own sound again.
+//  the same category (setGameCategory) and its own sound again.
 extern "C" void RanAudioSink_KeepAlive ( int on )
 {
     if (!g_queue) return;
@@ -120,7 +170,7 @@ extern "C" void RanAudioSink_KeepAlive ( int on )
                                          withOptions:AVAudioSessionCategoryOptionMixWithOthers
                                                error:&err];
     } else {
-        [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryAmbient error:&err];
+        setGameCategory ();
         g_silent = false;
     }
     if (err) LOGE ( "audio keep-alive category: %s", err.localizedDescription.UTF8String );

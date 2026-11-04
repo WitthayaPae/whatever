@@ -19,6 +19,8 @@ int  RanUI_PointInControl ( int x, int y );
 //  the middle of the screen.
 int  RanUI_PointInDragControl ( int x, int y );
 void RanUI_EndEditIfOutside ( int x, int y );
+//  A hold on the box being typed into opens the paste menu (UIEditBox.cpp).
+int  RanUI_PasteHoldAt ( int x, int y );
 //  Drag-to-scroll: is there a list under the point, and move it by dy.
 int  RanUI_ScrollableAt ( int x, int y, int *parkX, int *parkY );
 int  RanUI_ScrollAt ( int x, int y, float dy );
@@ -168,6 +170,14 @@ extern "C" void RanGesture_Tick ( void ) {
     if (!g_gesture.active || g_gesture.pressed || g_gesture.scrolling) return;
     if (g_gesture.moved) return;        // a drag in progress, not a hold
     if (nowMs() - g_gesture.downMs < kLongPressMs) return;
+    //  Typing, and the hold is on the box: the paste menu, and nothing else -
+    //  no right click, and the release that follows is no tap.
+    if (g_imeActive && RanUI_PasteHoldAt ( g_gesture.x, g_gesture.y )) {
+        RanPlat_Log ( RANLOG_INFO, "RanTouch", "GESTURE paste menu at (%d,%d)", g_gesture.x, g_gesture.y );
+        g_gesture.active  = false;
+        g_gesture.pressed = false;
+        return;
+    }
     gesturePress ( 1 );                 // right
 }
 

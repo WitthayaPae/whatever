@@ -24,8 +24,8 @@ def hud():
     cells = [
         A.button('sword', N),            clear,                         A.potion_slot(None, None, N),
         A.button('auto', N),             A.button('auto', N, lit=True),
-        A.button('pk', N),               A.button('pk', N, lit=True),
-        A.button('camera', N),           A.button('camera', N, lit=True),  A.button('pick_b', N),
+        A.text_button('PK', N),          A.text_button('PK', N, True),   # was crossed swords (user, 2026-11-02)
+        A.button('trophy', N),           A.button('trophy', N, lit=True),  A.button('pick_b', N),   # 7/8: event scoreboard (was camera lock, removed 2026-11-03)
         A.button('bike', N),             A.button('grid', N),
         A.text_button('F1', N), A.text_button('F2', N), A.text_button('F3', N), A.text_button('F4', N),
         A.text_button('F1', N, True), A.text_button('F2', N, True), A.text_button('F3', N, True), A.text_button('F4', N, True),
@@ -35,6 +35,7 @@ def hud():
         A.skill_frame(None, N),          # 26: skill-slot ring
         A.button('bot', N),              # 27: auto-hunt
         A.button('bot', N, lit=True),    # 28: auto-hunt, running
+        A.button('chat_npc', N),         # 29: talk to NPC (2026-11-05; player balloons keep 22)
     ]
     W, H = N * 5, N * 6
     sheet = Image.new('RGBA', (W, H), (0, 0, 0, 0))

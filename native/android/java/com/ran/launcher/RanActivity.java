@@ -21,6 +21,13 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
+import android.widget.PopupWindow;
+import android.widget.TextView;
+import android.content.ClipboardManager;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.graphics.drawable.GradientDrawable;
+import android.view.Gravity;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -78,6 +85,14 @@ public class RanActivity extends NativeActivity {
     /*  Return, for sending a chat line. The soft keyboard's action key used to
      *  just close the keyboard, so anything typed was dropped on the floor. */
     private static native void nativeEnter();
+    /*  The client's edit buffer, which the mirror below starts from and follows
+     *  (2026-11-02): its text, its caret, moving the caret, and whether the box
+     *  hides what is typed. One UTF-16 unit per buffer character, so an index
+     *  here is an index there.                                               */
+    private static native String  nativeImeText();
+    private static native int     nativeImeCaret();
+    private static native void    nativeImeSetCaret(int n);
+    private static native boolean nativeImeSecure();
 
     /*  A game is running in this process. RanLauncher reads it: the app icon
      *  starts the launcher again whenever the task's root (the launcher,
@@ -456,6 +471,73 @@ public class RanActivity extends NativeActivity {
         return px;
     }
 
+    /*  Paste, from a long press on the box being typed into (2026-11-02, the
+     *  user: "long press on the input text", and paste only - no copy).
+     *
+     *  A small button above the finger, in the game's dark style. The clipboard
+     *  is read only when it is tapped - showing the button asks only whether
+     *  there is text, which Android does not count as reading it. What it reads
+     *  goes in through the mirror like typed text, so the client's limit and
+     *  CP874 rules apply to it. Not focusable, so the keyboard stays up; gone
+     *  on a tap outside it, or after five seconds.                          */
+    private PopupWindow mPaste;
+
+    public void ranShowPaste(final int px, final int py) {
+        runOnUiThread(new Runnable() { public void run() {
+            if (mConn == null || !mAttached) return;
+            final ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip()) return;
+            final ClipDescription d = cm.getPrimaryClipDescription();
+            if (d == null || !(d.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) || d.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML))) return;
+            if (mPaste != null) { mPaste.dismiss(); mPaste = null; }
+
+            final float dp = getResources().getDisplayMetrics().density;
+            final TextView b = new TextView(RanActivity.this);
+            b.setText("วาง");                 //  "paste"
+            b.setTextColor(0xFFECECEA);
+            b.setTextSize(16);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding((int)(20 * dp), (int)(10 * dp), (int)(20 * dp), (int)(10 * dp));
+            final GradientDrawable bg = new GradientDrawable();
+            bg.setColor(0xF0202326);
+            bg.setStroke((int)Math.max(1, dp), 0x66FFFFFF);
+            bg.setCornerRadius(10 * dp);
+            b.setBackground(bg);
+
+            final PopupWindow pw = new PopupWindow(b, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, false);
+            pw.setOutsideTouchable(true);
+            pw.setFocusable(false);
+            pw.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
+            b.setOnClickListener(new View.OnClickListener() { public void onClick(View v) {
+                pw.dismiss();
+                if (mPaste == pw) mPaste = null;
+                final ClipData clip = cm.getPrimaryClip();
+                if (clip == null || clip.getItemCount() == 0) return;
+                final CharSequence t = clip.getItemAt(0).coerceToText(RanActivity.this);
+                if (t == null || t.length() == 0) return;
+                final RanInputConnection c = mConn;
+                if (c != null) c.type(t.toString());
+            }});
+            b.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+            final int w = b.getMeasuredWidth(), h = b.getMeasuredHeight();
+            int x = px - w / 2, y = py - h - (int)(24 * dp);
+            final View root = getWindow().getDecorView();
+            if (y < 0) y = py + (int)(24 * dp);
+            if (x < 0) x = 0;
+            if (x + w > root.getWidth()) x = Math.max(0, root.getWidth() - w);
+            try {
+                pw.showAtLocation(root, Gravity.NO_GRAVITY, x, y);
+            } catch (Exception e) {
+                Log.w(TAG, "paste button: " + e);
+                return;
+            }
+            mPaste = pw;
+            b.postDelayed(new Runnable() { public void run() {
+                if (mPaste == pw) { pw.dismiss(); mPaste = null; }
+            }}, 5000);
+        }});
+    }
+
     public void ranHideKeyboard() {
         runOnUiThread(new Runnable() { public void run() {
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -463,6 +545,7 @@ public class RanActivity extends NativeActivity {
             mIme.clearFocus();
             mIme.setVisibility(View.INVISIBLE);
             mConn = null;
+            if (mPaste != null) { mPaste.dismiss(); mPaste = null; }
             detach();
         }});
     }
@@ -514,17 +597,26 @@ public class RanActivity extends NativeActivity {
         }
 
         @Override public InputConnection onCreateInputConnection(EditorInfo out) {
+            /*  A password box asks for a password keyboard: nothing learned,
+             *  nothing suggested, nothing offered to copy.                     */
+            final boolean secure = nativeImeSecure();
             out.inputType = mNumeric
-                ? (InputType.TYPE_CLASS_NUMBER)
+                ? (secure ? (InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD)
+                          : InputType.TYPE_CLASS_NUMBER)
+                : secure
+                ? (InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD)
                 : (InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
             /*  No fullscreen editor in landscape: it would cover the game with
              *  the IME's own text field, and the client is already drawing one. */
             out.imeOptions = EditorInfo.IME_ACTION_DONE
                            | EditorInfo.IME_FLAG_NO_FULLSCREEN
                            | EditorInfo.IME_FLAG_NO_EXTRACT_UI;
-            out.initialSelStart = 0;
-            out.initialSelEnd = 0;
+            /*  The field starts as the box: its text and its caret, so the
+             *  keyboard's cursor slide has text to move through.             */
             mConn = new RanInputConnection(this);
+            final int caret = mConn.seed(nativeImeText(), nativeImeCaret());
+            out.initialSelStart = caret;
+            out.initialSelEnd = caret;
             return mConn;
         }
     }
@@ -652,18 +744,72 @@ public class RanActivity extends NativeActivity {
             report();
         }
 
+        /*  Start from the box's own text and caret (2026-11-02). The mirror used
+         *  to start empty, so the text already in the box was out of the
+         *  keyboard's reach and its cursor slide had nothing to move through.
+         *  Returns the caret as placed.                                       */
+        int seed(String text, int caret) {
+            if (text == null) text = "";
+            mText.clear();
+            mText.clearSpans();
+            mText.append(text);
+            if (caret < 0 || caret > text.length()) caret = text.length();
+            Selection.setSelection(mText, caret);
+            mSent = text;
+            return caret;
+        }
+
+        /*  The keyboard's change, applied where it happened, then the caret put
+         *  where the keyboard's cursor is.
+         *
+         *  mSent is what the client held after the last sync. While the client
+         *  still holds exactly that, one buffer character is one UTF-16 unit of
+         *  mSent, so the edit lands by index: caret to the end of the changed
+         *  span, backspace over it, type the new text. If the client changed the
+         *  text itself meanwhile (a line sent, a macro), only the keyboard's
+         *  own change goes in, at the client's caret, as it always did. Either
+         *  way the mirror then becomes the client's text, so what the client
+         *  refused (past the box's limit, a character CP874 cannot hold) does
+         *  not linger in the keyboard.                                        */
         private void sync() {
             final String now = mText.toString();
+            final String client = nativeImeText();
             int p = 0;
             final int n = Math.min(now.length(), mSent.length());
             while (p < n && now.charAt(p) == mSent.charAt(p)) p++;
             if (p > 0 && Character.isHighSurrogate(now.charAt(p - 1))) p--;
 
-            final int dels = clientChars(mSent.substring(p));
-            for (int i = 0; i < dels; i++) nativeBackspace();
-            final String add = now.substring(p);
-            if (add.length() > 0) nativeCommitText(add);
-            mSent = now;
+            if (client.equals(mSent)) {
+                int s = 0;
+                while (s < n - p && now.charAt(now.length() - 1 - s) == mSent.charAt(mSent.length() - 1 - s)) s++;
+                if (s > 0 && now.length() - s < now.length() && Character.isLowSurrogate(now.charAt(now.length() - s))) s--;
+                final int oldEnd = mSent.length() - s;
+                if (oldEnd - p > 0 || p < now.length() - s) {
+                    nativeImeSetCaret(oldEnd);
+                    for (int i = p; i < oldEnd; i++) nativeBackspace();
+                    final String add = now.substring(p, now.length() - s);
+                    if (add.length() > 0) nativeCommitText(add);
+                }
+            } else {
+                final int dels = clientChars(mSent.substring(p));
+                for (int i = 0; i < dels; i++) nativeBackspace();
+                final String add = now.substring(p);
+                if (add.length() > 0) nativeCommitText(add);
+            }
+
+            final String after = nativeImeText();
+            if (after.equals(now)) {
+                int sel = Selection.getSelectionStart(mText);
+                if (sel < 0 || sel > now.length()) sel = now.length();
+                nativeImeSetCaret(sel);
+                mSent = now;
+            } else {
+                final int c = nativeImeCaret();
+                mText.clearSpans();
+                mText.replace(0, mText.length(), after);
+                Selection.setSelection(mText, Math.max(0, Math.min(c, after.length())));
+                mSent = after;
+            }
             report();
         }
 
@@ -688,6 +834,13 @@ public class RanActivity extends NativeActivity {
         for (int i = 0; i < s.length(); ) {
             final int cp = s.codePointAt(i);
             i += Character.charCount(cp);
+            /*  Control characters as RanIME_InsertUtf8 treats them: a line break
+             *  or tab is one space (CR LF one), the rest are dropped.         */
+            if (cp < 0x20 || cp == 0x7F) {
+                if (cp == '\r' && i < s.length() && s.charAt(i) == '\n') continue;
+                if (cp == '\n' || cp == '\r' || cp == '\t') n++;
+                continue;
+            }
             if (cp < 0x80 || (cp >= 0x0E01 && cp <= 0x0E5B)) { n++; continue; }
             switch (cp) {
                 case 0x20AC: case 0x00A0: case 0x2026: case 0x2018: case 0x2019:

@@ -37,7 +37,7 @@ if (!dataDir || !workDir) { console.error('usage: node crow-qt-leader.js <CLIENT
 
 const RATE = 3.3;   // percent per kill: about one leader box per 30 kills (user, 2026-10-18; the q_002/q_003 tables had 0.5)
 //  mob -> leader box (item main/sub) and leader, or a ready table when the mob has none.
-const PLAN = [
+const PLAN_ALL = [
   { mobs: ['2/0', '2/1'],   box: '9,11', leader: '2/2 Hime Leader' },
   { mobs: ['19/0', '19/1'], box: '9,19', leader: '19/2 Fancer Leader' },
   { mobs: ['4/1'],          box: '9,12', leader: '4/2 Gibbs Leader' },
@@ -50,6 +50,13 @@ const PLAN = [
   { mobs: ['28/0'],         box: '9,23', leader: '28/1 Obasan' },
   { mobs: ['7/0', '7/1', '7/2'], box: '9,14', leader: '7/7 Blood Robber' },
 ];
+//  --plan=vulgar (2026-10-31): Vulgar Leader had no box at all; 9/47 was made for it
+//  (tools/event-exchange/mk_vulgarbox.js). Run on data that already has the other leaders.
+const PLAN_VULGAR = [
+  { mobs: ['0/0', '0/1'], box: '9,47', leader: '0/22 Vulgar Leader' },
+];
+const PLAN = args.includes('--plan=vulgar') ? PLAN_VULGAR : PLAN_ALL;
+const STAMP = args.includes('--plan=vulgar') ? '2026-10-31' : '2026-10-18';
 
 const plain = (b) => (gamecrypt.isEncoded(b) ? gamecrypt.decode(b) : b);
 function encode(text) {
@@ -111,7 +118,7 @@ for (const p of PLAN) {
     const sum = lines.reduce((s, l) => s + qtParse(l).rate, 0) + RATE;
     if (lines.length + 1 > 20 || sum > 100) throw new Error(`${src} + leader exceeds the limits`);
     const table = src.replace(/\.genitem$/i, '').toLowerCase() + '_ldr' + p.leader.split(' ')[0].replace('/', '_') + '.genitem';
-    const text = `// ${src} + ${p.leader} summon box at ${RATE}% (crow-qt-leader.js, 2026-10-18)\r\n` +
+    const text = `// ${src} + ${p.leader} summon box at ${RATE}% (crow-qt-leader.js, ${STAMP})\r\n` +
       lines.join('\r\n') + `\r\nQTITEM\t${p.box}\t${RATE}\t//MobGen ${p.leader}\r\n`;
     if (newTables.has(table) && newTables.get(table) !== text) throw new Error('two texts for ' + table);
     newTables.set(table, text);

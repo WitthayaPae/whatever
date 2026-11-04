@@ -41,6 +41,7 @@ int  RanTouch_PointerDown ( int id, float x, float y );
 int  RanTouch_PointerMove ( int id, float x, float y );
 int  RanTouch_PointerUp ( int id, float x, float y );
 void RanTouch_Frame ( float elapsedSeconds );
+int  RanTouch_IsRestMode ( void );
 
 void RanInput_PointerMove ( int x, int y );
 //  The touch-to-mouse gesture layer, shared with Android - long press for
@@ -62,6 +63,12 @@ void RanInput_KeyTap ( int scanCode );
 //  simply called.
 void RanIME_InsertUtf8 ( const char *utf8 );
 void RanIME_Backspace ( void );
+//  The buffer as the field mirrors it (shell_mobile.cpp): one UTF-16 unit per
+//  buffer character, so a field index is a buffer index.
+int  RanIME_TextUtf8 ( char *out, int cap );
+int  RanIME_Caret ( void );
+void RanIME_SetCaret ( int n );
+int  RanIME_IsSecure ( void );
 
 //  The audio sink, so the app delegate can stop the sound when it goes away -
 //  the mixer runs on the audio callback thread and would otherwise play on
@@ -159,6 +166,9 @@ static CGRect RanIOS_GameFrame ( UIView *root )
 //  The keyboard responder - see the keyboard section further down for why the
 //  client types into a UITextField and not into the view controller itself.
 @interface RanIMEField : UITextField <UITextFieldDelegate>
+//  Make the field the client's buffer again - its text and caret - if they
+//  differ (2026-11-02: the field mirrors the buffer).
+- (void)followClient;
 @end
 
 @interface RanViewController : UIViewController
@@ -170,6 +180,7 @@ static CGRect RanIOS_GameFrame ( UIView *root )
 @property (nonatomic, assign) BOOL           bootFailed;
 @property (nonatomic, assign) CFTimeInterval lastTick;
 @property (nonatomic, assign) BOOL           pacedForHeat;
+@property (nonatomic, assign) BOOL           pacedForRest;  //  the rest screen's 10 Hz
 - (void)ensureImeField;
 @end
 
@@ -313,9 +324,42 @@ static CGRect RanIOS_GameFrame ( UIView *root )
 //  of world-eff apparently costing three times its parent, which is how the
 //  measurement was caught. At 30 Hz the GPU sits at 28% and every section is
 //  inside the noise, so the attribution cannot be done there either.
+//  The rest screen (SOURCE MobileRestScreen.h): 10 Hz while it is up - a
+//  black frame and a few lines of text, and the game steps on elapsed time -
+//  then back to whatever the heat and the switches say, as android_main does.
+//  Checked every tick, so the game comes back at full rate on the same frame.
+- (void)updateRestPacing
+{
+    if (!self.link) return;
+    const BOOL bRest = RanTouch_IsRestMode () ? YES : NO;
+    if (bRest == self.pacedForRest) return;
+    self.pacedForRest = bRest;
+    if (bRest) {
+        if (@available(iOS 15.0, *)) {
+            self.link.preferredFrameRateRange = CAFrameRateRangeMake ( 10, 10, 10 );
+        } else {
+            self.link.preferredFramesPerSecond = 10;
+        }
+        RanPlat_Log ( RANLOG_INFO, "RanPace", "rest screen: frame loop at 10 Hz" );
+        return;
+    }
+    //  Back to the display rate (or the pace30 switch), then let the heat
+    //  decide again from scratch.
+    const BOOL b30 = RanPlat_DiagExists ( "pace30" ) ? YES : NO;
+    if (@available(iOS 15.0, *)) {
+        self.link.preferredFrameRateRange = b30 ? CAFrameRateRangeMake ( 30, 30, 30 ) : CAFrameRateRangeMake ( 30, 60, 60 );
+    } else {
+        self.link.preferredFramesPerSecond = b30 ? 30 : 0;
+    }
+    self.pacedForHeat = NO;
+    RanPlat_Log ( RANLOG_INFO, "RanPace", "rest screen closed: frame loop at %s", b30 ? "30 Hz" : "the display rate" );
+    [self updateThermalPacing];
+}
+
 - (void)updateThermalPacing
 {
     if (!self.link) return;
+    if (self.pacedForRest) return;      //  the rest screen holds 10 Hz
     if (RanPlat_DiagExists ( "pace30" )) return;
 
     //  Setting the switch while the clamp is already on has to LIFT it, not
@@ -363,6 +407,7 @@ static CGRect RanIOS_GameFrame ( UIView *root )
     }
 
     RanSampler_Tick ();     //  ran_ios_sampler.mm; idle unless the "sampler" diag is set
+    [self updateRestPacing];
     const CFTimeInterval now = link.timestamp;
     const float dt = self.lastTick > 0 ? (float)(now - self.lastTick) : 0.0f;
     self.lastTick = now;
@@ -480,6 +525,11 @@ static CGRect RanIOS_GameFrame ( UIView *root )
     if (!RanApp_Frame ()) return;
 
     //  RanApp_Frame presents through RanGL_Present, as it does on Android.
+
+    //  The client may have changed the text itself this frame (a chat line
+    //  sent and cleared, a macro): the field follows, so the keyboard's cursor
+    //  never walks text the box no longer has.
+    if (self.imeField.isFirstResponder) [self.imeField followClient];
 }
 
 - (void)keyboardFrame:(NSNotification *)n
@@ -617,19 +667,55 @@ static CGRect RanIOS_GameFrame ( UIView *root )
 
 @end
 
-//  One character always sits in the field. iOS delivers no deletion to an
-//  already-empty field, and this field is always empty of meaning, so without
-//  the sentinel a backspace would never arrive at all.
-static NSString * const kRanImeSentinel = @"​";
+//  The field is the client's buffer (2026-11-02).
+//
+//  It used to hold one invisible sentinel character and refuse every edit, so
+//  there was no text for the space-bar trackpad to move through (the user:
+//  "the spacebar swipe ... should work same as it is") and no field for a
+//  long-press Paste. Now it holds the buffer's own text with the caret where
+//  the client's caret is. Every edit still becomes a client call and is still
+//  refused here; the field is then set to what the client kept, so the client
+//  stays the one owner of the text, and what it refused (past the box's limit,
+//  a character CP874 cannot hold) does not linger on screen-less.
+//
+//  One buffer character is one UTF-16 unit in the field (RanIME_TextUtf8), so a
+//  field range IS a buffer range.
+
+//  Set while the field is changed from here, so the selection callback that
+//  change raises is not taken for the keyboard moving its cursor.
+static BOOL g_imeApplying = NO;
+
+static NSString *RanIME_ClientText ( void )
+{
+    static char buf[4096];
+    RanIME_TextUtf8 ( buf, (int)sizeof(buf) );
+    NSString *s = [NSString stringWithUTF8String:buf];
+    return s ? s : @"";
+}
 
 @implementation RanIMEField
+
+- (void)followClient
+{
+    if (self.markedTextRange) return;            //  mid-composition: leave it to finish
+    NSString *t = RanIME_ClientText ();
+    const NSInteger caret = RanIME_Caret ();
+    UITextRange *sel = self.selectedTextRange;
+    const NSInteger at = sel ? [self offsetFromPosition:self.beginningOfDocument toPosition:sel.start] : -1;
+    if ([self.text isEqualToString:t] && at == caret) return;
+    g_imeApplying = YES;
+    if (![self.text isEqualToString:t]) self.text = t;
+    UITextPosition *p = [self positionFromPosition:self.beginningOfDocument offset:MIN ( MAX ( caret, 0 ), (NSInteger)t.length )];
+    if (p) self.selectedTextRange = [self textRangeFromPosition:p toPosition:p];
+    g_imeApplying = NO;
+}
 
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
     if (!self) return nil;
     self.delegate               = self;
-    self.text                   = kRanImeSentinel;
+    self.text                   = @"";
     self.autocorrectionType     = UITextAutocorrectionTypeNo;
     self.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.spellCheckingType      = UITextSpellCheckingTypeNo;
@@ -644,20 +730,55 @@ static NSString * const kRanImeSentinel = @"​";
     return self;
 }
 
-//  Nothing is ever committed to the field: every edit becomes a client call and
-//  is then refused, which leaves the sentinel in place for the next backspace.
+//  Every edit - a key, a deletion, a Paste - becomes client calls at the place
+//  it happened, and is refused here; the field is then made the client's text.
 - (BOOL)              textField:(UITextField *)field
   shouldChangeCharactersInRange:(NSRange)range
               replacementString:(NSString *)string
 {
-    //  The same call the Android IME's deleteSurroundingText makes, not a
-    //  DIK_BACK key: the client's edit buffer holds UTF-8 and a backspace has
-    //  to remove one whole character, which only RanIME_Backspace knows how.
-    if (string.length == 0) { RanIME_Backspace (); return NO; }
     if ([string isEqualToString:@"\n"]) { RanInput_KeyTap ( 0x1C ); return NO; }
-    RanIME_InsertUtf8 ( string.UTF8String );
+
+    NSString *client = RanIME_ClientText ();
+    if ([field.text isEqualToString:client]) {
+        //  In step: caret to the end of the replaced span, a backspace for each
+        //  character of it (RanIME_Backspace removes one buffer character),
+        //  then the new text.
+        const NSUInteger end = MIN ( range.location + range.length, client.length );
+        const NSUInteger start = MIN ( range.location, end );
+        RanIME_SetCaret ( (int)end );
+        for (NSUInteger i = start; i < end; ++i) RanIME_Backspace ();
+    } else {
+        //  The client changed the text itself since the field last followed it:
+        //  only the keyboard's own change, at the client's caret.
+        for (NSUInteger i = 0; i < range.length; ++i) RanIME_Backspace ();
+    }
+    if (string.length) RanIME_InsertUtf8 ( string.UTF8String );
+    [self followClient];
     return NO;
 }
+
+//  The keyboard moved its cursor - the space-bar trackpad - and the client's
+//  caret follows, so the next key goes in there. (A selection keeps its start:
+//  the client has a caret, not a selection.)
+- (void)textFieldDidChangeSelection:(UITextField *)field
+{
+    if (g_imeApplying || field.markedTextRange) return;
+    UITextRange *sel = field.selectedTextRange;
+    if (!sel) return;
+    RanIME_SetCaret ( (int)[field offsetFromPosition:field.beginningOfDocument toPosition:sel.start] );
+}
+
+//  Paste and nothing else (the user, 2026-11-02: "no copy text in our app, just
+//  paste allow"). No copy, cut, select, look up, share or the rest; and Paste
+//  only while there is text to paste. The menu is the system's own, so iOS does
+//  not ask "Allow Paste?" - the player chose Paste.
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender
+{
+    if (action == @selector(paste:)) return UIPasteboard.generalPasteboard.hasStrings;
+    return NO;
+}
+- (void)copy:(id)sender {}
+- (void)cut:(id)sender {}
 
 //  Return sends the line: the client wants the key down on a poll plus the
 //  latch RanInput_TakeEnter reports, and BasicChatRightBody needs both before
@@ -679,7 +800,47 @@ extern "C" void RanIME_Show ( void )
     RanGesture_SetImeActive ( 1 );
     dispatch_async ( dispatch_get_main_queue(), ^{
         [g_vc ensureImeField];
-        [g_vc.imeField becomeFirstResponder];
+        RanIMEField *f = g_vc.imeField;
+        //  A password box gets a secure field: no keyboard learns it, and
+        //  nothing can be copied out of it.
+        const BOOL secure = RanIME_IsSecure () ? YES : NO;
+        if (f.secureTextEntry != secure) {
+            f.secureTextEntry = secure;
+            if (f.isFirstResponder) [f reloadInputViews];
+        }
+        [f followClient];
+        [f becomeFirstResponder];
+    } );
+}
+
+//  The paste menu, from a long press on the box being typed into (UIEditBox.cpp
+//  RanUI_PasteHoldAt). The system's edit menu on the field, at the finger: the
+//  field's canPerformAction leaves Paste as its only entry. (x, y) are client
+//  units: input scale to panel pixels, the layer scale to points.
+static id g_editMenu = nil;                     //  UIEditMenuInteraction, iOS 16+
+
+extern "C" void RanPlat_ShowPasteMenu ( int x, int y )
+{
+    dispatch_async ( dispatch_get_main_queue(), ^{
+        RanIMEField *f = g_vc.imeField;
+        if (!g_vc || !f || !f.isFirstResponder) return;
+        if (!UIPasteboard.generalPasteboard.hasStrings) return;
+        const CGFloat is = RanGL_InputScale() > 0 ? (CGFloat)RanGL_InputScale() : 1.0f;
+        const CGFloat ls = g_vc.glView.layer.contentsScale > 0 ? g_vc.glView.layer.contentsScale : 1.0f;
+        const CGPoint inGame = CGPointMake ( (CGFloat)x * is / ls, (CGFloat)y * is / ls );
+        const CGPoint inField = [g_vc.glView convertPoint:inGame toView:f];
+        if (@available(iOS 16.0, *)) {
+            if (!g_editMenu) {
+                UIEditMenuInteraction *m = [[UIEditMenuInteraction alloc] initWithDelegate:nil];
+                [f addInteraction:m];
+                g_editMenu = m;
+            }
+            UIEditMenuConfiguration *c = [UIEditMenuConfiguration configurationWithIdentifier:nil sourcePoint:inField];
+            [(UIEditMenuInteraction *)g_editMenu presentEditMenuWithConfiguration:c];
+        } else {
+            UIMenuController *mc = UIMenuController.sharedMenuController;
+            [mc showMenuFromView:f rect:CGRectMake ( inField.x - 1, inField.y - 1, 2, 2 )];
+        }
     } );
 }
 

@@ -52,6 +52,9 @@ int  RanGL_LogicalHeight(void);
 float RanGL_UIScale(void);
 //  Panel pixels per logical pixel: touch events arrive in panel pixels.
 float RanGL_InputScale(void);
+//  Android: a touch in the window's current pixels, into the frame's (the
+//  window may have changed size since the surface was made).
+void RanGL_FixTouch(int winW, int winH, float *x, float *y);
 
 //  Panel pixels per logical pixel, shared by the Android and iOS contexts.
 //

@@ -98,7 +98,12 @@ enum { kGrpStick, kGrpAttack, kGrpSkill, kGrpPage, kGrpAuto, kGrpPK,
        //  The nearby-players button (2026-10-20): in a crowd, one button that
        //  lists the players close by, instead of a balloon on every name. Saved
        //  after the talk button, in the same tail block.
-       kGrpNear, kGrpCount };
+       kGrpNear,
+       //  The event scoreboard button (2026-11-05, the user: "F11 take out of
+       //  the setting ... create new btn show when in the map event ... toggle
+       //  and edit like other hud"). Saved after the pick-up anchor, the last
+       //  value an older file carries: 4 floats and its hidden flag.
+       kGrpEvent, kGrpCount };
 //  The groups the layout file carried before the talk button: every block
 //  sized by group count is this many long, and the talk group comes last.
 const int kGrpFile = kGrpTalk;
@@ -179,6 +184,25 @@ WinBox    g_winBox[kWinMax] = { };
 int       g_winCount = 0;
 SlotAdj   g_winAdj[kWinMax];
 SlotAdj   g_winBefore[kWinMax];
+//  The kill feed (window slot 6, 2026-11-04) is not sized: the user wanted
+//  fewer rows, not bigger ones ("instead of showing 10 line we can edit it to
+//  2-3"). Its size value holds the row count as rows / 10, so the saved 1.0
+//  of every existing layout is the full 10 rows, and the editor's - and + step
+//  one row each.
+const int kWinKillFeed = 6;
+const int kKillFeedRowsMax = 10;
+int killFeedRows() {
+    const int n = (int)(g_winAdj[kWinKillFeed].scale * (float)kKillFeedRowsMax + 0.5f);
+    return n < 1 ? 1 : (n > kKillFeedRowsMax ? kKillFeedRowsMax : n);
+}
+bool editingKillFeed();
+//  The chat box on the screen (window slot 7, 2026-11-05): its height only.
+//  The size value is the height against the designed 210, 60% to 150%
+//  (CBasicChat::MobileNewLayout keeps at least three lines); it is not moved
+//  from here - the client keeps it on the bottom edge, over the keyboard.
+const int   kWinChat = 7;
+const float kChatMin = 0.6f, kChatMax = 1.5f;
+bool editingChat();
 
 //  Taken off the HUD by the player (the user, 2026-10-09: "let the player
 //  remove buttons in the HUD editor"). A hidden control is not drawn and takes
@@ -266,6 +290,12 @@ const int kBtnFist = 12;
 const int kBtnBot = 13;
 bool  g_botShow = false;
 float g_botLeft = 0.0f;			//  0..1 of today's allowance left
+//  Tap or hold (2026-11-01): a tap starts or stops the bot, a hold opens its
+//  settings. The tap is sent on release, and only when the hold did not fire.
+const float kBotHoldSec = 0.5f;
+float g_botHoldT = -1.0f;			//  seconds held, -1 when not held
+bool  g_botHoldFired = false;
+bool  g_botHoldEdge = false;		//  read by RanTouch_ConsumeBotHold
 bool buttonHidden(int slot);
 
 //  The ride button is placed by the client, not by layout(): it lives beside
@@ -368,6 +398,16 @@ bool g_nearShow = false;
 int  g_nearPtr  = -1;
 bool g_nearDown = false;
 bool g_nearEdge = false;
+
+//  The event scoreboard button: shown by the client on an event map, lit
+//  while the scoreboard is open; a press is F11 (RanTouch_ConsumeEvent).
+//  Placed at the top of the right-hand column, one step above the menu.
+bool  g_evtShow = false;
+bool  g_evtLit  = false;
+int   g_evtPtr  = -1;
+bool  g_evtDown = false;
+bool  g_evtEdge = false;
+float g_evtBaseX = 0.0f, g_evtBaseY = 0.0f, g_evtBaseR = 0.0f;
 
 //  The balloons, placed by the client each frame at the end of each near
 //  player's name plate (surface pixels). id is the player's.
@@ -1191,7 +1231,8 @@ void layout() {
     //  object as everything else the thumb works, and the HUD editor can move
     //  it like the rest.
     g_buttons[8].centre.x = arrowX;
-    g_buttons[8].centre.y = attackY - g_unit * 3.40f;
+    //  In the camera lock's old place (2.55, it was 3.40) so the column has no gap.
+    g_buttons[8].centre.y = attackY - g_unit * 2.55f;
     g_buttons[8].radius   = modeR;
     g_buttons[8].slot     = kSlotMenu;
 
@@ -1199,6 +1240,12 @@ void layout() {
     g_buttons[kBtnBot].centre.y = attackY - g_unit * 0.45f;
     g_buttons[kBtnBot].radius   = modeR;
     g_buttons[kBtnBot].slot     = kSlotBot;
+
+    //  The event scoreboard button: the next step up the column, above the
+    //  menu (the column is 0.70 apart: 0.45 bot ... 2.55 menu, 3.25 this).
+    g_evtBaseX = arrowX;
+    g_evtBaseY = attackY - g_unit * 3.25f;
+    g_evtBaseR = modeR;
 
     //  Pick-up is placed by placePickup(), after the arc is known.
     g_buttons[5].slot     = kSlotPickup;
@@ -1340,7 +1387,12 @@ void placePickup() {
     b.slot = kSlotPickup;
     float cx, cy, r;
     if (g_pickNewHome && g_skillCircleCount > 0) {
-        const Vec2 at = g_buttons[0].centre;
+        //  Measured from the attack button as DESIGNED, the place the skill arc
+        //  hangs off (RanTouch_GetSkillArc). Taken from the live button, moving
+        //  the attack button in the HUD editor moved this one too (the user,
+        //  2026-11-05: "I edit the btn normal attack why it effect the pickup").
+        Vec2 at = g_buttons[0].centre;
+        if (g_attackBaseR > 0.0f) { at.x = g_attackBaseX; at.y = g_attackBaseY; }
         float sx = 0.0f, sy = 0.0f, outer = 0.0f, rs = 0.0f;
         for (int i = 0; i < g_skillCircleCount; ++i) {
             const SkillCircle &c = g_skillCircles[i];
@@ -1409,9 +1461,40 @@ bool hit(const Vec2 &c, float r, float x, float y) {
 //  that sits in the way, and that is a group of its own.
 //
 bool   g_edit = false;
+
+//  Photo mode (2026-10-31): the client's interface is off (PC F12) and the
+//  pad draws one thing, a close button top right. Every other finger is the
+//  world's - drag turns the camera, two fingers zoom.
+bool   g_photo = false;
+int    g_photoPtr = -1;
+bool   g_photoDown = false;
+bool   g_photoExit = false;
+//  Its emote button, under the X (2026-10-31): opens the client's emote list,
+//  which the game stage runs alone while the interface is off.
+int    g_photoEmotePtr = -1;
+bool   g_photoEmoteDown = false;
+bool   g_photoEmoteEdge = false;
+bool   g_photoEmoteOpen = false;     //  the list is up: the button lit
+//  Its names button, under the emote one (2026-10-31, the user: "some user
+//  wanted to hide or show the name"): the client keeps the choice and tells
+//  the pad, which lights the button while names are shown.
+int    g_photoNamesPtr = -1;
+bool   g_photoNamesDown = false;
+bool   g_photoNamesEdge = false;
+bool   g_photoNamesOn = false;
+
+//  Rest screen (2026-10-31, SOURCE MobileRestScreen.h): the client draws a
+//  black screen while the bot runs. Every finger is ours, so nothing reaches
+//  the game, and the first one to lift wakes it (RanTouch_ConsumeRestExit).
+//  The platform loops read RanTouch_IsRestMode to slow the frame rate.
+bool   g_rest = false;
+bool   g_restDown = false;
+bool   g_restExit = false;
 bool   g_editBar = false;           //  dragging the editor's own toolbar
 int    g_editSel = -1;              //  selected group, -1 none
 int    g_editSlot = -1;             //  which skill slot, when the group is the arc
+bool editingKillFeed() { return g_editSel == kGrpWin && g_editSlot == kWinKillFeed; }
+bool editingChat()     { return g_editSel == kGrpWin && g_editSlot == kWinChat; }
 int    g_editPtr = -1;              //  the finger dragging it
 float  g_editLastX = 0, g_editLastY = 0;
 HudAdj g_editBefore[kGrpCount];     //  for cancel
@@ -1476,6 +1559,83 @@ void toolBar(float *x, float *y, float *w, float *h) {
     if (h) *h = r * 2.9f + g_unit * 0.66f * 1.05f;     //  both rows
 }
 
+//  Photo mode's close button: a circle in the top right corner.
+void photoCloseCircle(Vec2 &c, float &r) {
+    r = g_unit * 0.30f;
+    const float m = g_unit * 0.22f;
+    c.x = (float)g_width - m - r;
+    c.y = m + r;
+}
+
+//  The emote button: the same circle, one and a half sizes below the X.
+void photoEmoteCircle(Vec2 &c, float &r) {
+    photoCloseCircle(c, r);
+    c.y += r * 2.6f;
+}
+
+void drawPhotoEmote() {
+    Vec2 c; float r;
+    photoEmoteCircle(c, r);
+    const float k = g_photoEmoteDown ? 0.75f : 1.0f;
+    const float lit = g_photoEmoteOpen ? 1.0f : 0.0f;
+    discGrad(c.x, c.y, r, Col{0.08f + 0.20f * lit, 0.08f + 0.16f * lit, 0.10f, 0.66f * k},
+                          Col{0.04f + 0.14f * lit, 0.04f + 0.11f * lit, 0.05f, 0.58f * k});
+    drawRing(c.x, c.y, r - g_unit * 0.02f, r, 0.92f, 0.92f, 0.92f, 0.55f * k);
+    //  A smiling face: two eyes and a smile of short strokes on an arc.
+    const Col gold = {0.96f, 0.84f, 0.48f, 0.95f * k};
+    const float e = r * 0.075f;
+    discGrad(c.x - r * 0.24f, c.y - r * 0.14f, e, gold, gold);
+    discGrad(c.x + r * 0.24f, c.y - r * 0.14f, e, gold, gold);
+    const float R = r * 0.36f, w = r * 0.07f;
+    const int n = 6;
+    for (int i = 0; i < n; ++i) {
+        const float a0 = 0.35f + (2.79f * i) / n, a1 = 0.35f + (2.79f * (i + 1)) / n;
+        drawCapsule(c.x + R * cosf(a0), c.y + r * 0.02f + R * sinf(a0),
+                    c.x + R * cosf(a1), c.y + r * 0.02f + R * sinf(a1), w, gold);
+    }
+}
+
+//  The names button: the same circle again, under the emote one.
+void photoNamesCircle(Vec2 &c, float &r) {
+    photoEmoteCircle(c, r);
+    c.y += r * 2.6f;
+}
+
+//  A name plate over a head and shoulders; struck through while names are hidden.
+void drawPhotoNames() {
+    Vec2 c; float r;
+    photoNamesCircle(c, r);
+    const float k = g_photoNamesDown ? 0.75f : 1.0f;
+    const float lit = g_photoNamesOn ? 1.0f : 0.0f;
+    discGrad(c.x, c.y, r, Col{0.08f + 0.20f * lit, 0.08f + 0.16f * lit, 0.10f, 0.66f * k},
+                          Col{0.04f + 0.14f * lit, 0.04f + 0.11f * lit, 0.05f, 0.58f * k});
+    drawRing(c.x, c.y, r - g_unit * 0.02f, r, 0.92f, 0.92f, 0.92f, 0.55f * k);
+    const Col gold = {0.96f, 0.84f, 0.48f, 0.95f * k};
+    //  the plate: a bar with a short line of "text" on it
+    drawCapsule(c.x - r * 0.40f, c.y - r * 0.40f, c.x + r * 0.40f, c.y - r * 0.40f, r * 0.13f, gold);
+    const Col ink = {0.10f, 0.09f, 0.08f, 0.95f * k};
+    drawCapsule(c.x - r * 0.24f, c.y - r * 0.40f, c.x + r * 0.24f, c.y - r * 0.40f, r * 0.035f, ink);
+    //  the head and shoulders under it
+    discGrad(c.x, c.y + r * 0.02f, r * 0.15f, gold, gold);
+    drawCapsule(c.x - r * 0.20f, c.y + r * 0.40f, c.x + r * 0.20f, c.y + r * 0.40f, r * 0.13f, gold);
+    if (!g_photoNamesOn) {
+        const Col red = {0.90f, 0.30f, 0.26f, 0.95f * k};
+        drawCapsule(c.x - r * 0.52f, c.y + r * 0.52f, c.x + r * 0.52f, c.y - r * 0.52f, r * 0.07f, red);
+    }
+}
+
+void drawPhotoClose() {
+    Vec2 c; float r;
+    photoCloseCircle(c, r);
+    const float k = g_photoDown ? 0.75f : 1.0f;
+    discGrad(c.x, c.y, r, Col{0.08f, 0.08f, 0.10f, 0.66f * k}, Col{0.04f, 0.04f, 0.05f, 0.58f * k});
+    drawRing(c.x, c.y, r - g_unit * 0.02f, r, 0.92f, 0.92f, 0.92f, 0.55f * k);
+    const float a = r * 0.40f, w = r * 0.09f;
+    const Col white = {0.92f, 0.92f, 0.92f, 0.95f * k};
+    drawCapsule(c.x - a, c.y - a, c.x + a, c.y + a, w, white);
+    drawCapsule(c.x - a, c.y + a, c.x + a, c.y - a, w, white);
+}
+
 //  Move what is selected by (mdx, mdy) layout units - the one place a drag and
 //  the arrow buttons both go through, so an arrow moves exactly what a drag
 //  would: a slot on its own, a window on its own, otherwise the group.
@@ -1497,6 +1657,7 @@ void editNudge(float mdx, float mdy) {
         g_cornerAdj[g_editSlot].dx += mdx;
         g_cornerAdj[g_editSlot].dy += mdy;
     } else if (g_editSel == kGrpWin && g_editSlot >= 0 && g_editSlot < kWinMax) {
+        if (g_editSlot == kWinChat) return;     //  height only (kWinChat)
         g_winAdj[g_editSlot].dx += mdx;
         g_winAdj[g_editSlot].dy += mdy;
     } else {
@@ -1524,6 +1685,7 @@ int   g_potCount = 0;
 
 void talkCircle(Vec2 &c, float &r);     //  below, with the cancel circle it hangs off
 void nearCircle(Vec2 &c, float &r);     //  beside it
+void eventCircle(Vec2 &c, float &r);    //  below, with them
 
 bool groupCircle(int g, Vec2 &c, float &r) {
     switch (g) {
@@ -1532,7 +1694,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
         case kGrpAuto:   c = g_buttons[3].centre; r = g_buttons[3].radius * 1.35f; return true;
         case kGrpPK:     c = g_buttons[4].centre; r = g_buttons[4].radius * 1.35f; return true;
         case kGrpPickup: c = g_buttons[5].centre; r = g_buttons[5].radius * 1.35f; return true;
-        case kGrpCamera: c = g_buttons[6].centre; r = g_buttons[6].radius * 1.35f; return true;
+        case kGrpCamera: return false;     //  camera lock removed (buttonHidden)
         case kGrpMenu:   c = g_buttons[8].centre; r = g_buttons[8].radius * 1.35f; return true;
         //  Only while the client shows them (beside the chat).
         case kGrpVehicle: if (!g_vehShow) return false;
@@ -1545,6 +1707,8 @@ bool groupCircle(int g, Vec2 &c, float &r) {
         //  it is needed.
         case kGrpTalk:    talkCircle(c, r); r *= 1.2f; return true;
         case kGrpNear:    nearCircle(c, r); r *= 1.2f; return true;
+        //  Always in the editor too, event map or not.
+        case kGrpEvent:   eventCircle(c, r); r *= 1.35f; return r > 0.0f;
         case kGrpPage: {
             c.x = (g_buttons[kBtnF1].centre.x + g_buttons[kBtnF4].centre.x) * 0.5f;
             c.y = g_buttons[kBtnF1].centre.y;
@@ -1618,7 +1782,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
 //  The group under a finger. Small buttons first, so one sitting on top of a
 //  bigger group can still be picked; the skill slots before the stick.
 int groupAt(float x, float y) {
-    static const int order[] = { -2, -3, -4, kGrpTalk, kGrpNear, kGrpPickup, kGrpPage, kGrpAuto, kGrpPK,
+    static const int order[] = { -2, -3, -4, kGrpTalk, kGrpNear, kGrpEvent, kGrpPickup, kGrpPage, kGrpAuto, kGrpPK,
                                  kGrpCamera, kGrpMenu, kGrpVehicle, kGrpFist, kGrpBot,
                                  -5, kGrpAttack, kGrpStick };
     g_editSlot = -1;
@@ -1865,12 +2029,36 @@ void cancelCircle(Vec2 &c, float &r) {
     if (c.y < r * 1.4f) c.y = r * 1.4f;
 }
 
+//  Where the talk and nearby-players buttons start from: the cancel circle's
+//  place for the attack button as DESIGNED - where and how big it is before
+//  the player moved or sized it. Taken from the live button, moving the attack
+//  button in the HUD editor carried the talk button with it (the user,
+//  2026-11-04: "it also move the talk npc btn which it should be separate").
+//  The skill arc hangs off the same designed place, so it does not follow the
+//  attack button either.
+void talkAnchor(Vec2 &c, float &r) {
+    const bool base = g_attackBaseR > 0.0f;
+    const float baseR = base ? g_attackBaseR
+                             : (g_buttons[0].radius > 0.0f ? g_buttons[0].radius : g_unit * 0.5f);
+    const float bx = base ? g_attackBaseX : g_buttons[0].centre.x;
+    const float by = base ? g_attackBaseY : g_buttons[0].centre.y;
+    r = baseR * 0.62f;
+    float top = by - baseR;
+    for (int i = 0; i < g_skillCircleCount; ++i) {
+        const float t = g_skillCircles[i].y - g_skillCircles[i].r * 1.3f;
+        if (t < top) top = t;
+    }
+    c.x = bx;
+    c.y = top - r * 1.9f;
+    if (c.y < r * 1.4f) c.y = r * 1.4f;
+}
+
 //  The talk button: the cancel circle's place, a little larger - it is a
 //  button to press, not a place to drop a drag. Then wherever, and as big as,
 //  the player put it in the HUD editor (kGrpTalk).
 void talkCircle(Vec2 &c, float &r) {
     float cr;
-    cancelCircle(c, cr);
+    talkAnchor(c, cr);
     const HudAdj &a = g_adj[kGrpTalk];
     r = cr * 1.08f * a.scale;
     c.x += a.dx * g_unit;
@@ -1890,7 +2078,7 @@ bool talkVisible() { return g_talkShow && !g_edit && !(g_aim.ptr >= 0 && g_aim.a
 //  player put it (kGrpNear).
 void nearCircle(Vec2 &c, float &r) {
     float cr;
-    cancelCircle(c, cr);
+    talkAnchor(c, cr);
     const HudAdj &a = g_adj[kGrpNear];
     const float base = cr * 0.80f;
     r = base * a.scale;
@@ -1905,6 +2093,22 @@ void nearCircle(Vec2 &c, float &r) {
 }
 
 bool nearVisible() { return g_nearShow && !g_edit && !(g_aim.ptr >= 0 && g_aim.aiming); }
+
+//  The event scoreboard button: its place in the column, then wherever and
+//  as big as the player put it (kGrpEvent). No size while taken off the HUD.
+void eventCircle(Vec2 &c, float &r) {
+    const HudAdj &a = g_adj[kGrpEvent];
+    r = g_evtBaseR * shownScale(g_hidGrp[kGrpEvent], a.scale);
+    c.x = g_evtBaseX + a.dx * g_unit;
+    c.y = g_evtBaseY + a.dy * g_unit;
+    const float W = (float)g_width, H = (float)g_height;
+    if (c.x < r) c.x = r;
+    if (c.y < r) c.y = r;
+    if (W > 0.0f && c.x > W - r) c.x = W - r;
+    if (H > 0.0f && c.y > H - r) c.y = H - r;
+}
+
+bool eventVisible() { return g_evtShow && !g_edit && !g_hidGrp[kGrpEvent] && !(g_aim.ptr >= 0 && g_aim.aiming); }
 
 //  A balloon's press area: a little wider than it is drawn, and never smaller
 //  than a fingertip.
@@ -1957,6 +2161,11 @@ void RanTouch_SetActive(int active) {
     if (on) g_activeAge = 0;
     if (on == g_active) return;
     g_active = on;
+    //  Leaving the world ends photo mode; the client sets it again if needed.
+    if (!on) { g_photo = false; g_photoPtr = -1; g_photoDown = false; g_photoExit = false; }
+    if (!on) { g_photoEmotePtr = -1; g_photoEmoteDown = false; g_photoEmoteEdge = false; g_photoEmoteOpen = false; }
+    if (!on) { g_photoNamesPtr = -1; g_photoNamesDown = false; g_photoNamesEdge = false; }
+    if (!on) { g_rest = false; g_restDown = false; g_restExit = false; }
     //  Drop anything held, or a finger that was down when the world unloaded
     //  would leave the character walking forever.
     g_stick.pointer = -1; g_stick.held = false;
@@ -1967,20 +2176,127 @@ void RanTouch_SetActive(int active) {
     g_skillEvtN = 0;
     g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
     g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+    g_evtPtr = -1; g_evtDown = false; g_evtEdge = false;
     g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
     g_balloonN = 0;
 }
 
 int RanTouch_IsActive(void) { return g_active ? 1 : 0; }
 
+extern "C" void RanTouch_SetPhotoMode(int on) {
+    const bool b = on != 0;
+    if (b == g_photo) return;
+    g_photo = b;
+    g_photoPtr = -1; g_photoDown = false; g_photoExit = false;
+    g_photoEmotePtr = -1; g_photoEmoteDown = false; g_photoEmoteEdge = false;
+    g_photoNamesPtr = -1; g_photoNamesDown = false; g_photoNamesEdge = false;
+    //  Drop anything held, as when the pad goes away: a thumb on the stick
+    //  would otherwise keep the character walking under the photo.
+    g_stick.pointer = -1; g_stick.held = false;
+    g_stick.dir.x = g_stick.dir.y = 0.0f; g_stick.magnitude = 0.0f;
+    for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; }
+    skillAimDrop();
+    g_skillEvtN = 0;
+    g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
+    g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+    g_evtPtr = -1; g_evtDown = false; g_evtEdge = false;
+    g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
+}
+
+extern "C" int RanTouch_IsPhotoMode(void) { return g_photo ? 1 : 0; }
+
+extern "C" int RanTouch_ConsumePhotoEmote(void) {
+    const bool b = g_photoEmoteEdge;
+    g_photoEmoteEdge = false;
+    return b ? 1 : 0;
+}
+
+extern "C" void RanTouch_SetPhotoEmoteOpen(int open) { g_photoEmoteOpen = open != 0; }
+
+extern "C" int RanTouch_ConsumePhotoNames(void) {
+    const bool b = g_photoNamesEdge;
+    g_photoNamesEdge = false;
+    return b ? 1 : 0;
+}
+
+extern "C" void RanTouch_SetPhotoNamesOn(int on) { g_photoNamesOn = on != 0; }
+
+extern "C" void RanTouch_SetRestMode(int on) {
+    const bool b = on != 0;
+    if (b == g_rest) return;
+    g_rest = b;
+    g_restDown = false; g_restExit = false;
+    //  Drop anything held, as photo mode does: a thumb left on the stick
+    //  would keep the character walking behind the black screen.
+    g_stick.pointer = -1; g_stick.held = false;
+    g_stick.dir.x = g_stick.dir.y = 0.0f; g_stick.magnitude = 0.0f;
+    for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; }
+    skillAimDrop();
+    g_skillEvtN = 0;
+    g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
+    g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+    g_evtPtr = -1; g_evtDown = false; g_evtEdge = false;
+    g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
+    g_pinch.a = g_pinch.b = -1;
+}
+
+extern "C" int RanTouch_IsRestMode(void) { return g_rest ? 1 : 0; }
+
+extern "C" int RanTouch_ConsumeRestExit(void) {
+    const bool b = g_restExit;
+    g_restExit = false;
+    return b ? 1 : 0;
+}
+
+extern "C" int RanTouch_ConsumePhotoExit(void) {
+    const bool b = g_photoExit;
+    g_photoExit = false;
+    return b ? 1 : 0;
+}
+
 int RanTouch_PointerDown(int id, float x, float y) {
     //  Every touch gets its ring, whatever it lands on and whether or not the
     //  HUD is up - except in the HUD editor, where a ring under each drag
     //  would only be noise.
-    if (g_inited && !g_edit) tapFxPush(x, y);
+    if (g_inited && !g_edit && !g_photo && !g_rest) tapFxPush(x, y);
 
     if (!g_inited) return 0;
     if (!g_active) { lobbyPinchDown(id, x, y); return 0; }
+
+    //  Resting: every finger is ours; the lift wakes the game.
+    if (g_rest) { g_restDown = true; return 1; }
+
+    //  Photo mode: the close button, or the world.
+    if (g_photo) {
+        Vec2 c; float r;
+        photoCloseCircle(c, r);
+        if (g_photoPtr < 0 && len(x - c.x, y - c.y) <= r * 1.3f) {
+            g_photoPtr = id;
+            g_photoDown = true;
+            Touch *tp = addTouch(id, x, y);
+            if (tp) tp->claimed = true;
+            return 1;
+        }
+        photoEmoteCircle(c, r);
+        if (g_photoEmotePtr < 0 && len(x - c.x, y - c.y) <= r * 1.3f) {
+            g_photoEmotePtr = id;
+            g_photoEmoteDown = true;
+            Touch *tp = addTouch(id, x, y);
+            if (tp) tp->claimed = true;
+            return 1;
+        }
+        photoNamesCircle(c, r);
+        if (g_photoNamesPtr < 0 && len(x - c.x, y - c.y) <= r * 1.3f) {
+            g_photoNamesPtr = id;
+            g_photoNamesDown = true;
+            Touch *tp = addTouch(id, x, y);
+            if (tp) tp->claimed = true;
+            return 1;
+        }
+        if (!findTouch(id)) addTouch(id, x, y);
+        pinchCheckStart();
+        return 0;
+    }
 
     //  Editing the HUD: every touch is the editor's. Nothing reaches the game,
     //  so dragging a skill slot moves it instead of casting it.
@@ -2022,12 +2338,26 @@ int RanTouch_PointerDown(int id, float x, float y) {
                     editEnd();
                     break;
                 case kToolReset:  editDefaultsAll(); break;
-                case kToolSizeDn: if (pScale) {
+                case kToolSizeDn: if (pScale && editingKillFeed()) {
+                    //  One row fewer, down to one.
+                    const int n = killFeedRows() - 1;
+                    *pScale = (float)(n < 1 ? 1 : n) / (float)kKillFeedRowsMax;
+                } else if (pScale && editingChat()) {
+                    //  10% lower, down to 60% (the chat keeps three lines itself).
+                    *pScale = floorf((*pScale - 0.1f) * 10.0f + 0.5f) / 10.0f;
+                    if (*pScale < kChatMin) *pScale = kChatMin;
+                } else if (pScale) {
                     //  A game window only grows: its art is pixel art, and below
                     //  100% rows of it drop out (the HP labels at 90%, 2026-10-07).
                     const float fMin = (g_editSel == kGrpWin) ? 1.0f : 0.6f;
                     *pScale -= 0.1f; if (*pScale < fMin) *pScale = fMin; } break;
-                case kToolSizeUp: if (pScale) { *pScale += 0.1f; if (*pScale > 1.6f) *pScale = 1.6f; } break;
+                case kToolSizeUp: if (pScale && editingKillFeed()) {
+                    const int n = killFeedRows() + 1;
+                    *pScale = (float)(n > kKillFeedRowsMax ? kKillFeedRowsMax : n) / (float)kKillFeedRowsMax;
+                } else if (pScale && editingChat()) {
+                    *pScale = floorf((*pScale + 0.1f) * 10.0f + 0.5f) / 10.0f;
+                    if (*pScale > kChatMax) *pScale = kChatMax;
+                } else if (pScale) { *pScale += 0.1f; if (*pScale > 1.6f) *pScale = 1.6f; } break;
                 case kToolAlphaDn: if (a) { a->alpha -= 0.1f; if (a->alpha < 0.2f) a->alpha = 0.2f; } break;
                 case kToolAlphaUp: if (a) { a->alpha += 0.1f; if (a->alpha > 1.0f) a->alpha = 1.0f; } break;
                 case kToolHide: { bool *h = hidFlag(); if (h) *h = !*h; } break;
@@ -2128,6 +2458,21 @@ int RanTouch_PointerDown(int id, float x, float y) {
             g_nearPtr = id; g_nearDown = true;
             Touch *tn = addTouch(id, x, y);
             if (tn) tn->claimed = true;
+            return 1;
+        }
+    }
+
+    //  The event scoreboard button, the same way.
+    if (g_evtPtr < 0 && eventVisible()) {
+        Vec2 ec; float er;
+        eventCircle(ec, er);
+        const int win = RanUI_PointInDragControl
+                          ? RanUI_PointInDragControl((int)x, (int)y)
+                          : (RanUI_PointInControl ? RanUI_PointInControl((int)x, (int)y) : 0);
+        if (!win && er > 0.0f && hit(ec, er * 1.35f, x, y)) {
+            g_evtPtr = id; g_evtDown = true;
+            Touch *te = addTouch(id, x, y);
+            if (te) te->claimed = true;
             return 1;
         }
     }
@@ -2249,7 +2594,9 @@ int RanTouch_PointerDown(int id, float x, float y) {
         if (b.pointer < 0 && hit(b.centre, b.radius, x, y)) {
             b.pointer = id;
             b.down = true;
-            b.pressedEdge = true;
+            //  The bot button answers on release (a tap) or after a hold.
+            if (b.slot == kSlotBot) { g_botHoldT = 0.0f; g_botHoldFired = false; }
+            else b.pressedEdge = true;
             if (t) t->claimed = true;
             if (b.slot == kSlotAttack) botNoteTap(x, y);
             return 1;
@@ -2275,6 +2622,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
 int RanTouch_PointerMove(int id, float x, float y) {
     if (!g_inited) return 0;
     if (!g_active) { lobbyPinchMove(id, x, y); return 0; }
+    if (g_rest) return 1;
     if (g_edit) {
         if (id == g_editPtr && g_editBar) {
             g_toolDX += x - g_editLastX;
@@ -2296,6 +2644,30 @@ int RanTouch_PointerMove(int id, float x, float y) {
         }
         return 1;
     }
+    if (g_photo && id == g_photoPtr) {
+        Vec2 c; float r;
+        photoCloseCircle(c, r);
+        g_photoDown = len(x - c.x, y - c.y) <= r * 1.6f;
+        Touch *tp = findTouch(id);
+        if (tp) { tp->x = x; tp->y = y; }
+        return 1;
+    }
+    if (g_photo && id == g_photoEmotePtr) {
+        Vec2 c; float r;
+        photoEmoteCircle(c, r);
+        g_photoEmoteDown = len(x - c.x, y - c.y) <= r * 1.6f;
+        Touch *tp = findTouch(id);
+        if (tp) { tp->x = x; tp->y = y; }
+        return 1;
+    }
+    if (g_photo && id == g_photoNamesPtr) {
+        Vec2 c; float r;
+        photoNamesCircle(c, r);
+        g_photoNamesDown = len(x - c.x, y - c.y) <= r * 1.6f;
+        Touch *tp = findTouch(id);
+        if (tp) { tp->x = x; tp->y = y; }
+        return 1;
+    }
     Touch *t = findTouch(id);
     if (t) { t->x = x; t->y = y; }
 
@@ -2310,6 +2682,13 @@ int RanTouch_PointerMove(int id, float x, float y) {
         Vec2 nc; float nr;
         nearCircle(nc, nr);
         g_nearDown = hit(nc, nr * 1.4f, x, y);
+        return 1;
+    }
+
+    if (g_evtPtr == id) {
+        Vec2 ec; float er;
+        eventCircle(ec, er);
+        g_evtDown = hit(ec, er * 1.8f, x, y);
         return 1;
     }
 
@@ -2394,8 +2773,35 @@ int RanTouch_PointerMove(int id, float x, float y) {
 int RanTouch_PointerUp(int id, float x, float y) {
     if (!g_inited) { removeTouch(id); return 0; }
     if (!g_active) { lobbyPinchUp(id); return 0; }
+    if (g_rest) {
+        if (g_restDown) g_restExit = true;
+        g_restDown = false;
+        removeTouch(id);
+        return 1;
+    }
     if (g_edit) {
         if (id == g_editPtr) g_editPtr = -1;
+        removeTouch(id);
+        return 1;
+    }
+    if (g_photo && id == g_photoPtr) {
+        if (g_photoDown) g_photoExit = true;
+        g_photoPtr = -1;
+        g_photoDown = false;
+        removeTouch(id);
+        return 1;
+    }
+    if (g_photo && id == g_photoEmotePtr) {
+        if (g_photoEmoteDown) g_photoEmoteEdge = true;
+        g_photoEmotePtr = -1;
+        g_photoEmoteDown = false;
+        removeTouch(id);
+        return 1;
+    }
+    if (g_photo && id == g_photoNamesPtr) {
+        if (g_photoNamesDown) g_photoNamesEdge = true;
+        g_photoNamesPtr = -1;
+        g_photoNamesDown = false;
         removeTouch(id);
         return 1;
     }
@@ -2410,6 +2816,12 @@ int RanTouch_PointerUp(int id, float x, float y) {
     if (g_nearPtr == id) {
         if (g_nearDown && g_nearShow) g_nearEdge = true;
         g_nearPtr = -1; g_nearDown = false;
+        claimed = 1;
+    }
+
+    if (g_evtPtr == id) {
+        if (g_evtDown && g_evtShow) g_evtEdge = true;
+        g_evtPtr = -1; g_evtDown = false;
         claimed = 1;
     }
 
@@ -2451,6 +2863,9 @@ int RanTouch_PointerUp(int id, float x, float y) {
     }
     for (int i = 0; i < kButtonCount; ++i) {
         if (g_buttons[i].pointer == id) {
+            if (g_buttons[i].slot == kSlotBot && g_botHoldT >= 0.0f && !g_botHoldFired)
+                g_buttons[i].pressedEdge = true;        //  a tap
+            if (g_buttons[i].slot == kSlotBot) { g_botHoldT = -1.0f; g_botHoldFired = false; }
             g_buttons[i].pointer = -1;
             g_buttons[i].down = false;
             claimed = 1;
@@ -2467,6 +2882,16 @@ int RanTouch_PointerUp(int id, float x, float y) {
 const float kSkillPressTime = 0.20f;
 
 void RanTouch_Frame(float dt) {
+    //  The bot button's hold. Dropped if the press went away by any other road
+    //  (overlay switched off, editor) so no tap or hold fires late.
+    {
+        const Button &bb = g_buttons[kBtnBot];
+        if (!bb.down || bb.pointer < 0) { g_botHoldT = -1.0f; g_botHoldFired = false; }
+        else if (g_botHoldT >= 0.0f && !g_botHoldFired) {
+            g_botHoldT += dt;
+            if (g_botHoldT >= kBotHoldSec) { g_botHoldFired = true; g_botHoldEdge = true; }
+        }
+    }
     for (int i = 0; i < g_skillCircleCount; ++i) {
         SkillCircle &c = g_skillCircles[i];
         if (c.press < 0.0f) continue;
@@ -2732,9 +3157,15 @@ enum {
     kCellFistOn,    kCellSlotRing,
     //  auto-hunt, off and on (2026-10-05)
     kCellBot,       kCellBotOn,
+    //  talk to NPC: the chat bubble with "NPC" in it (2026-11-05), so it is
+    //  not taken for a player's name balloon, which keeps kCellChat.
+    kCellNpcChat,
 };
 
 bool buttonHidden(int slot) {
+    //  Camera lock removed (the user, 2026-11-03: "we do not need that"):
+    //  never drawn, never hit, not in the HUD editor, so it can't be turned on.
+    if (slot == kSlotCamLock) return true;
     if ((slot == kSlotVehicle || slot == kSlotFist) && !g_vehShow) return true;
     if (slot == kSlotBot && !g_botShow) return true;
     if (slot == kSlotPickup && !g_pickShow && !g_edit) return true;
@@ -3007,6 +3438,15 @@ extern "C" void RanTouch_SetWinBox(int i, float x, float y, float w, float h) {
 }
 
 //  And what the player did to it: an offset in pixels and an absolute size.
+//  How many rows the kill feed shows (window slot 6's size value, see killFeedRows).
+extern "C" int RanTouch_GetKillFeedRows(void) { return killFeedRows(); }
+
+//  The chat box's height against its designed 210 (window slot 7, kWinChat).
+extern "C" float RanTouch_GetChatHeightScale(void) {
+    const float s = g_winAdj[kWinChat].scale;
+    return (s >= kChatMin - 0.01f && s <= kChatMax + 0.01f) ? s : 1.0f;
+}
+
 extern "C" void RanTouch_GetWinAdjust(int i, float *dx, float *dy, float *scale) {
     float x = g_adj[kGrpWin].dx * g_unit, y = g_adj[kGrpWin].dy * g_unit, s = g_adj[kGrpWin].scale;
     if (i >= 0 && i < kWinMax) {
@@ -3827,9 +4267,16 @@ void drawEditor() {
         int pct = (int)(v * 100.0f + 0.5f);
         const float dh = r * 0.62f, dw = dh * 0.55f, gap = dw * 0.25f;
         char digits[4]; int nd = 0;
+        if (pair == 0 && editingKillFeed()) {
+            //  The kill feed's size is its row count: 1 to 10.
+            const int n = killFeedRows();
+            if (n >= 10) digits[nd++] = (char)(n / 10);
+            digits[nd++] = (char)(n % 10);
+        } else {
         if (pct >= 100) digits[nd++] = (char)(pct / 100);
         digits[nd++] = (char)((pct / 10) % 10);
         digits[nd++] = (char)(pct % 10);
+        }
         float x = mx - (nd * dw + (nd - 1) * gap) * 0.5f;
         for (int i = 0; i < nd; ++i) {
             drawDigit(x, a.y - dh * 0.25f, dw, dh, digits[i], kInk.r, kInk.g, kInk.b, 1.0f);
@@ -3868,6 +4315,20 @@ static void renderMenuAlert() {
         emit();
         break;
     }
+}
+
+//  Holding the bot button with the bot off: a gold ring fills until the bot
+//  settings open. Drawn live like the alert above - it changes every frame.
+static void renderBotHold() {
+    if (!g_botShow || g_edit || g_botHoldT <= 0.08f || g_botHoldFired) return;
+    const Button &bb = g_buttons[kBtnBot];
+    if (bb.toggled) return;
+    float f = g_botHoldT / kBotHoldSec;
+    if (f > 1.0f) f = 1.0f;
+    g_drawAlpha = 1.0f;
+    segRing(bb.centre.x, bb.centre.y, bb.radius * 1.28f, bb.radius * 1.42f, 24, f,
+            rgba(1.0f, 0.80f, 0.31f, 1.0f), rgba(0.0f, 0.0f, 0.0f, 1.0f), 1.0f, 0.35f);
+    emit();
 }
 
 void RanTouch_Render(void) {
@@ -3912,6 +4373,21 @@ void RanTouch_Render(void) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glUniform2f(uViewport, (float)g_width, (float)g_height);
+
+    //  Photo mode: only the close button.
+    if (g_photo) {
+        g_drawAlpha = 1.0f;
+        drawPhotoClose();
+        drawPhotoEmote();
+        drawPhotoNames();
+        emit();
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glDepthMask(GL_FALSE);
+        RanGLR_InvalidateStateCache();
+        return;
+    }
 
     //  Stick: the ring sits where the finger went down while held, so the
     //  control follows the thumb instead of the thumb hunting for the control.
@@ -4218,6 +4694,7 @@ void RanTouch_Render(void) {
     }
 
     renderMenuAlert();
+    renderBotHold();
 
     //  The skill slots get the painted bezel too - it was in the sheet from the
     //  start and only the potion row was using it.
@@ -4322,10 +4799,13 @@ void RanTouch_Render(void) {
         const bool dn = g_talkDown && g_talkPtr >= 0;
         if (hudSheet()) {
             //  The silver set paints the whole button - glass, rim and bubble
-            //  (the chat cell). A soft white lift while it is held.
+            //  (the NPC chat cell; the plain chat cell on a sheet without it).
+            //  A soft white lift while it is held.
             if (dn) drawHalo(tc.x, tc.y, tr, rgba(1.0f, 1.0f, 1.0f, 0.35f), 0.35f);
             emit();
-            drawHudCell(kCellChat, tc.x, tc.y, tr * kBezelSize, 1.0f);
+            const float cellPx = g_hudTexW / (float)kHudCols;
+            const bool npcCell = cellPx > 0.0f && (float)(kCellNpcChat / kHudCols + 1) * cellPx <= g_hudTexH + 0.5f;
+            drawHudCell(npcCell ? kCellNpcChat : kCellChat, tc.x, tc.y, tr * kBezelSize, 1.0f);
             glUseProgram(g_prog);
             glBindVertexArray(g_vao);
             glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
@@ -4371,6 +4851,29 @@ void RanTouch_Render(void) {
             drawRing(nc.x, nc.y, nr * 0.86f, nr * 0.98f, 0.93f, 0.74f, 0.36f, 0.95f);
         }
         glyphPeople(nc.x + nr * 0.05f, nc.y + nr * 0.04f, nr * (dn ? 0.94f : 1.0f), 1.0f);
+    }
+    g_drawAlpha = 1.0f;
+
+    //  The event scoreboard button, as a mode toggle of the column: the
+    //  camera lock's old cells, repainted as a trophy (2026-11-05), lit while
+    //  the scoreboard is open.
+    g_drawAlpha = g_adj[kGrpEvent].alpha;
+    if (eventVisible() || g_edit) {
+        Vec2 ec; float er;
+        eventCircle(ec, er);
+        const bool dn = g_evtDown && g_evtPtr >= 0;
+        const float R = er * (dn ? 0.94f : 1.0f);
+        if (er > 0.0f && hudSheet()) {
+            emit();
+            drawHudCell(g_evtLit ? kCellCamLockOn : kCellCamLock, ec.x, ec.y, R * 1.06f, g_adj[kGrpEvent].alpha);
+            glUseProgram(g_prog);
+            glBindVertexArray(g_vao);
+            glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
+            glUniform2f(uViewport, (float)g_width, (float)g_height);
+        } else if (er > 0.0f) {
+            discGrad(ec.x, ec.y, R, rgba(0.16f, 0.13f, 0.09f, 0.90f), rgba(0.06f, 0.05f, 0.04f, 0.90f));
+            drawRing(ec.x, ec.y, R * 0.86f, R * 0.98f, 0.93f, 0.74f, 0.36f, g_evtLit ? 1.0f : 0.6f);
+        }
     }
     g_drawAlpha = 1.0f;
 
@@ -4626,6 +5129,12 @@ extern "C" int RanTouch_IsPinching(void) {
     return (g_pinch.a >= 0 && g_pinch.b >= 0) ? 1 : 0;
 }
 
+extern "C" int RanTouch_ConsumeBotHold(void) {
+    if (!g_botHoldEdge) return 0;
+    g_botHoldEdge = false;
+    return (g_inited && g_active) ? 1 : 0;
+}
+
 extern "C" int RanTouch_ConsumeButton(int *outSlot) {
     if (!g_inited || !g_active) return 0;
     for (int i = 0; i < kButtonCount; ++i) {
@@ -4725,6 +5234,18 @@ extern "C" int RanTouch_ConsumeNear(void) {
     return (g_inited && g_active) ? 1 : 0;
 }
 
+extern "C" void RanTouch_SetEventButton(int show, int lit) {
+    g_evtShow = (show != 0);
+    g_evtLit  = (lit != 0);
+    if (!g_evtShow) { g_evtPtr = -1; g_evtDown = false; }
+}
+
+extern "C" int RanTouch_ConsumeEvent(void) {
+    if (!g_evtEdge) return 0;
+    g_evtEdge = false;
+    return (g_inited && g_active) ? 1 : 0;
+}
+
 extern "C" void RanTouch_SetBalloons(int n, const float *fx, const float *fy, const float *fr,
                                      const unsigned *id) {
     if (n < 0 || !fx || !fy || !fr || !id) n = 0;
@@ -4779,6 +5300,7 @@ extern "C" void RanTouch_SetEditMode(int on) {
         g_skillEvtN = 0;
         g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
         g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+        g_evtPtr = -1; g_evtDown = false; g_evtEdge = false;
         g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
         g_pickNewHomeB = g_pickNewHome;
         g_edit = true;
@@ -4813,8 +5335,9 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
                 + kWinMax * 3                           //  HUD windows, appended 2026-10-06
                 + (kCornerMax - kCornerSaved) * 3       //  corner icons 5-8, appended 2026-10-07
                 + kHideSaved                            //  hidden flags, appended 2026-10-09
-                + (kGrpCount - kGrpFile) * 4            //  talk button 2026-10-19, nearby players 2026-10-20
-                + 1;                                    //  pick-up anchor, appended 2026-10-20
+                + (kGrpEvent - kGrpFile) * 4            //  talk button 2026-10-19, nearby players 2026-10-20
+                + 1                                     //  pick-up anchor, appended 2026-10-20
+                + 4 + 1;                                //  event scoreboard button + its hidden flag, 2026-11-05
     if (!out || max < n) return n;
     for (int i = 0; i < kGrpLegacy; ++i) {
         out[i * 4]     = g_adj[i].dx;    out[i * 4 + 1] = g_adj[i].dy;
@@ -4848,13 +5371,17 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     for (int i = 0; i < kPotMax; ++i)                    out[w++] = g_hidPot[i] ? 1.0f : 0.0f;
     for (int i = 0; i < kPageMax; ++i)                   out[w++] = g_hidPage[i] ? 1.0f : 0.0f;
     for (int i = 0; i < kCornerMax; ++i)                 out[w++] = g_hidCorner[i] ? 1.0f : 0.0f;
-    for (int i = kGrpFile; i < kGrpCount; ++i) {
+    for (int i = kGrpFile; i < kGrpEvent; ++i) {
         out[w++] = g_adj[i].dx;    out[w++] = g_adj[i].dy;
         out[w++] = g_adj[i].scale; out[w++] = g_adj[i].alpha;
     }
     //  1: the pick-up button hangs off the skill arc; 2: off the attack button
     //  (a layout from before it moved, with the player's own offset).
     out[w++] = g_pickNewHome ? 1.0f : 2.0f;
+    //  The event scoreboard button, after everything an older file has.
+    out[w++] = g_adj[kGrpEvent].dx;    out[w++] = g_adj[kGrpEvent].dy;
+    out[w++] = g_adj[kGrpEvent].scale; out[w++] = g_adj[kGrpEvent].alpha;
+    out[w++] = g_hidGrp[kGrpEvent] ? 1.0f : 0.0f;
     return n;
 }
 
@@ -4925,7 +5452,11 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
             if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
             //  Grow-only (see kToolSizeDn): an older layout's 90% loads as 100%.
-            if (!(sc >= 1.0f && sc <= 1.6f))  sc = 1.0f;
+            //  Not the kill feed: its value is a row count, 0.1 (1 row) to 1.0
+            //  (10 rows), and the grow-only rule put every choice back to 10.
+            if (i == kWinKillFeed) { if (!(sc >= 0.05f && sc <= 1.0f)) sc = 1.0f; }
+            else if (i == kWinChat) { if (!(sc >= kChatMin - 0.01f && sc <= kChatMax + 0.01f)) sc = 1.0f; dx = dy = 0.0f; }
+            else if (!(sc >= 1.0f && sc <= 1.6f))  sc = 1.0f;
             g_winAdj[i].dx = dx; g_winAdj[i].dy = dy; g_winAdj[i].scale = sc;
         }
         //  Corner icons 5-8. Older files stop before them.
@@ -4944,7 +5475,7 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             for (int i = 0; i < count[a]; ++i)
                 hidden[a][i] = (r < n) ? (in[r++] > 0.5f) : false;
         //  The talk button, last in the file. Older files stop before it.
-        for (int i = kGrpFile; i < kGrpCount; ++i) {
+        for (int i = kGrpFile; i < kGrpEvent; ++i) {
             float dx = 0.0f, dy = 0.0f, sc = 1.0f, al = 1.0f;
             if (r + 3 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; al = in[r++]; }
             if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
@@ -4963,6 +5494,19 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (v > 1.5f)      g_pickNewHome = false;
             else if (v > 0.5f) g_pickNewHome = true;
             else               g_pickNewHome = (g_adj[kGrpPickup].dx == 0.0f && g_adj[kGrpPickup].dy == 0.0f);
+        }
+        //  The event scoreboard button (2026-11-05). Older files stop before it,
+        //  or carry zeros: out of range, so the designed place, shown.
+        {
+            float dx = 0.0f, dy = 0.0f, sc = 1.0f, al = 1.0f, hid = 0.0f;
+            if (r + 3 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; al = in[r++]; }
+            if (r < n) hid = in[r++];
+            if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
+            if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
+            if (!(sc >= 0.6f && sc <= 1.6f)) sc = 1.0f;
+            if (!(al >= 0.2f && al <= 1.0f)) al = 1.0f;
+            g_adj[kGrpEvent].dx = dx; g_adj[kGrpEvent].dy = dy; g_adj[kGrpEvent].scale = sc; g_adj[kGrpEvent].alpha = al;
+            g_hidGrp[kGrpEvent] = (hid > 0.5f);
         }
         for (int g = 0; g < kGrpCount; ++g)
             if (!canHideGroup(g) || g == kGrpSkill || g == kGrpPotion || g == kGrpCorner) g_hidGrp[g] = false;

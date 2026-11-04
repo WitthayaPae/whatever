@@ -114,6 +114,15 @@ def glyph(kind, n):
         d.rounded_rectangle((c - 62 * u, c - 46 * u, c + 62 * u, c + 34 * u), int(26 * u), fill=W)
         d.polygon([(c - 32 * u, c + 28 * u), (c - 6 * u, c + 28 * u), (c - 42 * u, c + 66 * u)], fill=W)
         for dx in (-32, 0, 32): d.ellipse((c + (dx - 10) * u, c - 16 * u, c + (dx + 10) * u, c + 4 * u), fill=0)
+    elif kind == 'chat_npc':
+        # talk-to-NPC button (2026-11-05): the chat bubble with "NPC" cut in it,
+        # so it is not taken for a player's name balloon (the plain 'chat' bubble)
+        d.rounded_rectangle((c - 70 * u, c - 50 * u, c + 70 * u, c + 36 * u), int(28 * u), fill=W)
+        d.polygon([(c - 36 * u, c + 30 * u), (c - 8 * u, c + 30 * u), (c - 46 * u, c + 70 * u)], fill=W)
+        f = ImageFont.truetype('tahomabd.ttf', int(54 * u))
+        b = d.textbbox((0, 0), 'NPC', font=f)
+        tw, th = b[2] - b[0], b[3] - b[1]
+        d.text((c - tw / 2 - b[0], c - 7 * u - th / 2 - b[1]), 'NPC', font=f, fill=0)
     elif kind == 'grid':
         for i in (-1, 1):
             for j in (-1, 1):
@@ -227,6 +236,21 @@ def glyph(kind, n):
         d.rounded_rectangle((c - 34 * u, c + 16 * u, c + 34 * u, c + 34 * u), int(6 * u), fill=0)
         for k in (-17, 0, 17):
             d.line([(c + k * u, c + 16 * u), (c + k * u, c + 34 * u)], fill=W, width=max(2, int(4 * u)))
+    elif kind == 'trophy':
+        # event scoreboard button (2026-11-05): a cup on a stem and a two-step base
+        d.chord((c - 50 * u, c - 92 * u, c + 50 * u, c + 20 * u), 0, 180, fill=W)       # bowl
+        d.rectangle((c - 50 * u, c - 74 * u, c + 50 * u, c - 36 * u), fill=W)            # rim to bowl
+        for s in (-1, 1):                                                               # handles
+            d.arc((c + (s * 50 - 26) * u, c - 70 * u, c + (s * 50 + 26) * u, c - 18 * u),
+                  -90 if s > 0 else 90, 90 if s > 0 else 270, fill=W, width=int(11 * u))
+        d.rectangle((c - 9 * u, c + 18 * u, c + 9 * u, c + 46 * u), fill=W)               # stem
+        d.rounded_rectangle((c - 30 * u, c + 44 * u, c + 30 * u, c + 60 * u), int(5 * u), fill=W)
+        d.rounded_rectangle((c - 44 * u, c + 58 * u, c + 44 * u, c + 78 * u), int(6 * u), fill=W)
+        pts = []                                                                        # star cut in the bowl
+        for q in range(10):
+            t = q * math.pi / 5 - math.pi / 2; rr = (22 if q % 2 == 0 else 9) * u
+            pts.append((c + math.cos(t) * rr, c - 40 * u + math.sin(t) * rr))
+        d.polygon(pts, fill=0)
     elif kind == 'bike':
         for s in (-1, 1):
             d.ellipse((c + (52 * s - 28) * u, c + 4 * u, c + (52 * s + 28) * u, c + 60 * u), outline=W, width=int(12 * u))

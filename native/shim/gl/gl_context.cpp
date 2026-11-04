@@ -530,6 +530,48 @@ extern "C" int RanGL_LogicalHeight(void) { return (int)lroundf(g_height / RanGL_
 //  Panel pixels per logical pixel, for turning a touch into a client coordinate.
 extern "C" float RanGL_InputScale(void)  { return g_renderScale > 0 ? g_renderScale : 1.0f; }
 
+//  A window that is no longer the size it was when the surface was made
+//  (2026-10-31, Lenovo Xiaoxin Pad with a pen: every tap landed about a row
+//  below the pen). The frame is laid out and drawn at the size the window had
+//  then (g_panelWidth/Height); nothing re-reads it on a resize. Touches come
+//  in the window's current pixels, so they are put back into the frame's:
+//
+//   - the buffers follow the window (geometry 0x0, the normal case): the
+//     frame is drawn at the old size from GL's bottom-left corner, so a
+//     taller window shows it lower by the difference - shift by it;
+//   - the buffer kept the old size and the display stretches it over the
+//     window: scale by the ratio.
+//
+//  Same window as at the start - every device until now - changes nothing.
+extern "C" void RanGL_FixTouch(int winW, int winH, float *x, float *y) {
+    if (!x || !y || winW <= 0 || winH <= 0) return;
+    if (g_panelWidth <= 0 || g_panelHeight <= 0) return;
+    if (winW == g_panelWidth && winH == g_panelHeight) return;
+    //  With the "renderscale" switch the buffers are set smaller on purpose
+    //  (setBuffersGeometry), and ANativeWindow_getWidth then reports the
+    //  buffer, not the panel: not a resize. Touch is right there already.
+    if (g_bufferDiv > 1) return;
+    EGLint sw = 0, sh = 0;
+    if (g_display != EGL_NO_DISPLAY && g_surface != EGL_NO_SURFACE) {
+        eglQuerySurface(g_display, g_surface, EGL_WIDTH,  &sw);
+        eglQuerySurface(g_display, g_surface, EGL_HEIGHT, &sh);
+    }
+    const bool follows = g_bufferDiv <= 1 && sw == winW && sh == winH;
+    if (follows) {
+        *y -= (float)(winH - g_panelHeight);
+    } else {
+        *x *= (float)g_panelWidth  / (float)winW;
+        *y *= (float)g_panelHeight / (float)winH;
+    }
+    //  Said once per new combination, so a report from such a device shows it.
+    static int s_w = 0, s_h = 0, s_sh = -1;
+    if (winW != s_w || winH != s_h || sh != s_sh) {
+        s_w = winW; s_h = winH; s_sh = sh;
+        LOGI("touch: window %dx%d, surface %dx%d, frame %dx%d - %s",
+             winW, winH, (int)sw, (int)sh, g_panelWidth, g_panelHeight, follows ? "shifted" : "scaled");
+    }
+}
+
 //  Time inside the swap, which is where a GPU that cannot keep up shows up:
 //  the client calls Present from inside its own Render, so without this the
 //  swap hides in the render figure.
@@ -548,6 +590,7 @@ extern "C" int RanGLR_FrameDrawCount(void);
 
 extern "C" unsigned RanGL_FrameIndex(void) { return g_frameIndex; }
 
+extern "C" void RanGLR_FlashProbe(void);   //  gl_render.cpp, bigfx diagnostic
 extern "C" void RanGL_Present(void) {
     if (!g_ready) return;
     ++g_frameIndex;
@@ -604,6 +647,10 @@ extern "C" void RanGL_Present(void) {
     //  say so: a tiled GPU otherwise writes both back out to memory at the end
     //  of every render pass. At 2560x1600 that is 16 MB of pure waste a frame.
     {
+        //  bigfx diagnostic: read the sky back and report a one-frame flash.
+        RanGLR_FlashProbe();
+    }
+    {
         const GLenum unwanted[] = { GL_DEPTH, GL_STENCIL };
         glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, unwanted);
     }
@@ -613,6 +660,7 @@ extern "C" void RanGL_Present(void) {
     //  No surface: the window is gone and this frame has nowhere to go. Swapping
     //  anyway is what filled the log with BAD_SURFACE while the browser was up.
     if (g_surface == EGL_NO_SURFACE) return;
+    if (RanPlat_DiagExists("framefinish")) glFinish();     //  bigfx A/B: the GPU never runs a frame behind
     if (!eglSwapBuffers(g_display, g_surface)) {
         EGLint e = eglGetError();
         // A lost surface is normal on rotate/background; the app layer recreates it.

@@ -47,9 +47,59 @@ const argv0 = process.argv.slice(2);
 const onlyArg = argv0.find((a) => a.startsWith('--only='));
 const ONLY = onlyArg ? new Set(onlyArg.slice(7).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean)) : null;
 const stoneArg = argv0.find((a) => a.startsWith('--set-stone='));
-const SET_STONE = stoneArg ? parseFloat(stoneArg.slice(12)) : null;
+//  --set-stone=LO-HI (2026-11-01, the user: 'upgrade stone in level 51 > between 0.9 ~ 1'): each table
+//  its own value in the range, hashed from the table name like --set-wa.
+const stoneRange = stoneArg && /^[0-9.]+-[0-9.]+$/.test(stoneArg.slice(12)) ? stoneArg.slice(12).split('-').map(Number) : null;
+const SET_STONE = stoneArg ? (stoneRange ? stoneRange[0] : parseFloat(stoneArg.slice(12))) : null;
 if (stoneArg && !(SET_STONE >= 0)) throw new Error('--set-stone needs a number');
 const MATCH_RESIST = argv0.includes('--match-resist');
+// --set-wa=X: set weapon and armor of each table to X per 100 kills, up or down
+// (user, 2026-10-31: "weapon and Armor should be around 2.9 to 3.1"). A table
+// with no weapon (armor) line keeps none.
+const waArg = argv0.find((a) => a.startsWith('--set-wa='));
+//  --set-wa=LO-HI (2026-10-31, the user: "weapon and Armor ... random between 2.7-2.8"):
+//  each table and category gets its own value in the range, drawn from a hash of
+//  the table name, so a rerun gives the same numbers. Kept 0.02 inside each edge,
+//  the tolerance a line can miss by.
+const waSpec = waArg ? waArg.slice(9) : null;
+const waRange = waSpec && /^[0-9.]+-[0-9.]+$/.test(waSpec) ? waSpec.split('-').map(Number) : null;
+const SET_WA = waSpec ? (waRange ? waRange[0] : parseFloat(waSpec)) : null;
+if (waArg && !(SET_WA >= 0)) throw new Error('--set-wa needs a number or LO-HI');
+if (waRange && !(waRange[1] - waRange[0] > 0.04)) throw new Error('--set-wa range too narrow');
+//  --set-weapon=LO-HI / --set-armor=LO-HI (2026-11-01, the user: 'weapon ~2 and armor 2.3 - 2.4'):
+//  a range per category; given alone, only that category changes.
+const catArg = (n) => { const a = argv0.find((x) => x.startsWith('--set-' + n + '=')); if (!a) return null; const r = a.slice(n.length + 7).split('-').map(Number); if (!(r.length === 2 && r[1] - r[0] > 0.04)) throw new Error('--set-' + n + ' needs LO-HI'); return r; };
+const catRange = { Weapon: catArg('weapon'), Armor: catArg('armor') };
+const CAT_WA = !!(catRange.Weapon || catRange.Armor);
+//  --level-min=N: only tables whose (median monster) level is N or more
+const lmArg = argv0.find((a) => a.startsWith('--level-min='));
+const LEVEL_MIN = lmArg ? parseInt(lmArg.slice(12), 10) : 0;
+function hashIn(range, key) {
+  let h = 2166136261;
+  for (const ch of key) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  const lo = range[0] + 0.02, hi = range[1] - 0.02;
+  return Math.round((lo + (hi - lo) * (h / 4294967296)) * 1000) / 1000;
+}
+function waFor(name, cat) {
+  if (CAT_WA) return hashIn(catRange[cat], name + '|' + cat);
+  if (!waRange) return SET_WA;
+  let h = 2166136261;
+  for (const ch of name + '|' + cat) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  const lo = waRange[0] + 0.02, hi = waRange[1] - 0.02;
+  return Math.round((lo + (hi - lo) * (h / 4294967296)) * 1000) / 1000;
+}
+// --set-book=LO-HI (2026-11-01, the user: skill books 'same range like weapon and armor ~ 110 kills'):
+// each table's skill-book drop set to its own value in the range (hashed from the table name like
+// --set-wa). A table with no skill-book line keeps none.
+const bookArg = argv0.find((a) => a.startsWith('--set-book='));
+const bookRange = bookArg ? bookArg.slice(11).split('-').map(Number) : null;
+if (bookArg && !(bookRange.length === 2 && bookRange[1] - bookRange[0] > 0.04)) throw new Error('--set-book needs LO-HI');
+function bookFor(name) {
+  let h = 2166136261;
+  for (const ch of name + '|Book') { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  const lo = bookRange[0] + 0.02, hi = bookRange[1] - 0.02;
+  return Math.round((lo + (hi - lo) * (h / 4294967296)) * 1000) / 1000;
+}
 const specArg = argv0.find((a) => a.startsWith('--match-spec='));
 const MATCH_SPEC = specArg ? specArg.slice(13).split(',').map((x) => parseInt(x, 10)) : null;
 if (MATCH_SPEC && MATCH_SPEC.some((x) => !(x > 0 && x < 999))) throw new Error('--match-spec needs spec ids');
@@ -57,8 +107,24 @@ const evCat = (id) => 'Spec' + id;
 // --match-to: which category the --match-spec lines copy (default the upgrade stones)
 const toArg = argv0.find((a) => a.startsWith('--match-to='));
 const MATCH_TO = toArg ? toArg.slice(11) : 'Stone';
-const SET = MATCH_SPEC ? Object.fromEntries(MATCH_SPEC.map((id) => [evCat(id), true]))
-  : MATCH_RESIST ? { Resist: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
+// --spec-value=X (2026-10-31, the user: event feather + shard 'together 3.0'): with --match-spec,
+// set each listed spec to X per 100 kills instead of copying a category. Only where the
+// table already gives that spec something, so tables without event drops keep none.
+const svArg = argv0.find((a) => a.startsWith('--spec-value='));
+const SPEC_VALUE = svArg ? parseFloat(svArg.slice(13)) : null;
+if (svArg && !(SPEC_VALUE >= 0 && MATCH_SPEC)) throw new Error('--spec-value needs a number and --match-spec');
+// --stone-from=<old GLogicServer.rcc> [--stone-above=X] (2026-11-01, the user: stones from level 51
+// "make it back to the one before"): each table's upgrade and resist stones set back to what the
+// same table gave in the old file. Only tables whose stones now give more than X per 100 kills
+// (default 0.5), so the low-level tables (0.01 / 0.15) stay as they are.
+const sfArg = argv0.find((a) => a.startsWith('--stone-from='));
+const STONE_FROM = sfArg ? sfArg.slice(13) : null;
+const saArg = argv0.find((a) => a.startsWith('--stone-above='));
+const STONE_ABOVE = saArg ? parseFloat(saArg.slice(14)) : 0.5;
+if (STONE_FROM && !fs.existsSync(STONE_FROM)) throw new Error('--stone-from file not found');
+const SET = STONE_FROM ? { Stone: true, Resist: true }
+  : MATCH_SPEC ? Object.fromEntries(MATCH_SPEC.map((id) => [evCat(id), true]))
+  : bookRange ? { Book: true } : MATCH_RESIST ? { Resist: true } : CAT_WA ? Object.fromEntries(['Weapon', 'Armor'].filter((c) => catRange[c]).map((c) => [c, true])) : SET_WA !== null ? { Weapon: true, Armor: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
 const DELTA = { Weapon: 0.4, Armor: 0.4, Stone: 0.2 };
 const CATS = ['Weapon', 'Armor', 'Acc', 'Stone', 'Resist', 'Potion', 'Book', ...(MATCH_SPEC || []).map(evCat)];
 const RESIST_SPEC = 196;
@@ -68,6 +134,9 @@ const STONE_SPEC = 191, MAX_LINES = 30, FULL = 99.99;
 const args = process.argv.slice(2);
 const write = args.includes('--write');
 const NOSPLIT = args.includes('--nosplit');
+// --tol=X: accept a table up to X off its target (noted in the report) instead of stopping
+const tolArg = args.find((a) => a.startsWith('--tol='));
+const TOL = tolArg ? parseFloat(tolArg.slice(6)) : 0.02;
 const [dataDir, repDir, workDir] = args.filter((a) => !a.startsWith('--'));
 if (!dataDir || !repDir || !workDir) { console.error('usage: node drop-delta.js <CLIENT/data> <report dir> <work dir> [--write] [--nosplit]'); process.exit(2); }
 
@@ -280,13 +349,25 @@ function build(t, gen, want, before, note) {
   return total() <= FULL + 1e-9 ? L : null;
 }
 
+const OLD = STONE_FROM ? new RccArchive(STONE_FROM) : null;
 const report = [], changed = [], skipped = [];
 fs.mkdirSync(path.join(workDir, 'files'), { recursive: true });
 for (const t of T) {
   if (!(t.rolls > 0) || !(t.gen > 0)) { skipped.push([t.name, t.level, 'never fires']); continue; }
+  if (t.level < LEVEL_MIN) { skipped.push([t.name, t.level, 'below --level-min']); continue; }
   const before = perCat(t, t.spec, t.gen);
+  let ref = null;
+  if (STONE_FROM) {
+    if (!(before.Stone > STONE_ABOVE)) { skipped.push([t.name, t.level, 'stones at or below ' + STONE_ABOVE]); continue; }
+    const rn = OLD.list().find((n) => n.toLowerCase() === t.k);
+    if (!rn) { skipped.push([t.name, t.level, 'not in the old file']); continue; }
+    const rl = plain(OLD.read(rn)).toString('latin1').replace(/\0+$/, '').split(/\r?\n/);
+    const rt = parse(rl);
+    ref = rt.rolls > 0 && rt.gen > 0 ? perCat(rt, rt.spec, rt.gen) : null;
+    if (!ref) { skipped.push([t.name, t.level, 'old table never fires']); continue; }
+  }
   const want = {}, base = {};
-  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = MATCH_SPEC ? before[MATCH_TO] : MATCH_RESIST ? before.Stone : SET_STONE !== null ? SET_STONE : Math.max(0, before[c] - DELTA[c]); }
+  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = ref ? ref[c] : bookRange ? bookFor(t.name) : MATCH_SPEC ? (SPEC_VALUE !== null ? (before[c] > 0 ? SPEC_VALUE : 0) : before[MATCH_TO]) : MATCH_RESIST ? before.Stone : (CAT_WA || SET_WA !== null) ? waFor(t.name, c) : SET_STONE !== null ? (stoneRange ? hashIn(stoneRange, t.name + '|Stone') : SET_STONE) : Math.max(0, before[c] - DELTA[c]); }
   const note = new Set();
 
   let gen = t.gen, L = build(t, gen, want, before, note);
@@ -345,10 +426,13 @@ for (const t of T) {
   const off = [];
   for (const c of Object.keys(SET)) if (back.spec.some((l) => l.cat === c)) {
     const d = after[c] - want[c];
-    if (Math.abs(d) > 0.02) { if (!NOSPLIT) throw new Error(`${t.name}: ${c} ${after[c]} not ${want[c]}`); off.push(`${c} off by ${d.toFixed(2)}`); }
+    // above target with every pure line of the category already at 0: the rest comes from a mixed
+    // group (lv81: spec 32 also drops arrows/talismans), which this tool does not cut
+    if (d > TOL && back.spec.filter((l) => l.cat === c).every((l) => l.pct === 0)) { off.push(`${c} ${after[c].toFixed(2)} from a mixed group only`); continue; }
+    if (Math.abs(d) > 0.02) { if (!NOSPLIT && !(Math.abs(d) <= TOL)) throw new Error(`${t.name}: ${c} ${after[c]} not ${want[c]}`); off.push(`${c} off by ${d.toFixed(2)}`); }
   }
   for (const o of off) note.add(o);
-  if (SET_STONE === null && !MATCH_RESIST && !MATCH_SPEC) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
+  if (SET_STONE === null && SET_WA === null && !CAT_WA && !MATCH_RESIST && !MATCH_SPEC && !bookRange && !STONE_FROM) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
   const out = encode(lines.join(t.eol) + t.eol);
   if (plain(out).toString('latin1').replace(/ +$/, '') !== lines.join(t.eol) + t.eol) throw new Error('round trip failed: ' + t.name);
   const file = path.join(workDir, 'files', t.name);

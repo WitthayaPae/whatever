@@ -70,6 +70,9 @@ extern "C" int RanTouch_ConsumeButton(int *outSlot);
 //  (RanTouch_SetBot); lit while hunting, with a ring of today's time left.
 #define RANTOUCH_SLOT_BOT         (-14)
 extern "C" void RanTouch_SetBot(int show, float leftFrac);
+//  1 once after the bot button was held for half a second (the bot settings).
+//  A short press comes through RanTouch_ConsumeButton as RANTOUCH_SLOT_BOT, on release.
+extern "C" int  RanTouch_ConsumeBotHold(void);
 
 //  Where the client put its quick-skill slots, as fractions of the surface, so
 //  the overlay can draw a round rim over each one.
@@ -171,6 +174,10 @@ extern "C" void RanTouch_GetCornerAdjust(int i, float *dx, float *dy, float *sca
 //  rects, and the offset / absolute size the editor gives each.
 extern "C" void RanTouch_SetWinBox(int i, float x, float y, float w, float h);
 extern "C" void RanTouch_GetWinAdjust(int i, float *dx, float *dy, float *scale);
+//  The kill feed's row count, 1..10, as set in the HUD editor (window slot 6).
+extern "C" int  RanTouch_GetKillFeedRows(void);
+//  The chat box's height against its designed 210, 0.6..1.5 (window slot 7).
+extern "C" float RanTouch_GetChatHeightScale(void);
 
 //  How big the player has asked the skill slots to be.
 extern "C" float RanTouch_GetSkillScale(void);
@@ -234,6 +241,27 @@ extern "C" void RanTouch_SetActive(int active);
 extern "C" void RanTouch_SetDim(float k);
 extern "C" int  RanTouch_IsActive(void);
 
+//  Photo mode: the client's interface is off; the pad draws only a close
+//  button top right and every other touch goes to the world (camera, zoom).
+//  The client sets it each frame from its own state and polls the close.
+extern "C" void RanTouch_SetPhotoMode(int on);
+extern "C" int  RanTouch_IsPhotoMode(void);
+extern "C" int  RanTouch_ConsumePhotoExit(void);
+//  Photo mode's emote button (under the X): a tap since the last call; and
+//  whether the emote list is open (the button is lit).
+extern "C" int  RanTouch_ConsumePhotoEmote(void);
+extern "C" void RanTouch_SetPhotoEmoteOpen(int open);
+//  Its names button (under the emote one): a tap since the last call; and
+//  whether names are shown now (the button is lit, not struck through).
+extern "C" int  RanTouch_ConsumePhotoNames(void);
+extern "C" void RanTouch_SetPhotoNamesOn(int on);
+
+//  Rest screen (SOURCE MobileRestScreen.h): every touch is eaten; the first
+//  lift is a wake (ConsumeRestExit). The frame loops slow down while it is on.
+extern "C" void RanTouch_SetRestMode(int on);
+extern "C" int  RanTouch_IsRestMode(void);
+extern "C" int  RanTouch_ConsumeRestExit(void);
+
 //  The player's HUD arrangement: move, size and opacity per control group,
 //  edited on screen. Layout is kGrpCount * 4 floats (dx, dy, size, opacity).
 extern "C" void RanTouch_SetEditMode(int on);
@@ -292,3 +320,7 @@ extern "C" void RanTouch_SetNearButton(int show);
 //  The nearby-players button's place: cx of the width, cy and r of the height.
 extern "C" void RanTouch_GetNearButton(float *cx, float *cy, float *r);
 extern "C" int  RanTouch_ConsumeNear(void);
+//  The event scoreboard button (2026-11-05): shown on an event map, lit while
+//  the scoreboard is open. Consume returns 1 once per press (the client sends F11).
+extern "C" void RanTouch_SetEventButton(int show, int lit);
+extern "C" int  RanTouch_ConsumeEvent(void);
