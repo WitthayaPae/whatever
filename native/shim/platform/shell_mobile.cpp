@@ -119,6 +119,11 @@ static void appendCp874(std::string &out, unsigned cp) {
     }
 }
 
+//  The focused edit box's limit in bytes (CP874: one a character), set when
+//  it begins editing; 0 = none known.
+static int g_imeLimit = 0;
+extern "C" void RanIME_SetLimit(int nBytes) { g_imeLimit = nBytes > 0 ? nBytes : 0; }
+
 extern "C" void RanIME_InsertUtf8(const char *sz) {
     if (!sz || !*sz) return;
 
@@ -138,10 +143,26 @@ extern "C" void RanIME_InsertUtf8(const char *sz) {
             cp = (cp << 6) | (p[i] & 0x3F);
         }
         if (i < n) { ++p; continue; }
-        appendCp874(cooked, cp);
         p += n;
+        //  No control characters, as the PC's edit box takes none. A keyboard
+        //  never types them, but pasted text can carry line breaks and tabs:
+        //  those become one space each (a CR LF pair one space), the rest go.
+        if (cp < 0x20 || cp == 0x7F) {
+            if (cp == '\r' && *p == '\n') continue;
+            if (cp != '\n' && cp != '\r' && cp != '\t') continue;
+            cp = ' ';
+        }
+        appendCp874(cooked, cp);
     }
     if (cooked.empty()) return;
+
+    //  Cut to the box's room. Past its limit CUIEditBox refuses the whole
+    //  change, so a long paste used to vanish instead of filling the box.
+    if (g_imeLimit > 0) {
+        const int room = g_imeLimit - (int)g_imeText.size();
+        if (room <= 0) return;
+        if ((int)cooked.size() > room) cooked.resize((size_t)room);
+    }
 
     int c = imeCaret();
     if (c < 0) c = 0;
@@ -162,6 +183,67 @@ extern "C" void RanIME_Backspace(void) {
 }
 
 extern "C" void RanIME_ClearText(void) { g_imeText.clear(); imeSetCaret(0); }
+
+//  The buffer as the keyboard's text field holds it (2026-11-02).
+//
+//  The field used to hold one invisible character and nothing else, so iOS's
+//  space-bar trackpad and Android keyboards' cursor slide had no text to move
+//  through, and a long-press Paste had no field to land in. The platform field
+//  now mirrors this buffer: every CP874 byte becomes exactly one UTF-16 unit
+//  (Thai and ASCII are one each; a byte with no mapping becomes U+FFFD), so a
+//  cursor index in the field IS a byte index here, with no conversion.
+static unsigned cp874ToUni(unsigned char b) {
+    if (b < 0x80) return b;
+    if (b >= 0xA1 && b <= 0xFB) return 0x0E00 + (b - 0xA0);
+    switch (b) {
+        case 0x80: return 0x20AC;  case 0xA0: return 0x00A0;  case 0x85: return 0x2026;
+        case 0x91: return 0x2018;  case 0x92: return 0x2019;  case 0x93: return 0x201C;
+        case 0x94: return 0x201D;  case 0x95: return 0x2022;  case 0x96: return 0x2013;
+        case 0x97: return 0x2014;
+    }
+    return 0xFFFD;
+}
+
+//  UTF-8 of the buffer into out (NUL-terminated, cut whole at cap). Returns
+//  the bytes written.
+extern "C" int RanIME_TextUtf8(char *out, int cap) {
+    if (!out || cap <= 0) return 0;
+    int n = 0;
+    for (size_t i = 0; i < g_imeText.size(); ++i) {
+        const unsigned cp = cp874ToUni((unsigned char)g_imeText[i]);
+        char u[3]; int k;
+        if (cp < 0x80)       { u[0] = (char)cp; k = 1; }
+        else if (cp < 0x800) { u[0] = (char)(0xC0 | (cp >> 6)); u[1] = (char)(0x80 | (cp & 0x3F)); k = 2; }
+        else                 { u[0] = (char)(0xE0 | (cp >> 12)); u[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                               u[2] = (char)(0x80 | (cp & 0x3F)); k = 3; }
+        if (n + k >= cap) break;
+        for (int j = 0; j < k; ++j) out[n++] = u[j];
+    }
+    out[n] = '\0';
+    return n;
+}
+
+extern "C" int RanIME_Caret(void) {
+    int c = imeCaret();
+    if (c < 0) c = 0;
+    if (c > (int)g_imeText.size()) c = (int)g_imeText.size();
+    return c;
+}
+
+//  The keyboard moved its cursor (the space-bar trackpad, a cursor slide):
+//  the client's caret follows, so the next character goes in there.
+extern "C" void RanIME_SetCaret(int n) {
+    if (n < 0) n = 0;
+    if (n > (int)g_imeText.size()) n = (int)g_imeText.size();
+    imeSetCaret(n);
+}
+
+//  The focused box hides what is typed (a password, CUIEditBox::IsHide): the
+//  platform field becomes a secure one, so no keyboard learns it and nothing
+//  can be copied out of it.
+static int g_imeSecure = 0;
+extern "C" void RanIME_SetSecure(int on) { g_imeSecure = on ? 1 : 0; }
+extern "C" int  RanIME_IsSecure(void) { return g_imeSecure; }
 
 extern "C" int RanInput_TakeEnter(void);
 

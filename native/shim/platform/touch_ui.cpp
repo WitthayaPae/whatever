@@ -98,7 +98,12 @@ enum { kGrpStick, kGrpAttack, kGrpSkill, kGrpPage, kGrpAuto, kGrpPK,
        //  The nearby-players button (2026-10-20): in a crowd, one button that
        //  lists the players close by, instead of a balloon on every name. Saved
        //  after the talk button, in the same tail block.
-       kGrpNear, kGrpCount };
+       kGrpNear,
+       //  The event scoreboard button (2026-11-05, the user: "F11 take out of
+       //  the setting ... create new btn show when in the map event ... toggle
+       //  and edit like other hud"). Saved after the pick-up anchor, the last
+       //  value an older file carries: 4 floats and its hidden flag.
+       kGrpEvent, kGrpCount };
 //  The groups the layout file carried before the talk button: every block
 //  sized by group count is this many long, and the talk group comes last.
 const int kGrpFile = kGrpTalk;
@@ -179,6 +184,25 @@ WinBox    g_winBox[kWinMax] = { };
 int       g_winCount = 0;
 SlotAdj   g_winAdj[kWinMax];
 SlotAdj   g_winBefore[kWinMax];
+//  The kill feed (window slot 6, 2026-11-04) is not sized: the user wanted
+//  fewer rows, not bigger ones ("instead of showing 10 line we can edit it to
+//  2-3"). Its size value holds the row count as rows / 10, so the saved 1.0
+//  of every existing layout is the full 10 rows, and the editor's - and + step
+//  one row each.
+const int kWinKillFeed = 6;
+const int kKillFeedRowsMax = 10;
+int killFeedRows() {
+    const int n = (int)(g_winAdj[kWinKillFeed].scale * (float)kKillFeedRowsMax + 0.5f);
+    return n < 1 ? 1 : (n > kKillFeedRowsMax ? kKillFeedRowsMax : n);
+}
+bool editingKillFeed();
+//  The chat box on the screen (window slot 7, 2026-11-05): its height only.
+//  The size value is the height against the designed 210, 60% to 150%
+//  (CBasicChat::MobileNewLayout keeps at least three lines); it is not moved
+//  from here - the client keeps it on the bottom edge, over the keyboard.
+const int   kWinChat = 7;
+const float kChatMin = 0.6f, kChatMax = 1.5f;
+bool editingChat();
 
 //  Taken off the HUD by the player (the user, 2026-10-09: "let the player
 //  remove buttons in the HUD editor"). A hidden control is not drawn and takes
@@ -374,6 +398,16 @@ bool g_nearShow = false;
 int  g_nearPtr  = -1;
 bool g_nearDown = false;
 bool g_nearEdge = false;
+
+//  The event scoreboard button: shown by the client on an event map, lit
+//  while the scoreboard is open; a press is F11 (RanTouch_ConsumeEvent).
+//  Placed at the top of the right-hand column, one step above the menu.
+bool  g_evtShow = false;
+bool  g_evtLit  = false;
+int   g_evtPtr  = -1;
+bool  g_evtDown = false;
+bool  g_evtEdge = false;
+float g_evtBaseX = 0.0f, g_evtBaseY = 0.0f, g_evtBaseR = 0.0f;
 
 //  The balloons, placed by the client each frame at the end of each near
 //  player's name plate (surface pixels). id is the player's.
@@ -1197,7 +1231,8 @@ void layout() {
     //  object as everything else the thumb works, and the HUD editor can move
     //  it like the rest.
     g_buttons[8].centre.x = arrowX;
-    g_buttons[8].centre.y = attackY - g_unit * 3.40f;
+    //  In the camera lock's old place (2.55, it was 3.40) so the column has no gap.
+    g_buttons[8].centre.y = attackY - g_unit * 2.55f;
     g_buttons[8].radius   = modeR;
     g_buttons[8].slot     = kSlotMenu;
 
@@ -1205,6 +1240,12 @@ void layout() {
     g_buttons[kBtnBot].centre.y = attackY - g_unit * 0.45f;
     g_buttons[kBtnBot].radius   = modeR;
     g_buttons[kBtnBot].slot     = kSlotBot;
+
+    //  The event scoreboard button: the next step up the column, above the
+    //  menu (the column is 0.70 apart: 0.45 bot ... 2.55 menu, 3.25 this).
+    g_evtBaseX = arrowX;
+    g_evtBaseY = attackY - g_unit * 3.25f;
+    g_evtBaseR = modeR;
 
     //  Pick-up is placed by placePickup(), after the arc is known.
     g_buttons[5].slot     = kSlotPickup;
@@ -1346,7 +1387,12 @@ void placePickup() {
     b.slot = kSlotPickup;
     float cx, cy, r;
     if (g_pickNewHome && g_skillCircleCount > 0) {
-        const Vec2 at = g_buttons[0].centre;
+        //  Measured from the attack button as DESIGNED, the place the skill arc
+        //  hangs off (RanTouch_GetSkillArc). Taken from the live button, moving
+        //  the attack button in the HUD editor moved this one too (the user,
+        //  2026-11-05: "I edit the btn normal attack why it effect the pickup").
+        Vec2 at = g_buttons[0].centre;
+        if (g_attackBaseR > 0.0f) { at.x = g_attackBaseX; at.y = g_attackBaseY; }
         float sx = 0.0f, sy = 0.0f, outer = 0.0f, rs = 0.0f;
         for (int i = 0; i < g_skillCircleCount; ++i) {
             const SkillCircle &c = g_skillCircles[i];
@@ -1447,6 +1493,8 @@ bool   g_restExit = false;
 bool   g_editBar = false;           //  dragging the editor's own toolbar
 int    g_editSel = -1;              //  selected group, -1 none
 int    g_editSlot = -1;             //  which skill slot, when the group is the arc
+bool editingKillFeed() { return g_editSel == kGrpWin && g_editSlot == kWinKillFeed; }
+bool editingChat()     { return g_editSel == kGrpWin && g_editSlot == kWinChat; }
 int    g_editPtr = -1;              //  the finger dragging it
 float  g_editLastX = 0, g_editLastY = 0;
 HudAdj g_editBefore[kGrpCount];     //  for cancel
@@ -1609,6 +1657,7 @@ void editNudge(float mdx, float mdy) {
         g_cornerAdj[g_editSlot].dx += mdx;
         g_cornerAdj[g_editSlot].dy += mdy;
     } else if (g_editSel == kGrpWin && g_editSlot >= 0 && g_editSlot < kWinMax) {
+        if (g_editSlot == kWinChat) return;     //  height only (kWinChat)
         g_winAdj[g_editSlot].dx += mdx;
         g_winAdj[g_editSlot].dy += mdy;
     } else {
@@ -1636,6 +1685,7 @@ int   g_potCount = 0;
 
 void talkCircle(Vec2 &c, float &r);     //  below, with the cancel circle it hangs off
 void nearCircle(Vec2 &c, float &r);     //  beside it
+void eventCircle(Vec2 &c, float &r);    //  below, with them
 
 bool groupCircle(int g, Vec2 &c, float &r) {
     switch (g) {
@@ -1644,7 +1694,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
         case kGrpAuto:   c = g_buttons[3].centre; r = g_buttons[3].radius * 1.35f; return true;
         case kGrpPK:     c = g_buttons[4].centre; r = g_buttons[4].radius * 1.35f; return true;
         case kGrpPickup: c = g_buttons[5].centre; r = g_buttons[5].radius * 1.35f; return true;
-        case kGrpCamera: c = g_buttons[6].centre; r = g_buttons[6].radius * 1.35f; return true;
+        case kGrpCamera: return false;     //  camera lock removed (buttonHidden)
         case kGrpMenu:   c = g_buttons[8].centre; r = g_buttons[8].radius * 1.35f; return true;
         //  Only while the client shows them (beside the chat).
         case kGrpVehicle: if (!g_vehShow) return false;
@@ -1657,6 +1707,8 @@ bool groupCircle(int g, Vec2 &c, float &r) {
         //  it is needed.
         case kGrpTalk:    talkCircle(c, r); r *= 1.2f; return true;
         case kGrpNear:    nearCircle(c, r); r *= 1.2f; return true;
+        //  Always in the editor too, event map or not.
+        case kGrpEvent:   eventCircle(c, r); r *= 1.35f; return r > 0.0f;
         case kGrpPage: {
             c.x = (g_buttons[kBtnF1].centre.x + g_buttons[kBtnF4].centre.x) * 0.5f;
             c.y = g_buttons[kBtnF1].centre.y;
@@ -1730,7 +1782,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
 //  The group under a finger. Small buttons first, so one sitting on top of a
 //  bigger group can still be picked; the skill slots before the stick.
 int groupAt(float x, float y) {
-    static const int order[] = { -2, -3, -4, kGrpTalk, kGrpNear, kGrpPickup, kGrpPage, kGrpAuto, kGrpPK,
+    static const int order[] = { -2, -3, -4, kGrpTalk, kGrpNear, kGrpEvent, kGrpPickup, kGrpPage, kGrpAuto, kGrpPK,
                                  kGrpCamera, kGrpMenu, kGrpVehicle, kGrpFist, kGrpBot,
                                  -5, kGrpAttack, kGrpStick };
     g_editSlot = -1;
@@ -1977,12 +2029,36 @@ void cancelCircle(Vec2 &c, float &r) {
     if (c.y < r * 1.4f) c.y = r * 1.4f;
 }
 
+//  Where the talk and nearby-players buttons start from: the cancel circle's
+//  place for the attack button as DESIGNED - where and how big it is before
+//  the player moved or sized it. Taken from the live button, moving the attack
+//  button in the HUD editor carried the talk button with it (the user,
+//  2026-11-04: "it also move the talk npc btn which it should be separate").
+//  The skill arc hangs off the same designed place, so it does not follow the
+//  attack button either.
+void talkAnchor(Vec2 &c, float &r) {
+    const bool base = g_attackBaseR > 0.0f;
+    const float baseR = base ? g_attackBaseR
+                             : (g_buttons[0].radius > 0.0f ? g_buttons[0].radius : g_unit * 0.5f);
+    const float bx = base ? g_attackBaseX : g_buttons[0].centre.x;
+    const float by = base ? g_attackBaseY : g_buttons[0].centre.y;
+    r = baseR * 0.62f;
+    float top = by - baseR;
+    for (int i = 0; i < g_skillCircleCount; ++i) {
+        const float t = g_skillCircles[i].y - g_skillCircles[i].r * 1.3f;
+        if (t < top) top = t;
+    }
+    c.x = bx;
+    c.y = top - r * 1.9f;
+    if (c.y < r * 1.4f) c.y = r * 1.4f;
+}
+
 //  The talk button: the cancel circle's place, a little larger - it is a
 //  button to press, not a place to drop a drag. Then wherever, and as big as,
 //  the player put it in the HUD editor (kGrpTalk).
 void talkCircle(Vec2 &c, float &r) {
     float cr;
-    cancelCircle(c, cr);
+    talkAnchor(c, cr);
     const HudAdj &a = g_adj[kGrpTalk];
     r = cr * 1.08f * a.scale;
     c.x += a.dx * g_unit;
@@ -2002,7 +2078,7 @@ bool talkVisible() { return g_talkShow && !g_edit && !(g_aim.ptr >= 0 && g_aim.a
 //  player put it (kGrpNear).
 void nearCircle(Vec2 &c, float &r) {
     float cr;
-    cancelCircle(c, cr);
+    talkAnchor(c, cr);
     const HudAdj &a = g_adj[kGrpNear];
     const float base = cr * 0.80f;
     r = base * a.scale;
@@ -2017,6 +2093,22 @@ void nearCircle(Vec2 &c, float &r) {
 }
 
 bool nearVisible() { return g_nearShow && !g_edit && !(g_aim.ptr >= 0 && g_aim.aiming); }
+
+//  The event scoreboard button: its place in the column, then wherever and
+//  as big as the player put it (kGrpEvent). No size while taken off the HUD.
+void eventCircle(Vec2 &c, float &r) {
+    const HudAdj &a = g_adj[kGrpEvent];
+    r = g_evtBaseR * shownScale(g_hidGrp[kGrpEvent], a.scale);
+    c.x = g_evtBaseX + a.dx * g_unit;
+    c.y = g_evtBaseY + a.dy * g_unit;
+    const float W = (float)g_width, H = (float)g_height;
+    if (c.x < r) c.x = r;
+    if (c.y < r) c.y = r;
+    if (W > 0.0f && c.x > W - r) c.x = W - r;
+    if (H > 0.0f && c.y > H - r) c.y = H - r;
+}
+
+bool eventVisible() { return g_evtShow && !g_edit && !g_hidGrp[kGrpEvent] && !(g_aim.ptr >= 0 && g_aim.aiming); }
 
 //  A balloon's press area: a little wider than it is drawn, and never smaller
 //  than a fingertip.
@@ -2084,6 +2176,7 @@ void RanTouch_SetActive(int active) {
     g_skillEvtN = 0;
     g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
     g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+    g_evtPtr = -1; g_evtDown = false; g_evtEdge = false;
     g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
     g_balloonN = 0;
 }
@@ -2106,6 +2199,7 @@ extern "C" void RanTouch_SetPhotoMode(int on) {
     g_skillEvtN = 0;
     g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
     g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+    g_evtPtr = -1; g_evtDown = false; g_evtEdge = false;
     g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
 }
 
@@ -2141,6 +2235,7 @@ extern "C" void RanTouch_SetRestMode(int on) {
     g_skillEvtN = 0;
     g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
     g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+    g_evtPtr = -1; g_evtDown = false; g_evtEdge = false;
     g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
     g_pinch.a = g_pinch.b = -1;
 }
@@ -2243,12 +2338,26 @@ int RanTouch_PointerDown(int id, float x, float y) {
                     editEnd();
                     break;
                 case kToolReset:  editDefaultsAll(); break;
-                case kToolSizeDn: if (pScale) {
+                case kToolSizeDn: if (pScale && editingKillFeed()) {
+                    //  One row fewer, down to one.
+                    const int n = killFeedRows() - 1;
+                    *pScale = (float)(n < 1 ? 1 : n) / (float)kKillFeedRowsMax;
+                } else if (pScale && editingChat()) {
+                    //  10% lower, down to 60% (the chat keeps three lines itself).
+                    *pScale = floorf((*pScale - 0.1f) * 10.0f + 0.5f) / 10.0f;
+                    if (*pScale < kChatMin) *pScale = kChatMin;
+                } else if (pScale) {
                     //  A game window only grows: its art is pixel art, and below
                     //  100% rows of it drop out (the HP labels at 90%, 2026-10-07).
                     const float fMin = (g_editSel == kGrpWin) ? 1.0f : 0.6f;
                     *pScale -= 0.1f; if (*pScale < fMin) *pScale = fMin; } break;
-                case kToolSizeUp: if (pScale) { *pScale += 0.1f; if (*pScale > 1.6f) *pScale = 1.6f; } break;
+                case kToolSizeUp: if (pScale && editingKillFeed()) {
+                    const int n = killFeedRows() + 1;
+                    *pScale = (float)(n > kKillFeedRowsMax ? kKillFeedRowsMax : n) / (float)kKillFeedRowsMax;
+                } else if (pScale && editingChat()) {
+                    *pScale = floorf((*pScale + 0.1f) * 10.0f + 0.5f) / 10.0f;
+                    if (*pScale > kChatMax) *pScale = kChatMax;
+                } else if (pScale) { *pScale += 0.1f; if (*pScale > 1.6f) *pScale = 1.6f; } break;
                 case kToolAlphaDn: if (a) { a->alpha -= 0.1f; if (a->alpha < 0.2f) a->alpha = 0.2f; } break;
                 case kToolAlphaUp: if (a) { a->alpha += 0.1f; if (a->alpha > 1.0f) a->alpha = 1.0f; } break;
                 case kToolHide: { bool *h = hidFlag(); if (h) *h = !*h; } break;
@@ -2349,6 +2458,21 @@ int RanTouch_PointerDown(int id, float x, float y) {
             g_nearPtr = id; g_nearDown = true;
             Touch *tn = addTouch(id, x, y);
             if (tn) tn->claimed = true;
+            return 1;
+        }
+    }
+
+    //  The event scoreboard button, the same way.
+    if (g_evtPtr < 0 && eventVisible()) {
+        Vec2 ec; float er;
+        eventCircle(ec, er);
+        const int win = RanUI_PointInDragControl
+                          ? RanUI_PointInDragControl((int)x, (int)y)
+                          : (RanUI_PointInControl ? RanUI_PointInControl((int)x, (int)y) : 0);
+        if (!win && er > 0.0f && hit(ec, er * 1.35f, x, y)) {
+            g_evtPtr = id; g_evtDown = true;
+            Touch *te = addTouch(id, x, y);
+            if (te) te->claimed = true;
             return 1;
         }
     }
@@ -2561,6 +2685,13 @@ int RanTouch_PointerMove(int id, float x, float y) {
         return 1;
     }
 
+    if (g_evtPtr == id) {
+        Vec2 ec; float er;
+        eventCircle(ec, er);
+        g_evtDown = hit(ec, er * 1.8f, x, y);
+        return 1;
+    }
+
     if (g_balloonPtr == id) {
         if (g_balloonHit >= 0 && g_balloonHit < g_balloonN) {
             const Balloon &b = g_balloon[g_balloonHit];
@@ -2685,6 +2816,12 @@ int RanTouch_PointerUp(int id, float x, float y) {
     if (g_nearPtr == id) {
         if (g_nearDown && g_nearShow) g_nearEdge = true;
         g_nearPtr = -1; g_nearDown = false;
+        claimed = 1;
+    }
+
+    if (g_evtPtr == id) {
+        if (g_evtDown && g_evtShow) g_evtEdge = true;
+        g_evtPtr = -1; g_evtDown = false;
         claimed = 1;
     }
 
@@ -3020,9 +3157,15 @@ enum {
     kCellFistOn,    kCellSlotRing,
     //  auto-hunt, off and on (2026-10-05)
     kCellBot,       kCellBotOn,
+    //  talk to NPC: the chat bubble with "NPC" in it (2026-11-05), so it is
+    //  not taken for a player's name balloon, which keeps kCellChat.
+    kCellNpcChat,
 };
 
 bool buttonHidden(int slot) {
+    //  Camera lock removed (the user, 2026-11-03: "we do not need that"):
+    //  never drawn, never hit, not in the HUD editor, so it can't be turned on.
+    if (slot == kSlotCamLock) return true;
     if ((slot == kSlotVehicle || slot == kSlotFist) && !g_vehShow) return true;
     if (slot == kSlotBot && !g_botShow) return true;
     if (slot == kSlotPickup && !g_pickShow && !g_edit) return true;
@@ -3295,6 +3438,15 @@ extern "C" void RanTouch_SetWinBox(int i, float x, float y, float w, float h) {
 }
 
 //  And what the player did to it: an offset in pixels and an absolute size.
+//  How many rows the kill feed shows (window slot 6's size value, see killFeedRows).
+extern "C" int RanTouch_GetKillFeedRows(void) { return killFeedRows(); }
+
+//  The chat box's height against its designed 210 (window slot 7, kWinChat).
+extern "C" float RanTouch_GetChatHeightScale(void) {
+    const float s = g_winAdj[kWinChat].scale;
+    return (s >= kChatMin - 0.01f && s <= kChatMax + 0.01f) ? s : 1.0f;
+}
+
 extern "C" void RanTouch_GetWinAdjust(int i, float *dx, float *dy, float *scale) {
     float x = g_adj[kGrpWin].dx * g_unit, y = g_adj[kGrpWin].dy * g_unit, s = g_adj[kGrpWin].scale;
     if (i >= 0 && i < kWinMax) {
@@ -4115,9 +4267,16 @@ void drawEditor() {
         int pct = (int)(v * 100.0f + 0.5f);
         const float dh = r * 0.62f, dw = dh * 0.55f, gap = dw * 0.25f;
         char digits[4]; int nd = 0;
+        if (pair == 0 && editingKillFeed()) {
+            //  The kill feed's size is its row count: 1 to 10.
+            const int n = killFeedRows();
+            if (n >= 10) digits[nd++] = (char)(n / 10);
+            digits[nd++] = (char)(n % 10);
+        } else {
         if (pct >= 100) digits[nd++] = (char)(pct / 100);
         digits[nd++] = (char)((pct / 10) % 10);
         digits[nd++] = (char)(pct % 10);
+        }
         float x = mx - (nd * dw + (nd - 1) * gap) * 0.5f;
         for (int i = 0; i < nd; ++i) {
             drawDigit(x, a.y - dh * 0.25f, dw, dh, digits[i], kInk.r, kInk.g, kInk.b, 1.0f);
@@ -4640,10 +4799,13 @@ void RanTouch_Render(void) {
         const bool dn = g_talkDown && g_talkPtr >= 0;
         if (hudSheet()) {
             //  The silver set paints the whole button - glass, rim and bubble
-            //  (the chat cell). A soft white lift while it is held.
+            //  (the NPC chat cell; the plain chat cell on a sheet without it).
+            //  A soft white lift while it is held.
             if (dn) drawHalo(tc.x, tc.y, tr, rgba(1.0f, 1.0f, 1.0f, 0.35f), 0.35f);
             emit();
-            drawHudCell(kCellChat, tc.x, tc.y, tr * kBezelSize, 1.0f);
+            const float cellPx = g_hudTexW / (float)kHudCols;
+            const bool npcCell = cellPx > 0.0f && (float)(kCellNpcChat / kHudCols + 1) * cellPx <= g_hudTexH + 0.5f;
+            drawHudCell(npcCell ? kCellNpcChat : kCellChat, tc.x, tc.y, tr * kBezelSize, 1.0f);
             glUseProgram(g_prog);
             glBindVertexArray(g_vao);
             glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
@@ -4689,6 +4851,29 @@ void RanTouch_Render(void) {
             drawRing(nc.x, nc.y, nr * 0.86f, nr * 0.98f, 0.93f, 0.74f, 0.36f, 0.95f);
         }
         glyphPeople(nc.x + nr * 0.05f, nc.y + nr * 0.04f, nr * (dn ? 0.94f : 1.0f), 1.0f);
+    }
+    g_drawAlpha = 1.0f;
+
+    //  The event scoreboard button, as a mode toggle of the column: the
+    //  camera lock's old cells, repainted as a trophy (2026-11-05), lit while
+    //  the scoreboard is open.
+    g_drawAlpha = g_adj[kGrpEvent].alpha;
+    if (eventVisible() || g_edit) {
+        Vec2 ec; float er;
+        eventCircle(ec, er);
+        const bool dn = g_evtDown && g_evtPtr >= 0;
+        const float R = er * (dn ? 0.94f : 1.0f);
+        if (er > 0.0f && hudSheet()) {
+            emit();
+            drawHudCell(g_evtLit ? kCellCamLockOn : kCellCamLock, ec.x, ec.y, R * 1.06f, g_adj[kGrpEvent].alpha);
+            glUseProgram(g_prog);
+            glBindVertexArray(g_vao);
+            glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
+            glUniform2f(uViewport, (float)g_width, (float)g_height);
+        } else if (er > 0.0f) {
+            discGrad(ec.x, ec.y, R, rgba(0.16f, 0.13f, 0.09f, 0.90f), rgba(0.06f, 0.05f, 0.04f, 0.90f));
+            drawRing(ec.x, ec.y, R * 0.86f, R * 0.98f, 0.93f, 0.74f, 0.36f, g_evtLit ? 1.0f : 0.6f);
+        }
     }
     g_drawAlpha = 1.0f;
 
@@ -5049,6 +5234,18 @@ extern "C" int RanTouch_ConsumeNear(void) {
     return (g_inited && g_active) ? 1 : 0;
 }
 
+extern "C" void RanTouch_SetEventButton(int show, int lit) {
+    g_evtShow = (show != 0);
+    g_evtLit  = (lit != 0);
+    if (!g_evtShow) { g_evtPtr = -1; g_evtDown = false; }
+}
+
+extern "C" int RanTouch_ConsumeEvent(void) {
+    if (!g_evtEdge) return 0;
+    g_evtEdge = false;
+    return (g_inited && g_active) ? 1 : 0;
+}
+
 extern "C" void RanTouch_SetBalloons(int n, const float *fx, const float *fy, const float *fr,
                                      const unsigned *id) {
     if (n < 0 || !fx || !fy || !fr || !id) n = 0;
@@ -5103,6 +5300,7 @@ extern "C" void RanTouch_SetEditMode(int on) {
         g_skillEvtN = 0;
         g_talkPtr = -1; g_talkDown = false; g_talkEdge = false;
         g_nearPtr = -1; g_nearDown = false; g_nearEdge = false;
+        g_evtPtr = -1; g_evtDown = false; g_evtEdge = false;
         g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
         g_pickNewHomeB = g_pickNewHome;
         g_edit = true;
@@ -5137,8 +5335,9 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
                 + kWinMax * 3                           //  HUD windows, appended 2026-10-06
                 + (kCornerMax - kCornerSaved) * 3       //  corner icons 5-8, appended 2026-10-07
                 + kHideSaved                            //  hidden flags, appended 2026-10-09
-                + (kGrpCount - kGrpFile) * 4            //  talk button 2026-10-19, nearby players 2026-10-20
-                + 1;                                    //  pick-up anchor, appended 2026-10-20
+                + (kGrpEvent - kGrpFile) * 4            //  talk button 2026-10-19, nearby players 2026-10-20
+                + 1                                     //  pick-up anchor, appended 2026-10-20
+                + 4 + 1;                                //  event scoreboard button + its hidden flag, 2026-11-05
     if (!out || max < n) return n;
     for (int i = 0; i < kGrpLegacy; ++i) {
         out[i * 4]     = g_adj[i].dx;    out[i * 4 + 1] = g_adj[i].dy;
@@ -5172,13 +5371,17 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     for (int i = 0; i < kPotMax; ++i)                    out[w++] = g_hidPot[i] ? 1.0f : 0.0f;
     for (int i = 0; i < kPageMax; ++i)                   out[w++] = g_hidPage[i] ? 1.0f : 0.0f;
     for (int i = 0; i < kCornerMax; ++i)                 out[w++] = g_hidCorner[i] ? 1.0f : 0.0f;
-    for (int i = kGrpFile; i < kGrpCount; ++i) {
+    for (int i = kGrpFile; i < kGrpEvent; ++i) {
         out[w++] = g_adj[i].dx;    out[w++] = g_adj[i].dy;
         out[w++] = g_adj[i].scale; out[w++] = g_adj[i].alpha;
     }
     //  1: the pick-up button hangs off the skill arc; 2: off the attack button
     //  (a layout from before it moved, with the player's own offset).
     out[w++] = g_pickNewHome ? 1.0f : 2.0f;
+    //  The event scoreboard button, after everything an older file has.
+    out[w++] = g_adj[kGrpEvent].dx;    out[w++] = g_adj[kGrpEvent].dy;
+    out[w++] = g_adj[kGrpEvent].scale; out[w++] = g_adj[kGrpEvent].alpha;
+    out[w++] = g_hidGrp[kGrpEvent] ? 1.0f : 0.0f;
     return n;
 }
 
@@ -5249,7 +5452,11 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
             if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
             //  Grow-only (see kToolSizeDn): an older layout's 90% loads as 100%.
-            if (!(sc >= 1.0f && sc <= 1.6f))  sc = 1.0f;
+            //  Not the kill feed: its value is a row count, 0.1 (1 row) to 1.0
+            //  (10 rows), and the grow-only rule put every choice back to 10.
+            if (i == kWinKillFeed) { if (!(sc >= 0.05f && sc <= 1.0f)) sc = 1.0f; }
+            else if (i == kWinChat) { if (!(sc >= kChatMin - 0.01f && sc <= kChatMax + 0.01f)) sc = 1.0f; dx = dy = 0.0f; }
+            else if (!(sc >= 1.0f && sc <= 1.6f))  sc = 1.0f;
             g_winAdj[i].dx = dx; g_winAdj[i].dy = dy; g_winAdj[i].scale = sc;
         }
         //  Corner icons 5-8. Older files stop before them.
@@ -5268,7 +5475,7 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             for (int i = 0; i < count[a]; ++i)
                 hidden[a][i] = (r < n) ? (in[r++] > 0.5f) : false;
         //  The talk button, last in the file. Older files stop before it.
-        for (int i = kGrpFile; i < kGrpCount; ++i) {
+        for (int i = kGrpFile; i < kGrpEvent; ++i) {
             float dx = 0.0f, dy = 0.0f, sc = 1.0f, al = 1.0f;
             if (r + 3 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; al = in[r++]; }
             if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
@@ -5287,6 +5494,19 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (v > 1.5f)      g_pickNewHome = false;
             else if (v > 0.5f) g_pickNewHome = true;
             else               g_pickNewHome = (g_adj[kGrpPickup].dx == 0.0f && g_adj[kGrpPickup].dy == 0.0f);
+        }
+        //  The event scoreboard button (2026-11-05). Older files stop before it,
+        //  or carry zeros: out of range, so the designed place, shown.
+        {
+            float dx = 0.0f, dy = 0.0f, sc = 1.0f, al = 1.0f, hid = 0.0f;
+            if (r + 3 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; al = in[r++]; }
+            if (r < n) hid = in[r++];
+            if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
+            if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
+            if (!(sc >= 0.6f && sc <= 1.6f)) sc = 1.0f;
+            if (!(al >= 0.2f && al <= 1.0f)) al = 1.0f;
+            g_adj[kGrpEvent].dx = dx; g_adj[kGrpEvent].dy = dy; g_adj[kGrpEvent].scale = sc; g_adj[kGrpEvent].alpha = al;
+            g_hidGrp[kGrpEvent] = (hid > 0.5f);
         }
         for (int g = 0; g < kGrpCount; ++g)
             if (!canHideGroup(g) || g == kGrpSkill || g == kGrpPotion || g == kGrpCorner) g_hidGrp[g] = false;

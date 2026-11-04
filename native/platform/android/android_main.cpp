@@ -535,6 +535,49 @@ Java_com_ran_launcher_RanActivity_nativeBackspace(JNIEnv *, jclass) {
     RanIME_Backspace();
 }
 
+//  The edit buffer as the keyboard's field mirrors it (2026-11-02): its text,
+//  where the caret is, and moving the caret - so the keyboard's cursor slide
+//  moves the client's caret. One UTF-16 unit per buffer byte (shell_mobile.cpp
+//  RanIME_TextUtf8), so the indices need no conversion.
+extern "C" int  RanIME_TextUtf8(char *out, int cap);
+extern "C" int  RanIME_Caret(void);
+extern "C" void RanIME_SetCaret(int n);
+extern "C" int  RanIME_IsSecure(void);
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_ran_launcher_RanActivity_nativeImeText(JNIEnv *env, jclass) {
+    static char buf[4096];
+    RanIME_TextUtf8(buf, (int)sizeof(buf));
+    return env->NewStringUTF(buf);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_ran_launcher_RanActivity_nativeImeCaret(JNIEnv *, jclass) { return RanIME_Caret(); }
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_ran_launcher_RanActivity_nativeImeSetCaret(JNIEnv *, jclass, jint n) { RanIME_SetCaret((int)n); }
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_ran_launcher_RanActivity_nativeImeSecure(JNIEnv *, jclass) { return RanIME_IsSecure() ? JNI_TRUE : JNI_FALSE; }
+
+//  A long press on the box being typed into (UIEditBox.cpp RanUI_PasteHoldAt):
+//  RanActivity.ranShowPaste puts a small Paste button there. In window pixels,
+//  as the activity lays out its views; the client works in pixels / InputScale.
+extern "C" void RanPlat_ShowPasteMenu(int x, int y) {
+    if (!g_app) return;
+    JNIEnv *env = NULL;
+    if (g_app->activity->vm->AttachCurrentThread(&env, NULL) != JNI_OK || !env) return;
+    jobject act = g_app->activity->clazz;
+    jclass  cAct = env->GetObjectClass(act);
+    jmethodID m = env->GetMethodID(cAct, "ranShowPaste", "(II)V");
+    if (m) {
+        const float s = RanGL_InputScale();
+        env->CallVoidMethod(act, m, (jint)(x * s), (jint)(y * s));
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    g_app->activity->vm->DetachCurrentThread();
+}
+
 //  How much of the bottom of the window the soft keyboard covers, in
 //  thousandths of the window height.
 //

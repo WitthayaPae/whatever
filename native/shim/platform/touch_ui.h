@@ -174,6 +174,10 @@ extern "C" void RanTouch_GetCornerAdjust(int i, float *dx, float *dy, float *sca
 //  rects, and the offset / absolute size the editor gives each.
 extern "C" void RanTouch_SetWinBox(int i, float x, float y, float w, float h);
 extern "C" void RanTouch_GetWinAdjust(int i, float *dx, float *dy, float *scale);
+//  The kill feed's row count, 1..10, as set in the HUD editor (window slot 6).
+extern "C" int  RanTouch_GetKillFeedRows(void);
+//  The chat box's height against its designed 210, 0.6..1.5 (window slot 7).
+extern "C" float RanTouch_GetChatHeightScale(void);
 
 //  How big the player has asked the skill slots to be.
 extern "C" float RanTouch_GetSkillScale(void);
@@ -316,3 +320,7 @@ extern "C" void RanTouch_SetNearButton(int show);
 //  The nearby-players button's place: cx of the width, cy and r of the height.
 extern "C" void RanTouch_GetNearButton(float *cx, float *cy, float *r);
 extern "C" int  RanTouch_ConsumeNear(void);
+//  The event scoreboard button (2026-11-05): shown on an event map, lit while
+//  the scoreboard is open. Consume returns 1 once per press (the client sends F11).
+extern "C" void RanTouch_SetEventButton(int show, int lit);
+extern "C" int  RanTouch_ConsumeEvent(void);
