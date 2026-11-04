@@ -116,6 +116,70 @@ the patch ships a needless APK bump).
 
 
 
+## UPLOAD CHECKLIST — release 825 / app 289 (written 2026-11-05; tick off as done)
+
+Everything below is built and waiting for the user. Nothing has been uploaded yet.
+
+**Before uploading the patch: decide on the timing.** Patch 825 sets minApk 289 and minIos 289.
+Players who installed from Google Play or TestFlight are on 287 and cannot play until their store
+approves 289. Players on the patch-site APK / AltStore get 289 at once. Either upload after both
+approvals, or accept the block. (Play: production 1.1.102 (289) sent for review 11-05. TestFlight:
+build 289 in the Public group, Beta App Review WAITING_FOR_REVIEW.)
+
+### 1. Game server (first, then restart) — from `DEV EP9/store-release/patch825_app289/server/`
+- [ ] `ServerField.exe`  (11-05 02:11) — stall resume (+ no-reply fix), auto-click question, academy quests school map, gacha announce, SQL quoting
+- [ ] `ServerAgent.exe`  (11-05 02:11)
+- [ ] `data/glogic/GLogic.rcc` — trainer shops, potion boxes 6/3/1 h, costume [ทับ] names
+- [ ] `data/glogic/quest/Quest.rcc` — academy sweep quests 3125-3128 (+ Q110 MP from 10-31)
+- [ ] `data/glogic/npctalk/NpcTalk.rcc` — SG 9/27 and PHX 34/31 offer the new quests
+- [ ] `data/gui/Gui.rcc` — gacha text, photo button, character page
+- [ ] (`data/glogicserver/GLogicServer.rcc` is unchanged since 823 — only if the server's copy is older)
+- [ ] Server `Config.ini` next to ServerField.exe: `[GAME_FEATURE] bFeatureAntiBot = 1` (the client config.ini has it; the server reads its own)
+- [ ] Restart the servers
+
+### 2. Patch — copy the contents of `DEV EP9/MOBILE/native/out/upload/` into `launcher_mobile/`, in this order
+- [ ] `blobs/` — 10 files (132.5 MB):
+  - 145bdc85…  APK 289 (50,350,149)
+  - c822ef62…  data/gui/Gui.rcc (52,848,472)
+  - 1f1468ea…  data/glogic/GLogic.rcc (7,899,382)
+  - 1def073b…  data/glogic/npctalk/NpcTalk.rcc (1,315,949)
+  - 81797886…  data/glogic/quest/Quest.rcc (878,426)
+  - 662c6b66…, 893dfa82…, e1e72733…  textures/gui/mobile_hud3/4/5.dds (7,864,448 each)
+  - 9e67e3f1…  textures/gui/mobile_icons.dds (2,097,280)
+  - bfe2af33…  config.ini (1,508)
+- [ ] `ios/` — RanLegacyM.ipa (1.1.102 / 289), source.json, install.html, icon.png
+- [ ] `android/` — RanLegacyM.apk (289), version.json, index.html, icon.png
+- [ ] `manifest.json` + `manifest.sig` — LAST (version 825)
+- [ ] Do not upload `upload/.since` (the tool's own marker)
+- [ ] Cloudflare: purge `manifest.json` + `manifest.sig`
+- [ ] Tell me it is up: I run `build-and-publish.js --uploaded` to clear the set and check the live manifest
+
+### 3. Top-up site (from 11-03, separate from the game patch)
+- [ ] Check the server's `C:\www\topup\functions.php` is the 11-03 01:02 one (the fix after the 00:00 deploy that broke orders). If not, upload from `RAN/topup_prod/`: `index.php`, `functions.php`, `admin.php`, `tmw_hook.php`
+
+### 4. Stores (nothing to upload — watch only)
+- [ ] Google Play production 289 approved → no action (players update from the Play Store)
+- [ ] TestFlight 289 approved → no action (Public group gets it)
+
+### 5. After it is live
+- [ ] Post `Prompt/patch app 289/POST.txt` (fill `[วันที่]` / `[เวลา]`) + the poster from `patch-app-289-poster.md`
+- [ ] Test in game: academy quests (SG 9/27, PHX 34/31), offline stall resume, event trophy button on a CDM map, kill feed rows, chat height, NPC "NPC" bubble
+- [ ] Potion boxes 6/3/1 h (998/178, 182, 186) exist but nothing gives them out yet — decide where (shop / drop / item mall)
+
+### Not in this release (known open)
+- Android keyboard text read from two threads (review finding) — rare garbled text or crash; not fixed
+- iOS not run on a device
+- Kill feed default position (top left vs top centre) — waiting for the user's choice
+
+## 2026-11-05 — Release 825 / APK 289 / iOS 1.1.102 (289): built, Play production + TestFlight in review, patch waiting for the user upload
+- Commits: SOURCE d1555a53, MOBILE 713f1ed + 2c8b49c (versionCode 289 / 1.1.102), store merge 01123fa.
+- Patch: native/out/upload = 10 blobs 132.5 MB + manifest + ios/ + android/ (version 825; 824 was built first and never uploaded). **minApk 289 / minIos 289** - store players on 287 stay blocked until their store approves 289. Changed data: config.ini (user: bFeatureSkillNeedBook=1; bFeatureAntiBot=1 already there), GLogic.rcc, Quest.rcc, NpcTalk.rcc, Gui.rcc, mobile_hud3/4/5.dds, mobile_icons.dds.
+- iOS: CI 41896288016 (MOBILE 2c8b49c) success, binary checked (new "ปรับแต่งปุ่มกด" label, RanTouch_GetChatHeightScale, RanTouch_ConsumeEvent; 1.1.102/289), published with make-ios-source --notes-file (a --notes Thai arg came out garbled, redone).
+- Google Play: store/RanMobile-store-289.aab (store-release/, sha 840711b3e4ad) uploaded to PRODUCTION, status completed = sent for review, th/en notes. Main tree restored after the store build (37 mtimes, out/ libs; build.sh no rebuild).
+- TestFlight: CI 41898927818 from the store branch (the main-branch run was cancelled), build 289 VALID, What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW.
+- Server set for the user: store-release/patch825_app289/server/ (ServerField.exe, ServerAgent.exe 11-05 02:11, data/glogic/GLogic.rcc, quest/Quest.rcc, npctalk/NpcTalk.rcc, glogicserver/GLogicServer.rcc (unchanged since 823), gui/Gui.rcc).
+- Open: Android IME text read from two threads (review finding, not fixed); iOS not run on a device.
+
 ## 2026-11-05 — Academy sweep quests for SG and Phoenix, copied from MP Q106/Q110 (data + school map built, NOT on the server, NOT patched, NOT committed)
 - User: "it should be similar like MP have การกวาดล้างสถาบัน ... for each school", then chose full copies for SG + PHX (told: PHX Q148/Q152 are already the same quests under room names - kept, so PHX now has both).
 - Facts first: in every quest copy (EP9 original questEo9Bak, EP1 sets, 10-05..10-31 backups) only MP has "การกวาดล้างที่สถาบัน" (00091 Q106 lv24 Uncle Bald Head x30 -> 4000 EXP + Copper Ring 61/2 + Majestic Dagger 19/7; 00095 Q110 lv25 Fu x34 -> 5000 EXP + orb 4). Q110 was SG in the 10-20/10-26 data only (fixed back to MP 10-31). Uncle Bald Head 5/1 and Fu 10/1 spawn in every academy (Level.rcc: 2/0, 5/0, 8/0 and the matching rooms). Hand-in NPCs: MP 32/22 in 5/0, SG 9/27 in 2/0, PHX 34/31 in 8/0.
