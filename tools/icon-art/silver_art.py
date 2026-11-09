@@ -251,6 +251,29 @@ def glyph(kind, n):
             t = q * math.pi / 5 - math.pi / 2; rr = (22 if q % 2 == 0 else 9) * u
             pts.append((c + math.cos(t) * rr, c - 40 * u + math.sin(t) * rr))
         d.polygon(pts, fill=0)
+    elif kind == 'walk':
+        # walk lock button (2026-11-08): a figure mid-stride, as bold as the bot head
+        def stroke(pts, wd):
+            pts = [(c + x * u, c + y * u) for x, y in pts]
+            d.line(pts, fill=W, width=int(wd * u), joint='curve')
+            for (x, y) in pts:
+                r = wd * u / 2; d.ellipse((x - r, y - r, x + r, y + r), fill=W)
+        d.ellipse((c - 6 * u, c - 98 * u, c + 30 * u, c - 62 * u), fill=W)         # head
+        stroke([(6, -48), (-4, 10)], 30)                                            # body
+        stroke([(4, -40), (30, -16), (44, 6)], 18)                                  # front arm
+        stroke([(2, -40), (-26, -18), (-40, 6)], 18)                                # back arm
+        stroke([(-4, 10), (22, 46), (18, 84)], 22)                                  # front leg
+        stroke([(18, 84), (36, 86)], 16)                                            # front foot
+        stroke([(-4, 10), (-20, 48), (-50, 78)], 22)                                # back leg
+    elif kind == 'zzz':
+        # rest screen / save battery button (2026-11-08, the user: "it should be like zZZ"):
+        # a small z then two growing Z, stepping up to the right, in the F1/PK face
+        x0 = c - 72 * u
+        for ch, sz, base in (('z', 62, 72), ('Z', 82, 38), ('Z', 104, 2)):
+            f = ImageFont.truetype('tahomabd.ttf', int(sz * u))
+            b = d.textbbox((0, 0), ch, font=f)
+            d.text((x0 - b[0], c + base * u - b[3]), ch, font=f, fill=W)
+            x0 += (b[2] - b[0]) - 2 * u
     elif kind == 'bike':
         for s in (-1, 1):
             d.ellipse((c + (52 * s - 28) * u, c + 4 * u, c + (52 * s + 28) * u, c + 60 * u), outline=W, width=int(12 * u))

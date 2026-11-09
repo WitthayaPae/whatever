@@ -28,6 +28,7 @@ on:
       - 'native/platform/ios/**'
       - 'native/shim/**'
       - 'native/CMakeLists.txt'
+      - 'native/cmake/**'          #  per-library source lists (a new .cpp lands here)
       #  The iOS bundle version is read out of this file by CMakeLists.txt
       #  (RAN_PRODUCT_VERSION = 1.0.<android versionCode>), and the version
       #  is bumped by MAKE-PATCH *after* the code was pushed. Without this

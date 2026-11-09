@@ -103,7 +103,12 @@ enum { kGrpStick, kGrpAttack, kGrpSkill, kGrpPage, kGrpAuto, kGrpPK,
        //  the setting ... create new btn show when in the map event ... toggle
        //  and edit like other hud"). Saved after the pick-up anchor, the last
        //  value an older file carries: 4 floats and its hidden flag.
-       kGrpEvent, kGrpCount };
+       kGrpEvent,
+       //  The walk lock and the rest-screen (save battery) buttons (2026-11-07).
+       //  Saved after the event button, the last thing an older file carries:
+       //  4 floats and a hidden flag each.
+       kGrpWalk, kGrpRest,
+       kGrpCount };
 //  The groups the layout file carried before the talk button: every block
 //  sized by group count is this many long, and the talk group comes last.
 const int kGrpFile = kGrpTalk;
@@ -178,12 +183,21 @@ SlotAdj   g_cornerBefore[kCornerMax];
 //  the same way: the client reports each one's rect, the editor hands back an
 //  offset and a size, and the client applies them. Rects, not circles - they
 //  are wide strips, and a circle round the health bars covered half the screen.
+//  kWinMax is how many the layout file carries in its window block; slots past
+//  it are saved at the end of the file instead (RanTouch_GetHudLayout).
 const int kWinMax = 8;
+//  The top target panel (2026-11-08, the user: "the target panel should be
+//  able to setting the position like other hub"), and sized ("should be able
+//  to scale up or down"): 60% to 160%, applied by the panel itself (its HP bar
+//  is re-laid every frame, which the client's size walk would fight).
+const int kWinTarget = 8;
+const float kTargetMin = 0.6f, kTargetMax = 1.6f;
+const int kWinAll = 9;
 struct WinBox { float x, y, w, h; bool has; };
-WinBox    g_winBox[kWinMax] = { };
+WinBox    g_winBox[kWinAll] = { };
 int       g_winCount = 0;
-SlotAdj   g_winAdj[kWinMax];
-SlotAdj   g_winBefore[kWinMax];
+SlotAdj   g_winAdj[kWinAll];
+SlotAdj   g_winBefore[kWinAll];
 //  The kill feed (window slot 6, 2026-11-04) is not sized: the user wanted
 //  fewer rows, not bigger ones ("instead of showing 10 line we can edit it to
 //  2-3"). Its size value holds the row count as rows / 10, so the saved 1.0
@@ -271,6 +285,8 @@ const int kSlotMenu     = RANTOUCH_SLOT_MENU;
 const int kSlotChat     = RANTOUCH_SLOT_CHAT;
 const int kSlotFist     = RANTOUCH_SLOT_FIST;
 const int kSlotBot      = RANTOUCH_SLOT_BOT;
+const int kSlotWalk     = RANTOUCH_SLOT_WALK;
+const int kSlotRest     = RANTOUCH_SLOT_REST;
 
 //  Attack, four skill-page buttons, the auto-target and PK toggles, pick-up,
 //  camera lock, the ride button, and the menu.
@@ -279,7 +295,7 @@ const int kSlotBot      = RANTOUCH_SLOT_BOT;
 //  indices of the buttons below them are written out in half a dozen places -
 //  the group table, the outline table, the layout. Their ORDER on screen comes
 //  from layout(), not from their position here.
-const int kButtonCount = 14;
+const int kButtonCount = 16;
 const int kBtnF1 = 1, kBtnF2 = 2, kBtnF3 = 9, kBtnF4 = 10;
 const int kPageBtn[4] = { kBtnF1, kBtnF2, kBtnF3, kBtnF4 };
 //  The chat button, placed by the client like the ride button below it.
@@ -288,6 +304,11 @@ const int kBtnChat = 11;
 const int kBtnFist = 12;
 //  Auto-hunt, under AUTO at the foot of the right column. Shown by the client.
 const int kBtnBot = 13;
+//  Walk lock, in the right column where the target lock was (2026-11-07).
+const int kBtnWalk = 14;
+//  Rest screen (save battery), only while the bot runs (2026-11-07).
+const int kBtnRest = 15;
+bool  g_restShow = false;
 bool  g_botShow = false;
 float g_botLeft = 0.0f;			//  0..1 of today's allowance left
 //  Tap or hold (2026-11-01): a tap starts or stops the bot, a hold opens its
@@ -296,6 +317,11 @@ const float kBotHoldSec = 0.5f;
 float g_botHoldT = -1.0f;			//  seconds held, -1 when not held
 bool  g_botHoldFired = false;
 bool  g_botHoldEdge = false;		//  read by RanTouch_ConsumeBotHold
+//  The PK button the same way (2026-11-07, the user: "long press and show the
+//  setting window"): a tap toggles PK on release, a hold opens who PK may hit.
+float g_pkHoldT = -1.0f;
+bool  g_pkHoldFired = false;
+bool  g_pkHoldEdge = false;			//  read by RanTouch_ConsumePKHold
 bool buttonHidden(int slot);
 
 //  The ride button is placed by the client, not by layout(): it lives beside
@@ -1247,6 +1273,21 @@ void layout() {
     g_evtBaseY = attackY - g_unit * 3.25f;
     g_evtBaseR = modeR;
 
+    //  Walk lock: in the target lock's old place (1.15), which moved into the
+    //  top target panel (2026-11-07).
+    g_buttons[kBtnWalk].centre.x = arrowX;
+    g_buttons[kBtnWalk].centre.y = attackY - g_unit * 1.15f;
+    g_buttons[kBtnWalk].radius   = modeR;
+    g_buttons[kBtnWalk].slot     = kSlotWalk;
+
+    //  Rest screen: beside the event button's place, one step in from the edge.
+    //  The two never show together (no bot on an event map), but both are in
+    //  the editor at once, so not on top of each other.
+    g_buttons[kBtnRest].centre.x = arrowX - g_unit * 0.70f;
+    g_buttons[kBtnRest].centre.y = attackY - g_unit * 3.25f;
+    g_buttons[kBtnRest].radius   = modeR;
+    g_buttons[kBtnRest].slot     = kSlotRest;
+
     //  Pick-up is placed by placePickup(), after the arc is known.
     g_buttons[5].slot     = kSlotPickup;
 
@@ -1281,15 +1322,17 @@ void layout() {
     g_attackBaseR = g_buttons[0].radius;
     g_attackBaseX = g_buttons[0].centre.x;
     g_attackBaseY = g_buttons[0].centre.y;
-    const int single[6][2] = { { 0, kGrpAttack }, { 3, kGrpAuto }, { 4, kGrpPK },
-                               { 6, kGrpCamera }, { 8, kGrpMenu },
-                               { kBtnBot, kGrpBot } };
-    //  Six entries, six passes.
+    const int single[][2] = { { 0, kGrpAttack }, { 3, kGrpAuto }, { 4, kGrpPK },
+                              { 6, kGrpCamera }, { 8, kGrpMenu },
+                              { kBtnBot, kGrpBot },
+                              { kBtnWalk, kGrpWalk }, { kBtnRest, kGrpRest } };
+    //  One pass per entry, counted from the table itself.
     //
-    //  It ran to five, so the last row - the MENU button - was never given its
-    //  offset or its size. In the editor it outlined and selected like the
-    //  others and then ignored everything the player did to it.
-    for (int k = 0; k < 6; ++k) {
+    //  It ran to a fixed five, so the last row - the MENU button - was never
+    //  given its offset or its size. In the editor it outlined and selected like
+    //  the others and then ignored everything the player did to it.
+    const int nSingle = (int)(sizeof(single) / sizeof(single[0]));
+    for (int k = 0; k < nSingle; ++k) {
         Button &b = g_buttons[single[k][0]];
         const HudAdj &a = g_adj[single[k][1]];
         b.radius   *= shownScale(g_hidGrp[single[k][1]], a.scale);
@@ -1442,6 +1485,8 @@ int groupOfButton(int i) {
         case 7: return kGrpVehicle;
         case kBtnFist: return kGrpFist;
         case kBtnBot: return kGrpBot;
+        case kBtnWalk: return kGrpWalk;
+        case kBtnRest: return kGrpRest;
         default: return -1;
     }
 }
@@ -1656,7 +1701,7 @@ void editNudge(float mdx, float mdy) {
         //  was taking the party frame with it.
         g_cornerAdj[g_editSlot].dx += mdx;
         g_cornerAdj[g_editSlot].dy += mdy;
-    } else if (g_editSel == kGrpWin && g_editSlot >= 0 && g_editSlot < kWinMax) {
+    } else if (g_editSel == kGrpWin && g_editSlot >= 0 && g_editSlot < kWinAll) {
         if (g_editSlot == kWinChat) return;     //  height only (kWinChat)
         g_winAdj[g_editSlot].dx += mdx;
         g_winAdj[g_editSlot].dy += mdy;
@@ -1691,7 +1736,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
     switch (g) {
         case kGrpStick:  c = g_stick.centre; r = g_stick.radius * 1.25f; return true;
         case kGrpAttack: c = g_buttons[0].centre; r = g_buttons[0].radius * 1.15f; return true;
-        case kGrpAuto:   c = g_buttons[3].centre; r = g_buttons[3].radius * 1.35f; return true;
+        case kGrpAuto:   return false;     //  target lock moved to the top target panel (buttonHidden)
         case kGrpPK:     c = g_buttons[4].centre; r = g_buttons[4].radius * 1.35f; return true;
         case kGrpPickup: c = g_buttons[5].centre; r = g_buttons[5].radius * 1.35f; return true;
         case kGrpCamera: return false;     //  camera lock removed (buttonHidden)
@@ -1709,6 +1754,10 @@ bool groupCircle(int g, Vec2 &c, float &r) {
         case kGrpNear:    nearCircle(c, r); r *= 1.2f; return true;
         //  Always in the editor too, event map or not.
         case kGrpEvent:   eventCircle(c, r); r *= 1.35f; return r > 0.0f;
+        //  Always in the editor too: the rest button shows only while the
+        //  bot runs, and has to be placeable before that.
+        case kGrpWalk:    c = g_buttons[kBtnWalk].centre; r = g_buttons[kBtnWalk].radius * 1.35f; return r > 0.0f;
+        case kGrpRest:    c = g_buttons[kBtnRest].centre; r = g_buttons[kBtnRest].radius * 1.35f; return r > 0.0f;
         case kGrpPage: {
             c.x = (g_buttons[kBtnF1].centre.x + g_buttons[kBtnF4].centre.x) * 0.5f;
             c.y = g_buttons[kBtnF1].centre.y;
@@ -1731,7 +1780,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
         case kGrpWin: {
             //  Outlined one by one; this is the picked one, or all of them.
             float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
-            for (int i = 0; i < g_winCount && i < kWinMax; ++i) {
+            for (int i = 0; i < g_winCount && i < kWinAll; ++i) {
                 if (!g_winBox[i].has) continue;
                 if (g_editSlot >= 0 && g_editSel == kGrpWin && i != g_editSlot) continue;
                 x0 = fminf(x0, g_winBox[i].x); y0 = fminf(y0, g_winBox[i].y);
@@ -1782,7 +1831,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
 //  The group under a finger. Small buttons first, so one sitting on top of a
 //  bigger group can still be picked; the skill slots before the stick.
 int groupAt(float x, float y) {
-    static const int order[] = { -2, -3, -4, kGrpTalk, kGrpNear, kGrpEvent, kGrpPickup, kGrpPage, kGrpAuto, kGrpPK,
+    static const int order[] = { -2, -3, -4, kGrpTalk, kGrpNear, kGrpEvent, kGrpRest, kGrpWalk, kGrpPickup, kGrpPage, kGrpAuto, kGrpPK,
                                  kGrpCamera, kGrpMenu, kGrpVehicle, kGrpFist, kGrpBot,
                                  -5, kGrpAttack, kGrpStick };
     g_editSlot = -1;
@@ -1809,7 +1858,7 @@ int groupAt(float x, float y) {
         if (g == -5) {
             //  A HUD window, by its rect. Last of the small things: a button
             //  that sits over a window is still picked as the button.
-            for (int i = 0; i < g_winCount && i < kWinMax; ++i)
+            for (int i = 0; i < g_winCount && i < kWinAll; ++i)
                 if (g_winBox[i].has &&
                     x >= g_winBox[i].x && x < g_winBox[i].x + g_winBox[i].w &&
                     y >= g_winBox[i].y && y < g_winBox[i].y + g_winBox[i].h) {
@@ -1870,7 +1919,7 @@ void editDefaultsAll() {
     for (int i = 0; i < kCornerMax; ++i) {
         g_cornerAdj[i].dx = g_cornerAdj[i].dy = 0.0f; g_cornerAdj[i].scale = 1.0f;
     }
-    for (int i = 0; i < kWinMax; ++i) {
+    for (int i = 0; i < kWinAll; ++i) {
         g_winAdj[i].dx = g_winAdj[i].dy = 0.0f; g_winAdj[i].scale = 1.0f;
     }
     //  The pick-up button goes to its new place outside the skill arc.
@@ -2320,7 +2369,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
                     pScale = &g_pageAdj[g_editSlot].scale;
                 else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax)
                     pScale = &g_cornerAdj[g_editSlot].scale;
-                else if (g_editSel == kGrpWin && g_editSlot < kWinMax)
+                else if (g_editSel == kGrpWin && g_editSlot < kWinAll)
                     pScale = &g_winAdj[g_editSlot].scale;
             }
             switch (t) {
@@ -2349,7 +2398,8 @@ int RanTouch_PointerDown(int id, float x, float y) {
                 } else if (pScale) {
                     //  A game window only grows: its art is pixel art, and below
                     //  100% rows of it drop out (the HP labels at 90%, 2026-10-07).
-                    const float fMin = (g_editSel == kGrpWin) ? 1.0f : 0.6f;
+                    //  Not the target panel: the panel lays itself out at any size.
+                    const float fMin = (g_editSel == kGrpWin && g_editSlot != kWinTarget) ? 1.0f : kTargetMin;
                     *pScale -= 0.1f; if (*pScale < fMin) *pScale = fMin; } break;
                 case kToolSizeUp: if (pScale && editingKillFeed()) {
                     const int n = killFeedRows() + 1;
@@ -2596,6 +2646,7 @@ int RanTouch_PointerDown(int id, float x, float y) {
             b.down = true;
             //  The bot button answers on release (a tap) or after a hold.
             if (b.slot == kSlotBot) { g_botHoldT = 0.0f; g_botHoldFired = false; }
+            else if (b.slot == kSlotPK) { g_pkHoldT = 0.0f; g_pkHoldFired = false; }
             else b.pressedEdge = true;
             if (t) t->claimed = true;
             if (b.slot == kSlotAttack) botNoteTap(x, y);
@@ -2866,6 +2917,9 @@ int RanTouch_PointerUp(int id, float x, float y) {
             if (g_buttons[i].slot == kSlotBot && g_botHoldT >= 0.0f && !g_botHoldFired)
                 g_buttons[i].pressedEdge = true;        //  a tap
             if (g_buttons[i].slot == kSlotBot) { g_botHoldT = -1.0f; g_botHoldFired = false; }
+            if (g_buttons[i].slot == kSlotPK && g_pkHoldT >= 0.0f && !g_pkHoldFired)
+                g_buttons[i].pressedEdge = true;        //  a tap
+            if (g_buttons[i].slot == kSlotPK) { g_pkHoldT = -1.0f; g_pkHoldFired = false; }
             g_buttons[i].pointer = -1;
             g_buttons[i].down = false;
             claimed = 1;
@@ -2887,9 +2941,21 @@ void RanTouch_Frame(float dt) {
     {
         const Button &bb = g_buttons[kBtnBot];
         if (!bb.down || bb.pointer < 0) { g_botHoldT = -1.0f; g_botHoldFired = false; }
-        else if (g_botHoldT >= 0.0f && !g_botHoldFired) {
+        //  While the bot runs (button lit) there is no hold: any press, short
+        //  or long, is a tap and stops it (2026-11-07: a press held past
+        //  kBotHoldSec did nothing at all, so the bot "would not stop").
+        else if (!bb.toggled && g_botHoldT >= 0.0f && !g_botHoldFired) {
             g_botHoldT += dt;
             if (g_botHoldT >= kBotHoldSec) { g_botHoldFired = true; g_botHoldEdge = true; }
+        }
+    }
+    //  The PK button's hold, the same way.
+    {
+        const Button &pb = g_buttons[4];
+        if (!pb.down || pb.pointer < 0) { g_pkHoldT = -1.0f; g_pkHoldFired = false; }
+        else if (g_pkHoldT >= 0.0f && !g_pkHoldFired) {
+            g_pkHoldT += dt;
+            if (g_pkHoldT >= kBotHoldSec) { g_pkHoldFired = true; g_pkHoldEdge = true; }
         }
     }
     for (int i = 0; i < g_skillCircleCount; ++i) {
@@ -3160,15 +3226,28 @@ enum {
     //  talk to NPC: the chat bubble with "NPC" in it (2026-11-05), so it is
     //  not taken for a player's name balloon, which keeps kCellChat.
     kCellNpcChat,
+    //  Seventh row: the walk lock, off and on (2026-11-08, the user: "the new
+    //  btn walk style not align with other btn style").
+    kCellWalk,      kCellWalkOn,
+    //  The rest-screen (save battery) button, "zZZ" (2026-11-08, the user:
+    //  "the btn battary saving not align with other btn style").
+    kCellRest,
 };
 
 bool buttonHidden(int slot) {
     //  Camera lock removed (the user, 2026-11-03: "we do not need that"):
     //  never drawn, never hit, not in the HUD editor, so it can't be turned on.
     if (slot == kSlotCamLock) return true;
+    //  Target lock: the button is in the top target panel now (2026-11-07,
+    //  the user: "then we can remove the lock btn on the screen"). Its group
+    //  stays in the layout file so nothing saved after it moves.
+    if (slot == kSlotAuto) return true;
     if ((slot == kSlotVehicle || slot == kSlotFist) && !g_vehShow) return true;
     if (slot == kSlotBot && !g_botShow) return true;
-    if (slot == kSlotPickup && !g_pickShow && !g_edit) return true;
+    //  Rest screen: only while the bot runs (the client says), and in the editor.
+    if (slot == kSlotRest && !g_restShow && !g_edit) return true;
+    //  Pick-up is always on screen (2026-11-07, players: it showed and hid,
+    //  and a press did not always work): dimmed with nothing in range.
     return false;
 }
 
@@ -3259,6 +3338,23 @@ int hudCellFor(int slot, bool on) {
         {
             //  Cells 27/28: an older sheet does not have them - drawn shape instead.
             const int cell = on ? kCellBotOn : kCellBot;
+            const float cellPx = g_hudTexW / (float)kHudCols;
+            if (cellPx <= 0.0f || (float)(cell / kHudCols + 1) * cellPx > g_hudTexH + 0.5f) return -1;
+            return cell;
+        }
+        case kSlotWalk:
+        {
+            //  Cells 30/31, the seventh row: an older sheet stops at six rows,
+            //  and the drawn figure stands in.
+            const int cell = on ? kCellWalkOn : kCellWalk;
+            const float cellPx = g_hudTexW / (float)kHudCols;
+            if (cellPx <= 0.0f || (float)(cell / kHudCols + 1) * cellPx > g_hudTexH + 0.5f) return -1;
+            return cell;
+        }
+        case kSlotRest:
+        {
+            //  Cell 32, the seventh row: an older sheet without it keeps the drawn moon.
+            const int cell = kCellRest;
             const float cellPx = g_hudTexW / (float)kHudCols;
             if (cellPx <= 0.0f || (float)(cell / kHudCols + 1) * cellPx > g_hudTexH + 0.5f) return -1;
             return cell;
@@ -3431,7 +3527,7 @@ extern "C" void RanTouch_SetCornerBox(int i, float cx, float cy, float r) {
 
 //  Where the client has put HUD window i (pixels), or w <= 0 for not shown.
 extern "C" void RanTouch_SetWinBox(int i, float x, float y, float w, float h) {
-    if (i < 0 || i >= kWinMax) return;
+    if (i < 0 || i >= kWinAll) return;
     g_winBox[i].x = x; g_winBox[i].y = y; g_winBox[i].w = w; g_winBox[i].h = h;
     g_winBox[i].has = (w > 0.0f && h > 0.0f);
     if (i + 1 > g_winCount) g_winCount = i + 1;
@@ -3449,7 +3545,7 @@ extern "C" float RanTouch_GetChatHeightScale(void) {
 
 extern "C" void RanTouch_GetWinAdjust(int i, float *dx, float *dy, float *scale) {
     float x = g_adj[kGrpWin].dx * g_unit, y = g_adj[kGrpWin].dy * g_unit, s = g_adj[kGrpWin].scale;
-    if (i >= 0 && i < kWinMax) {
+    if (i >= 0 && i < kWinAll) {
         x += g_winAdj[i].dx * g_unit;
         y += g_winAdj[i].dy * g_unit;
         s *= g_winAdj[i].scale;
@@ -3937,6 +4033,44 @@ void glyphMark(const Button &b, float a) {
             drawPoly(tail, 3, c);
         }
     }
+    else if (b.slot == kSlotWalk || b.slot == kSlotRest) {
+        //  A thick line between two points (R units from the centre).
+        const float cx = b.centre.x, cy = b.centre.y;
+        auto stroke = [&](float x1, float y1, float x2, float y2, float t) {
+            x1 = cx + x1 * R; y1 = cy + y1 * R; x2 = cx + x2 * R; y2 = cy + y2 * R;
+            float dx = x2 - x1, dy = y2 - y1;
+            const float l = sqrtf(dx * dx + dy * dy);
+            if (l <= 0.0f) return;
+            const float nx = -dy / l * t * R * 0.5f, ny = dx / l * t * R * 0.5f;
+            const float q[8] = { x1 + nx, y1 + ny, x2 + nx, y2 + ny, x2 - nx, y2 - ny, x1 - nx, y1 - ny };
+            drawPoly(q, 4, c);
+        };
+        if (b.slot == kSlotWalk) {
+            //  A walking figure: head, body, arms and legs mid-stride.
+            const float t = 0.11f;
+            drawRing(cx + R * 0.04f, cy - R * 0.44f, 0.0f, R * 0.12f, c.r, c.g, c.b, c.a);
+            stroke( 0.02f, -0.28f, -0.04f,  0.10f, t);     //  body
+            stroke( 0.01f, -0.20f,  0.17f, -0.02f, t);     //  front arm
+            stroke( 0.17f, -0.02f,  0.24f,  0.10f, t);
+            stroke( 0.01f, -0.20f, -0.15f, -0.05f, t);     //  back arm
+            stroke(-0.15f, -0.05f, -0.21f,  0.10f, t);
+            stroke(-0.04f,  0.10f,  0.14f,  0.30f, t);     //  front leg
+            stroke( 0.14f,  0.30f,  0.12f,  0.52f, t);
+            stroke(-0.04f,  0.10f, -0.13f,  0.32f, t);     //  back leg
+            stroke(-0.13f,  0.32f, -0.28f,  0.47f, t);
+        } else {
+            //  Rest: a crescent moon and "z z".
+            drawArc(cx - R * 0.08f, cy + R * 0.06f, R * 0.30f, R * 0.44f,
+                    1.05f, 5.25f, c.r, c.g, c.b, c.a);
+            const float t = 0.07f;
+            stroke(0.16f, -0.44f, 0.36f, -0.44f, t);       //  big z
+            stroke(0.36f, -0.44f, 0.16f, -0.22f, t);
+            stroke(0.16f, -0.22f, 0.36f, -0.22f, t);
+            stroke(0.30f, -0.12f, 0.44f, -0.12f, t);       //  small z
+            stroke(0.44f, -0.12f, 0.30f,  0.04f, t);
+            stroke(0.30f,  0.04f, 0.44f,  0.04f, t);
+        }
+    }
     else if (b.slot == kSlotCamLock) {
         drawRing(b.centre.x, b.centre.y, R * 0.13f, R * 0.21f, c.r, c.g, c.b, c.a);
         drawArc(b.centre.x, b.centre.y + R * 0.30f, R * 0.40f, R * 0.50f,
@@ -4071,7 +4205,7 @@ static unsigned long long staticSignature() {
         MIX(b.down); MIX(b.toggled); MIX(b.slot);
     }
     for (int i = 0; i < kGrpCount; ++i) { MIX(g_adj[i].alpha); MIX(g_adj[i].scale); }
-    MIX(g_pickShow); MIX(g_pickNewHome);
+    MIX(g_pickShow); MIX(g_pickNewHome); MIX(g_restShow);
     #undef MIX
     (void)p; (void)n;
     return h;
@@ -4114,7 +4248,7 @@ void drawEditor() {
         }
     }
     //  The client's HUD windows: a frame round each rect.
-    for (int i = 0; i < g_winCount && i < kWinMax; ++i) {
+    for (int i = 0; i < g_winCount && i < kWinAll; ++i) {
         if (!g_winBox[i].has) continue;
         const WinBox &wb = g_winBox[i];
         const bool sel = (g_editSel == kGrpWin && g_editSlot == i);
@@ -4260,7 +4394,7 @@ void drawEditor() {
                 vScale = g_pageAdj[g_editSlot].scale;
             else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax)
                 vScale = g_cornerAdj[g_editSlot].scale;
-            else if (g_editSel == kGrpWin && g_editSlot < kWinMax)
+            else if (g_editSel == kGrpWin && g_editSlot < kWinAll)
                 vScale = g_winAdj[g_editSlot].scale;
         }
         const float v = (pair == 0) ? vScale : g_adj[g_editSel].alpha;
@@ -4327,6 +4461,19 @@ static void renderBotHold() {
     if (f > 1.0f) f = 1.0f;
     g_drawAlpha = 1.0f;
     segRing(bb.centre.x, bb.centre.y, bb.radius * 1.28f, bb.radius * 1.42f, 24, f,
+            rgba(1.0f, 0.80f, 0.31f, 1.0f), rgba(0.0f, 0.0f, 0.0f, 1.0f), 1.0f, 0.35f);
+    emit();
+}
+
+//  Holding the PK button: the same gold ring, until the PK settings open.
+static void renderPKHold() {
+    if (g_edit || g_pkHoldT <= 0.08f || g_pkHoldFired) return;
+    const Button &pb = g_buttons[4];
+    if (buttonHidden(pb.slot)) return;
+    float f = g_pkHoldT / kBotHoldSec;
+    if (f > 1.0f) f = 1.0f;
+    g_drawAlpha = 1.0f;
+    segRing(pb.centre.x, pb.centre.y, pb.radius * 1.28f, pb.radius * 1.42f, 24, f,
             rgba(1.0f, 0.80f, 0.31f, 1.0f), rgba(0.0f, 0.0f, 0.0f, 1.0f), 1.0f, 0.35f);
     emit();
 }
@@ -4526,6 +4673,8 @@ void RanTouch_Render(void) {
             const int grp = groupOfButton(i);
             emit();
             g_drawAlpha = (grp >= 0) ? g_adj[grp].alpha : 1.0f;
+            //  Pick-up with nothing in range: still there, dimmed.
+            if (b.slot == kSlotPickup && !g_pickShow && !g_edit) g_drawAlpha *= 0.45f;
         }
         //  A press shrinks the button and brightens its rim. It used to change
         //  alpha only, which is invisible against a moving scene.
@@ -4649,7 +4798,9 @@ void RanTouch_Render(void) {
             if (buttonHidden(b.slot)) continue;
             if (b.slot == kSlotChat) continue;     //  drawn in RanTouch_RenderChatTop
             const int grp = groupOfButton(i);
-            const float ga = (grp >= 0) ? g_adj[grp].alpha : 1.0f;
+            float ga = (grp >= 0) ? g_adj[grp].alpha : 1.0f;
+            //  Pick-up with nothing in range: dimmed here too (this pass draws it, the cache does not).
+            if (b.slot == kSlotPickup && !g_pickShow && !g_edit) ga *= 0.45f;
             const float R  = b.radius * (b.down ? 0.94f : 1.0f);
             if (b.slot == kSlotAttack) {
                 drawHudCell(kCellAtkRing, b.centre.x, b.centre.y, R * 1.18f, ga);
@@ -4695,6 +4846,7 @@ void RanTouch_Render(void) {
 
     renderMenuAlert();
     renderBotHold();
+    renderPKHold();
 
     //  The skill slots get the painted bezel too - it was in the sheet from the
     //  start and only the potion row was using it.
@@ -5017,6 +5169,14 @@ extern "C" void RanTouch_SetBot(int show, float leftFrac) {
     }
 }
 
+extern "C" void RanTouch_SetRestButton(int show) {
+    const bool b = (show != 0);
+    if (b == g_restShow) return;
+    g_restShow = b;
+    if (!b) { g_buttons[kBtnRest].pointer = -1; g_buttons[kBtnRest].down = false; g_buttons[kBtnRest].pressedEdge = false; }
+    if (g_inited) layout();
+}
+
 extern "C" void RanTouch_SetToggle(int slot, int on) {
     for (int i = 0; i < kButtonCount; ++i)
         if (g_buttons[i].slot == slot) g_buttons[i].toggled = (on != 0);
@@ -5135,6 +5295,12 @@ extern "C" int RanTouch_ConsumeBotHold(void) {
     return (g_inited && g_active) ? 1 : 0;
 }
 
+extern "C" int RanTouch_ConsumePKHold(void) {
+    if (!g_pkHoldEdge) return 0;
+    g_pkHoldEdge = false;
+    return (g_inited && g_active) ? 1 : 0;
+}
+
 extern "C" int RanTouch_ConsumeButton(int *outSlot) {
     if (!g_inited || !g_active) return 0;
     for (int i = 0; i < kButtonCount; ++i) {
@@ -5200,8 +5366,9 @@ extern "C" int RanTouch_ConsumeTalk(void) {
 extern "C" void RanTouch_SetPickupButton(int show) {
     const bool b = (show != 0);
     if (b == g_pickShow) return;
+    //  Only the look changes (dimmed or not): the button is always there, and
+    //  a press under way is not cut off when the item leaves range.
     g_pickShow = b;
-    if (!b) { g_buttons[5].pointer = -1; g_buttons[5].down = false; }
 }
 
 extern "C" void RanTouch_SetPickupArt(unsigned tex, int w, int h, int frames, int cols) {
@@ -5337,7 +5504,9 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
                 + kHideSaved                            //  hidden flags, appended 2026-10-09
                 + (kGrpEvent - kGrpFile) * 4            //  talk button 2026-10-19, nearby players 2026-10-20
                 + 1                                     //  pick-up anchor, appended 2026-10-20
-                + 4 + 1;                                //  event scoreboard button + its hidden flag, 2026-11-05
+                + 4 + 1                                 //  event scoreboard button + its hidden flag, 2026-11-05
+                + (4 + 1) * 2                           //  walk, rest screen buttons + their hidden flags, 2026-11-07
+                + (kWinAll - kWinMax) * 3;              //  target panel place and size (dx, dy, size), 2026-11-08
     if (!out || max < n) return n;
     for (int i = 0; i < kGrpLegacy; ++i) {
         out[i * 4]     = g_adj[i].dx;    out[i * 4 + 1] = g_adj[i].dy;
@@ -5382,6 +5551,16 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     out[w++] = g_adj[kGrpEvent].dx;    out[w++] = g_adj[kGrpEvent].dy;
     out[w++] = g_adj[kGrpEvent].scale; out[w++] = g_adj[kGrpEvent].alpha;
     out[w++] = g_hidGrp[kGrpEvent] ? 1.0f : 0.0f;
+    //  The walk and rest-screen buttons (2026-11-07), after the event button.
+    for (int i = kGrpWalk; i <= kGrpRest; ++i) {
+        out[w++] = g_adj[i].dx;    out[w++] = g_adj[i].dy;
+        out[w++] = g_adj[i].scale; out[w++] = g_adj[i].alpha;
+        out[w++] = g_hidGrp[i] ? 1.0f : 0.0f;
+    }
+    //  The window slots past the file's window block: the target panel's place and size.
+    for (int i = kWinMax; i < kWinAll; ++i) {
+        out[w++] = g_winAdj[i].dx; out[w++] = g_winAdj[i].dy; out[w++] = g_winAdj[i].scale;
+    }
     return n;
 }
 
@@ -5507,6 +5686,30 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (!(al >= 0.2f && al <= 1.0f)) al = 1.0f;
             g_adj[kGrpEvent].dx = dx; g_adj[kGrpEvent].dy = dy; g_adj[kGrpEvent].scale = sc; g_adj[kGrpEvent].alpha = al;
             g_hidGrp[kGrpEvent] = (hid > 0.5f);
+        }
+        //  The walk and rest-screen buttons (2026-11-07). Older files stop
+        //  before them: the designed place, shown.
+        for (int i = kGrpWalk; i <= kGrpRest; ++i) {
+            float dx = 0.0f, dy = 0.0f, sc = 1.0f, al = 1.0f, hid = 0.0f;
+            if (r + 3 < n) { dx = in[r++]; dy = in[r++]; sc = in[r++]; al = in[r++]; }
+            if (r < n) hid = in[r++];
+            if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
+            if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
+            if (!(sc >= 0.6f && sc <= 1.6f)) sc = 1.0f;
+            if (!(al >= 0.2f && al <= 1.0f)) al = 1.0f;
+            g_adj[i].dx = dx; g_adj[i].dy = dy; g_adj[i].scale = sc; g_adj[i].alpha = al;
+            g_hidGrp[i] = (hid > 0.5f);
+        }
+        //  The target panel's place and size (2026-11-08). Older files stop
+        //  before it, or carry zeros: where and how big the panel is designed.
+        for (int i = kWinMax; i < kWinAll; ++i) {
+            float dx = 0.0f, dy = 0.0f, sc = 1.0f;
+            if (r + 1 < n) { dx = in[r++]; dy = in[r++]; }
+            if (r < n) sc = in[r++];
+            if (!(dx > -40.0f && dx < 40.0f)) dx = 0.0f;
+            if (!(dy > -40.0f && dy < 40.0f)) dy = 0.0f;
+            if (!(sc >= kTargetMin - 0.01f && sc <= kTargetMax + 0.01f)) sc = 1.0f;
+            g_winAdj[i].dx = dx; g_winAdj[i].dy = dy; g_winAdj[i].scale = sc;
         }
         for (int g = 0; g < kGrpCount; ++g)
             if (!canHideGroup(g) || g == kGrpSkill || g == kGrpPotion || g == kGrpCorner) g_hidGrp[g] = false;

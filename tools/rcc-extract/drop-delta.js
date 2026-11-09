@@ -53,6 +53,16 @@ const stoneRange = stoneArg && /^[0-9.]+-[0-9.]+$/.test(stoneArg.slice(12)) ? st
 const SET_STONE = stoneArg ? (stoneRange ? stoneRange[0] : parseFloat(stoneArg.slice(12))) : null;
 if (stoneArg && !(SET_STONE >= 0)) throw new Error('--set-stone needs a number');
 const MATCH_RESIST = argv0.includes('--match-resist');
+// --match-acc-resist (2026-11-09, the user: accessories 'make it same rate as the resistance stone'):
+// each table's accessories (rings, necklaces, bracelets) set to what its resistance stones give.
+// Only tables that already drop accessories; one with none keeps none.
+const MATCH_ACC = argv0.includes('--match-acc-resist');
+// --set-acc=LO-HI (2026-11-09, the user: 'make all for accessories about 0.6'): each table's
+// accessories set to its own value in the range (hash of the table name, like --set-resist).
+// Only tables that already drop accessories.
+const accArg = argv0.find((a) => a.startsWith('--set-acc='));
+const accRange = accArg ? accArg.slice(10).split('-').map(Number) : null;
+if (accArg && !(accRange.length === 2 && accRange[1] - accRange[0] > 0.04)) throw new Error('--set-acc needs LO-HI');
 // --set-wa=X: set weapon and armor of each table to X per 100 kills, up or down
 // (user, 2026-10-31: "weapon and Armor should be around 2.9 to 3.1"). A table
 // with no weapon (armor) line keeps none.
@@ -91,6 +101,11 @@ function waFor(name, cat) {
 // --set-book=LO-HI (2026-11-01, the user: skill books 'same range like weapon and armor ~ 110 kills'):
 // each table's skill-book drop set to its own value in the range (hashed from the table name like
 // --set-wa). A table with no skill-book line keeps none.
+// --set-resist=LO-HI: each table's resistance stones (spec 196) set to its own value in the range
+// (hash of the table name, like --set-book; user 2026-11-05: "resistance stone about 0.7-0.75")
+const resArg = argv0.find((a) => a.startsWith('--set-resist='));
+const resRange = resArg ? resArg.slice(13).split('-').map(Number) : null;
+if (resArg && !(resRange.length === 2 && resRange[1] - resRange[0] > 0.04)) throw new Error('--set-resist needs LO-HI');
 const bookArg = argv0.find((a) => a.startsWith('--set-book='));
 const bookRange = bookArg ? bookArg.slice(11).split('-').map(Number) : null;
 if (bookArg && !(bookRange.length === 2 && bookRange[1] - bookRange[0] > 0.04)) throw new Error('--set-book needs LO-HI');
@@ -124,7 +139,8 @@ const STONE_ABOVE = saArg ? parseFloat(saArg.slice(14)) : 0.5;
 if (STONE_FROM && !fs.existsSync(STONE_FROM)) throw new Error('--stone-from file not found');
 const SET = STONE_FROM ? { Stone: true, Resist: true }
   : MATCH_SPEC ? Object.fromEntries(MATCH_SPEC.map((id) => [evCat(id), true]))
-  : bookRange ? { Book: true } : MATCH_RESIST ? { Resist: true } : CAT_WA ? Object.fromEntries(['Weapon', 'Armor'].filter((c) => catRange[c]).map((c) => [c, true])) : SET_WA !== null ? { Weapon: true, Armor: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
+  : (MATCH_ACC || accRange) ? { Acc: true }
+  : resRange ? { Resist: true } : bookRange ? { Book: true } : MATCH_RESIST ? { Resist: true } : CAT_WA ? Object.fromEntries(['Weapon', 'Armor'].filter((c) => catRange[c]).map((c) => [c, true])) : SET_WA !== null ? { Weapon: true, Armor: true } : SET_STONE !== null ? { Stone: true } : { Weapon: true, Armor: true, Stone: true };
 const DELTA = { Weapon: 0.4, Armor: 0.4, Stone: 0.2 };
 const CATS = ['Weapon', 'Armor', 'Acc', 'Stone', 'Resist', 'Potion', 'Book', ...(MATCH_SPEC || []).map(evCat)];
 const RESIST_SPEC = 196;
@@ -345,7 +361,10 @@ function build(t, gen, want, before, note) {
       for (const l of pot) l.pct *= k;
     }
   }
-  for (const l of L) l.pct = Math.floor(l.pct * 10000) / 10000;
+  //	only the lines this run sets (and potions, which give way when a table is full) are
+  //	rounded; every other line keeps its text exactly (2026-11-09: a run used to trim armor
+  //	0.409 -> 0.4089 in tables it was not changing)
+  for (const l of L) if (l.i < 0 || l.cat in SET || l.cat === 'Potion') l.pct = Math.floor(l.pct * 10000) / 10000;
   return total() <= FULL + 1e-9 ? L : null;
 }
 
@@ -367,7 +386,7 @@ for (const t of T) {
     if (!ref) { skipped.push([t.name, t.level, 'old table never fires']); continue; }
   }
   const want = {}, base = {};
-  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = ref ? ref[c] : bookRange ? bookFor(t.name) : MATCH_SPEC ? (SPEC_VALUE !== null ? (before[c] > 0 ? SPEC_VALUE : 0) : before[MATCH_TO]) : MATCH_RESIST ? before.Stone : (CAT_WA || SET_WA !== null) ? waFor(t.name, c) : SET_STONE !== null ? (stoneRange ? hashIn(stoneRange, t.name + '|Stone') : SET_STONE) : Math.max(0, before[c] - DELTA[c]); }
+  for (const c of Object.keys(SET)) { base[c] = before[c]; want[c] = ref ? ref[c] : accRange ? hashIn(accRange, t.name + '|Acc') : MATCH_ACC ? before.Resist : resRange ? hashIn(resRange, t.name + '|Resist') : bookRange ? bookFor(t.name) : MATCH_SPEC ? (SPEC_VALUE !== null ? (before[c] > 0 ? SPEC_VALUE : 0) : before[MATCH_TO]) : MATCH_RESIST ? before.Stone : (CAT_WA || SET_WA !== null) ? waFor(t.name, c) : SET_STONE !== null ? (stoneRange ? hashIn(stoneRange, t.name + '|Stone') : SET_STONE) : Math.max(0, before[c] - DELTA[c]); }
   const note = new Set();
 
   let gen = t.gen, L = build(t, gen, want, before, note);
@@ -432,7 +451,7 @@ for (const t of T) {
     if (Math.abs(d) > 0.02) { if (!NOSPLIT && !(Math.abs(d) <= TOL)) throw new Error(`${t.name}: ${c} ${after[c]} not ${want[c]}`); off.push(`${c} off by ${d.toFixed(2)}`); }
   }
   for (const o of off) note.add(o);
-  if (SET_STONE === null && SET_WA === null && !CAT_WA && !MATCH_RESIST && !MATCH_SPEC && !bookRange && !STONE_FROM) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
+  if (SET_STONE === null && SET_WA === null && !CAT_WA && !MATCH_RESIST && !MATCH_ACC && !accRange && !MATCH_SPEC && !bookRange && !resRange && !STONE_FROM) for (const c of Object.keys(SET)) if (after[c] > before[c] + 1e-6) throw new Error(`${t.name}: ${c} went up`);
   const out = encode(lines.join(t.eol) + t.eol);
   if (plain(out).toString('latin1').replace(/ +$/, '') !== lines.join(t.eol) + t.eol) throw new Error('round trip failed: ' + t.name);
   const file = path.join(workDir, 'files', t.name);

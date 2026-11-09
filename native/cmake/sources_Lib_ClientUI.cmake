@@ -206,6 +206,8 @@ set(Lib_ClientUI_SOURCES
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileBotPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileAutoPotPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileRestScreen.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobileTargetPanel.cpp
+  ${RAN_SRC}/Lib_ClientUI/Interface/MobilePKPanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileEmotePanel.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileQuestRoute.cpp
   ${RAN_SRC}/Lib_ClientUI/Interface/MobileUiKit.cpp
