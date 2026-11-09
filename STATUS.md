@@ -138,30 +138,32 @@ the patch ships a needless APK bump).
 
 Replaces the 825 list below: 825 IS live (manifest 825). Everything here is built and waiting for the user.
 Stores: Google Play production 291 sent for review 2026-11-09 (AAB store-release/RanMobile-store-291.aab sha 2b1960bf).
-TestFlight 291 uploaded (CI 42642577912) - Beta App Review submitted once Apple finished processing (see the row below the table).
+TestFlight 291 uploaded (CI 42642577912, VALID 22:42), What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW. iOS patch build CI 42642489557 (1.1.104/291, new code found in the binary) published via make-ios-source. iOS CI now runs on macos-26 (macos-14 retired); main got the store std::ran_fopen fix for Xcode 26.
 Patch 828 sets **minApk 291 / minIos 291**: store players (Play/TestFlight 289) cannot play until their store approves 291.
 
-### 1. Game server (first, then restart) — from - [ ]  +  (2026-11-09 21:33) — lag fixes (MsgGoto snap max(60, speed x1.5 s) + no repeat snap within 1 s, attack burst 2->6), queued-message guard, pickup stats log, Gunner drop gate, classic skill switch, Emulator-only rules
-- [ ]  md5 ed06af14 — skills since 11-05, costume sets + Starlight gacha, NPC 49/26 กาชาเงิน M (1M), Black Dragon gacha names, icons
-- [ ]  md5 c52153a8 — npc_gachamoney.ntk
-- [ ]  md5 1235555f — w_tradezone1 (กาชาเงิน M placed)
-- [ ]  md5 f082ae0e (v16, accessories 0.6) — if not uploaded yet
-- [ ] Server  [GAME_FEATURE] **bCreateClass = 1,1,1,1,0,0,0,0** (missing = Gunner open = Gunner gear drops)
+### 1. Game server (first, then restart) — from `DEV EP9/store-release/patch827_app291/server/`
+- [ ] `ServerField.exe` + `ServerAgent.exe` (2026-11-09 21:33) — lag fixes (MsgGoto snap max(60, speed x1.5 s) + no repeat snap within 1 s, attack burst 2->6), queued-message guard, pickup stats log, Gunner drop gate, classic skill switch, Emulator-only rules
+- [ ] `data/glogic/GLogic.rcc` md5 ed06af14 — skills since 11-05, costume sets + Starlight gacha, NPC 49/26 กาชาเงิน M (1M), Black Dragon gacha names, icons
+- [ ] `data/glogic/npctalk/NpcTalk.rcc` md5 c52153a8 — npc_gachamoney.ntk
+- [ ] `data/glogic/level/Level.rcc` md5 1235555f — w_tradezone1 (กาชาเงิน M placed)
+- [ ] `data/glogicserver/GLogicServer.rcc` md5 f082ae0e (v16, accessories 0.6) — if not uploaded yet
+- [ ] Server `Config.ini` [GAME_FEATURE] **bCreateClass = 1,1,1,1,0,0,0,0** (missing = Gunner open = Gunner gear drops)
 - [ ] Restart the servers. Never this GLogic.rcc with an older ServerField.
 
-### 2. Patch — copy  into  in this order
-- [ ]  — 10 files (95.2 MB): APK 291, GLogic/Level/NpcTalk.rcc, config.ini, mobile_hud3/4/5.dds, costumegacha01 dds + png
-- [ ]  — RanLegacyM.ipa 1.1.104 (291), source.json, install.html, icon.png
-- [ ]  — RanLegacyM.apk (291), version.json, index.html, icon.png
-- [ ]  +  — LAST (version 828)
-- [ ] Cloudflare: purge manifest.json + manifest.sig, then tell me ()
+### 2. Patch — copy `MOBILE/native/out/upload/` into `launcher_mobile/` in this order
+- [ ] `blobs/` — 10 files (95.2 MB): APK 291, GLogic/Level/NpcTalk.rcc, config.ini, mobile_hud3/4/5.dds, costumegacha01 dds + png
+- [ ] `ios/` — RanLegacyM.ipa 1.1.104 (291), source.json, install.html, icon.png
+- [ ] `android/` — RanLegacyM.apk (291), version.json, index.html, icon.png
+- [ ] `manifest.json` + `manifest.sig` — LAST (version 828)
+- [ ] Cloudflare: purge manifest.json + manifest.sig, then tell me (`build-and-publish.js --uploaded`)
 
 ### 3. Stores — watch only
 - [ ] Google Play production 291 approved
 - [ ] TestFlight 291 Beta App Review approved
 
 ### 4. After it is live
-- [ ] Post  (fill date/time, NPC place) + poster - [ ] Test on a slow connection with the Crazy Q-box: no snap-back loop, damage numbers show
+- [ ] Post `Prompt/patch app 291/POST.txt` (fill date/time, NPC place) + poster `patch-app-291-poster.md`
+- [ ] Test on a slow connection with the Crazy Q-box: no snap-back loop, damage numbers show
 - [ ] Test: target panel lock (lets go when the target dies), PK long press, walk lock, rest button, bag pages, กาชาเงิน M shop + exchange 10 salt / 1 card -> Starlight box
 
 **Not tested on a device yet** (no LDPlayer / iPhone run of 291): everything above is built, reviewed by reading code, compiled for PC, Android (arm64 + x86_64), iOS (Xcode 26) and TestFlight.
