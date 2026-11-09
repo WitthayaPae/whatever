@@ -69,10 +69,22 @@ extern "C" int RanTouch_ConsumeButton(int *outSlot);
 //  Auto-hunt (the bot). Shown only while the client says the server allows it
 //  (RanTouch_SetBot); lit while hunting, with a ring of today's time left.
 #define RANTOUCH_SLOT_BOT         (-14)
+//  Walk (2026-11-07, the user: "add the walk btn, make sure it config the hub").
+//  A walk lock: lit, the character walks however far the stick is pushed.
+#define RANTOUCH_SLOT_WALK        (-15)
+//  Rest screen (save battery), shown only while the bot runs (2026-11-07, the
+//  user: "the btn save battery should be small btn and not middle of the
+//  screen"). Was a wide button across the middle (CMobileRestPrompt).
+#define RANTOUCH_SLOT_REST        (-16)
+extern "C" void RanTouch_SetRestButton(int show);
 extern "C" void RanTouch_SetBot(int show, float leftFrac);
 //  1 once after the bot button was held for half a second (the bot settings).
 //  A short press comes through RanTouch_ConsumeButton as RANTOUCH_SLOT_BOT, on release.
 extern "C" int  RanTouch_ConsumeBotHold(void);
+//  1 once after the PK button was held for half a second (2026-11-07): who PK
+//  may target. A short press comes through RanTouch_ConsumeButton as
+//  RANTOUCH_SLOT_PK, on release.
+extern "C" int  RanTouch_ConsumePKHold(void);
 
 //  Where the client put its quick-skill slots, as fractions of the surface, so
 //  the overlay can draw a round rim over each one.

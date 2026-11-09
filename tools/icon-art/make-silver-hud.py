@@ -36,8 +36,11 @@ def hud():
         A.button('bot', N),              # 27: auto-hunt
         A.button('bot', N, lit=True),    # 28: auto-hunt, running
         A.button('chat_npc', N),         # 29: talk to NPC (2026-11-05; player balloons keep 22)
+        A.button('walk', N),             # 30: walk lock (2026-11-08)
+        A.button('walk', N, lit=True),   # 31: walk lock, on
+        A.button('zzz', N),              # 32: rest screen / save battery (2026-11-08)
     ]
-    W, H = N * 5, N * 6
+    W, H = N * 5, N * ((len(cells) + 4) // 5)
     sheet = Image.new('RGBA', (W, H), (0, 0, 0, 0))
     for i, im in enumerate(cells):
         sheet.paste(im, ((i % 5) * N, (i // 5) * N))

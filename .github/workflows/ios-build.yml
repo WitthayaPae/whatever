@@ -28,6 +28,7 @@ on:
       - 'native/platform/ios/**'
       - 'native/shim/**'
       - 'native/CMakeLists.txt'
+      - 'native/cmake/**'          #  per-library source lists (a new .cpp lands here)
       #  The iOS bundle version is read out of this file by CMakeLists.txt
       #  (RAN_PRODUCT_VERSION = 1.0.<android versionCode>), and the version
       #  is bumped by MAKE-PATCH *after* the code was pushed. Without this
@@ -40,7 +41,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14           #  Xcode 15, iOS 17 SDK, arm64 runner
+    runs-on: macos-26           #  macos-14 was retired by GitHub (2026-11); same runner as ios-testflight.yml
     steps:
       - name: Check out MOBILE
         uses: actions/checkout@v4
