@@ -41,7 +41,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14           #  Xcode 15, iOS 17 SDK, arm64 runner
+    runs-on: macos-26           #  macos-14 was retired by GitHub (2026-11); same runner as ios-testflight.yml
     steps:
       - name: Check out MOBILE
         uses: actions/checkout@v4
