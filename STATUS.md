@@ -134,6 +134,18 @@ the patch ships a needless APK bump).
 
 
 
+## Release 830 (2026-11-10): manifest only, minApk 289 / minIos 289 (user OK)
+829 was uploaded but Play still serves 1.1.102 (289): 291 not approved yet (the Play API says "completed" as soon as a release is sent for review; the public page is the truth). Play phones showed "update the game before play" with no update in Play. 291 changed no packets (SOURCE d551683a: lag fixes, queued-message guard, class gate are server side), so 289 works with the new server. 830 = 829 content with min 289; the APK block still offers 291 to patch-site phones.
+- [x] 830 live (checked 2026-11-10, cached and uncached both 830 / minApk 289)
+- Checked after: TestFlight 291 is APPROVED and in the Public group (asc_status), so iOS needs no exception. Built 831 = 830 with **minIos 291** (minApk 289 kept): upload manifest.json + manifest.sig, purge.
+- [ ] **After Google Play approves 291 (public Play page shows 1.1.104): rebuild with `--min-apk 291 --min-ios 291`**
+
+## UPLOAD CHECKLIST — release 829 (data only, written 2026-11-10)
+Fix: Starlight exchange line [9] in spender.npcex gave the costume random box 1000/47 for 10 salt 1997/15; now gives the gacha 1997/16 กาชาบัตรสุ่มอาวุธแสงดาว (same as Black Dragon [1]: 10 salt -> gacha 1997/5). Line [10] card 1997/17 -> 1000/47 unchanged. Only spender.npcex differs inside GLogic.rcc (new md5 9429208e, was ed06af14). Backup backups/starlight_salt_fix_20261110/. Release 828 confirmed live (LDPlayer updated 289 -> 291 at 18:42).
+- [ ] Server: `data/glogic/GLogic.rcc` md5 9429208e (copy in store-release/patch827_app291/server/data/glogic/), then restart
+- [ ] Patch: out/upload `blobs/1788e944...` then `manifest.json` + `manifest.sig` (version 829), purge both in Cloudflare
+- [ ] Test: 10 Starlight salt at Gacha Exchange Clerk -> 1 กาชาบัตรสุ่มอาวุธแสงดาว
+
 ## UPLOAD CHECKLIST — release 828 / app 291 (written 2026-11-09; tick off as done)
 
 Replaces the 825 list below: 825 IS live (manifest 825). Everything here is built and waiting for the user.
