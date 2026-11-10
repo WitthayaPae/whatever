@@ -134,6 +134,52 @@ the patch ships a needless APK bump).
 
 
 
+## Release 830 (2026-11-10): manifest only, minApk 289 / minIos 289 (user OK)
+829 was uploaded but Play still serves 1.1.102 (289): 291 not approved yet (the Play API says "completed" as soon as a release is sent for review; the public page is the truth). Play phones showed "update the game before play" with no update in Play. 291 changed no packets (SOURCE d551683a: lag fixes, queued-message guard, class gate are server side), so 289 works with the new server. 830 = 829 content with min 289; the APK block still offers 291 to patch-site phones.
+- [x] 830 live (checked 2026-11-10, cached and uncached both 830 / minApk 289)
+- Checked after: TestFlight 291 is APPROVED and in the Public group (asc_status), so iOS needs no exception. Built 831 = 830 with **minIos 291** (minApk 289 kept): upload manifest.json + manifest.sig, purge.
+- [ ] **After Google Play approves 291 (public Play page shows 1.1.104): rebuild with `--min-apk 291 --min-ios 291`**
+
+## UPLOAD CHECKLIST — release 829 (data only, written 2026-11-10)
+Fix: Starlight exchange line [9] in spender.npcex gave the costume random box 1000/47 for 10 salt 1997/15; now gives the gacha 1997/16 กาชาบัตรสุ่มอาวุธแสงดาว (same as Black Dragon [1]: 10 salt -> gacha 1997/5). Line [10] card 1997/17 -> 1000/47 unchanged. Only spender.npcex differs inside GLogic.rcc (new md5 9429208e, was ed06af14). Backup backups/starlight_salt_fix_20261110/. Release 828 confirmed live (LDPlayer updated 289 -> 291 at 18:42).
+- [ ] Server: `data/glogic/GLogic.rcc` md5 9429208e (copy in store-release/patch827_app291/server/data/glogic/), then restart
+- [ ] Patch: out/upload `blobs/1788e944...` then `manifest.json` + `manifest.sig` (version 829), purge both in Cloudflare
+- [ ] Test: 10 Starlight salt at Gacha Exchange Clerk -> 1 กาชาบัตรสุ่มอาวุธแสงดาว
+
+## UPLOAD CHECKLIST — release 828 / app 291 (written 2026-11-09; tick off as done)
+
+Replaces the 825 list below: 825 IS live (manifest 825). Everything here is built and waiting for the user.
+Stores: Google Play production 291 sent for review 2026-11-09 (AAB store-release/RanMobile-store-291.aab sha 2b1960bf).
+TestFlight 291 uploaded (CI 42642577912, VALID 22:42), What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW. iOS patch build CI 42642489557 (1.1.104/291, new code found in the binary) published via make-ios-source. iOS CI now runs on macos-26 (macos-14 retired); main got the store std::ran_fopen fix for Xcode 26.
+Patch 828 sets **minApk 291 / minIos 291**: store players (Play/TestFlight 289) cannot play until their store approves 291.
+
+### 1. Game server (first, then restart) — from `DEV EP9/store-release/patch827_app291/server/`
+- [ ] `ServerField.exe` + `ServerAgent.exe` (2026-11-09 21:33) — lag fixes (MsgGoto snap max(60, speed x1.5 s) + no repeat snap within 1 s, attack burst 2->6), queued-message guard, pickup stats log, Gunner drop gate, classic skill switch, Emulator-only rules
+- [ ] `data/glogic/GLogic.rcc` md5 ed06af14 — skills since 11-05, costume sets + Starlight gacha, NPC 49/26 กาชาเงิน M (1M), Black Dragon gacha names, icons
+- [ ] `data/glogic/npctalk/NpcTalk.rcc` md5 c52153a8 — npc_gachamoney.ntk
+- [ ] `data/glogic/level/Level.rcc` md5 1235555f — w_tradezone1 (กาชาเงิน M placed)
+- [ ] `data/glogicserver/GLogicServer.rcc` md5 f082ae0e (v16, accessories 0.6) — if not uploaded yet
+- [ ] Server `Config.ini` [GAME_FEATURE] **bCreateClass = 1,1,1,1,0,0,0,0** (missing = Gunner open = Gunner gear drops)
+- [ ] Restart the servers. Never this GLogic.rcc with an older ServerField.
+
+### 2. Patch — copy `MOBILE/native/out/upload/` into `launcher_mobile/` in this order
+- [ ] `blobs/` — 10 files (95.2 MB): APK 291, GLogic/Level/NpcTalk.rcc, config.ini, mobile_hud3/4/5.dds, costumegacha01 dds + png
+- [ ] `ios/` — RanLegacyM.ipa 1.1.104 (291), source.json, install.html, icon.png
+- [ ] `android/` — RanLegacyM.apk (291), version.json, index.html, icon.png
+- [ ] `manifest.json` + `manifest.sig` — LAST (version 828)
+- [ ] Cloudflare: purge manifest.json + manifest.sig, then tell me (`build-and-publish.js --uploaded`)
+
+### 3. Stores — watch only
+- [ ] Google Play production 291 approved
+- [ ] TestFlight 291 Beta App Review approved
+
+### 4. After it is live
+- [ ] Post `Prompt/patch app 291/POST.txt` (fill date/time, NPC place) + poster `patch-app-291-poster.md`
+- [ ] Test on a slow connection with the Crazy Q-box: no snap-back loop, damage numbers show
+- [ ] Test: target panel lock (lets go when the target dies), PK long press, walk lock, rest button, bag pages, กาชาเงิน M shop + exchange 10 salt / 1 card -> Starlight box
+
+**Not tested on a device yet** (no LDPlayer / iPhone run of 291): everything above is built, reviewed by reading code, compiled for PC, Android (arm64 + x86_64), iOS (Xcode 26) and TestFlight.
+
 ## UPLOAD CHECKLIST — release 825 / app 289 (written 2026-11-05; tick off as done)
 
 Everything below is built and waiting for the user. Nothing has been uploaded yet.
