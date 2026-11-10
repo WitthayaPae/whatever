@@ -134,6 +134,13 @@ the patch ships a needless APK bump).
 
 
 
+## UPLOAD CHECKLIST — release 832 / app 292 (2026-11-10)
+Fix: NPC shop quantity box (stackable items) counted affordable units from the item's own dwBuyPrice instead of the NPC sale-list price; NPC 49/26 (1997/16 at 1M, item price 5M) said "no money" under 5M and allowed only 1 at 5-9M. InnerInterfaceModalMsg.cpp MODAL_PILE_ITEM now uses GLCrowData::GetNpcSellPrice when set (same as ReqNpcTo and the server). RAN_MOBILE only, shared SOURCE b2344690 so Android and iOS both have it. User tested on LDPlayer (292 x86_64): works. iOS: CI 42816257895 compiled the file from b2344690, not run on an iPhone.
+Stores: Play production 1.1.105 (292) uploaded 2026-11-10 (AAB store-release/RanMobile-store-292.aab sha a24e9e1c, edit 03867587402699009257) - replaces 291 in review (user chose). TestFlight CI 42816793477 started (store branch 3296b4e).
+- [ ] Upload out/upload: `blobs/d290d726...` (APK 292) first, then `ios/`, `android/`, then `manifest.json` + `manifest.sig` (832, minApk 289 / minIos 291), purge manifest + ios/source.json + android/ in Cloudflare
+- [ ] TestFlight 292: What to Test (th), add to Public, submit beta review
+- [ ] After Play approves 292 (public Play page shows 1.1.105) and TestFlight 292 is approved: rebuild with `--min-apk 292 --min-ios 292`
+
 ## Release 830 (2026-11-10): manifest only, minApk 289 / minIos 289 (user OK)
 829 was uploaded but Play still serves 1.1.102 (289): 291 not approved yet (the Play API says "completed" as soon as a release is sent for review; the public page is the truth). Play phones showed "update the game before play" with no update in Play. 291 changed no packets (SOURCE d551683a: lag fixes, queued-message guard, class gate are server side), so 289 works with the new server. 830 = 829 content with min 289; the APK block still offers 291 to patch-site phones.
 - [x] 830 live (checked 2026-11-10, cached and uncached both 830 / minApk 289)
