@@ -138,7 +138,7 @@ the patch ships a needless APK bump).
 Fix: NPC shop quantity box (stackable items) counted affordable units from the item's own dwBuyPrice instead of the NPC sale-list price; NPC 49/26 (1997/16 at 1M, item price 5M) said "no money" under 5M and allowed only 1 at 5-9M. InnerInterfaceModalMsg.cpp MODAL_PILE_ITEM now uses GLCrowData::GetNpcSellPrice when set (same as ReqNpcTo and the server). RAN_MOBILE only, shared SOURCE b2344690 so Android and iOS both have it. User tested on LDPlayer (292 x86_64): works. iOS: CI 42816257895 compiled the file from b2344690, not run on an iPhone.
 Stores: Play production 1.1.105 (292) uploaded 2026-11-10 (AAB store-release/RanMobile-store-292.aab sha a24e9e1c, edit 03867587402699009257) - replaces 291 in review (user chose). TestFlight CI 42816793477 started (store branch 3296b4e).
 - [ ] Upload out/upload: `blobs/d290d726...` (APK 292) first, then `ios/`, `android/`, then `manifest.json` + `manifest.sig` (832, minApk 289 / minIos 291), purge manifest + ios/source.json + android/ in Cloudflare
-- [ ] TestFlight 292: What to Test (th), add to Public, submit beta review
+- [x] TestFlight 292 (CI 42816793477, VALID): What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW (2026-11-10 20:3x, read back via asc_status)
 - [ ] After Play approves 292 (public Play page shows 1.1.105) and TestFlight 292 is approved: rebuild with `--min-apk 292 --min-ios 292`
 
 ## Release 830 (2026-11-10): manifest only, minApk 289 / minIos 289 (user OK)
