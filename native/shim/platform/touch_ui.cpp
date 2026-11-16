@@ -231,6 +231,10 @@ bool g_hidPage[kPageMax]                     = { };
 bool g_hidCorner[kCornerMax]                 = { };
 bool g_hidGrpB[kGrpCount], g_hidSkillB[RANTOUCH_MAX_SKILL_CIRCLES], g_hidPotB[kPotMax],
      g_hidPageB[kPageMax], g_hidCornerB[kCornerMax];     //  for cancel
+//  The top target panel is the one game window that can be taken off
+//  (2026-11-15, the user, about hiding it: "why not do in the edit hub?").
+//  The other windows cannot. Saved as one float at the end of the layout.
+bool g_hidWinTarget = false, g_hidWinTargetB = false;
 const int kHideSaved = kGrpFile + RANTOUCH_MAX_SKILL_CIRCLES + kPotMax + kPageMax + kCornerMax;
 bool canHideGroup(int g) {
     //  Not the talk button either: hidden, no NPC could be spoken to.
@@ -253,6 +257,11 @@ struct Stick {
     Vec2  dir       = { 0, 0 };     // normalised, y positive = down the screen
     float magnitude = 0.0f;         // 0..1
 } g_stick;
+//  Settings > Function "fixed joystick" (2026-11-13, the user: some players
+//  want the stick to stay where it is). On: the ring never moves to the thumb;
+//  direction and push are measured from its own centre. Off (default): the
+//  ring recentres where the thumb lands, as before.
+bool g_stickFixed = false;
 
 //  --- the attack button --------------------------------------------------
 //
@@ -1541,6 +1550,9 @@ int    g_editSlot = -1;             //  which skill slot, when the group is the 
 bool editingKillFeed() { return g_editSel == kGrpWin && g_editSlot == kWinKillFeed; }
 bool editingChat()     { return g_editSel == kGrpWin && g_editSlot == kWinChat; }
 int    g_editPtr = -1;              //  the finger dragging it
+//  The tools' window in the game (RanTouch_SetEditPanelRect) and the finger on it.
+float  g_editPanelX = 0.0f, g_editPanelY = 0.0f, g_editPanelW = 0.0f, g_editPanelH = 0.0f;
+int    g_editUiPtr = -1;
 float  g_editLastX = 0, g_editLastY = 0;
 HudAdj g_editBefore[kGrpCount];     //  for cancel
 int    g_hudSavedGen = 0;           //  bumped on save; the client polls it
@@ -1551,7 +1563,9 @@ SlotAdj g_pageBefore[kPageMax];
 //  The toolbar across the top: cancel, reset all, size -, size +, opacity -,
 //  opacity +, save. Positions in surface pixels, recomputed from the unit.
 enum { kToolCancel, kToolReset, kToolSizeDn, kToolSizeUp, kToolAlphaDn, kToolAlphaUp,
-       kToolHide, kToolSave, kToolLeft, kToolUp, kToolDown, kToolRight, kToolCount };
+       kToolHide, kToolSave, kToolLeft, kToolUp, kToolDown, kToolRight,
+       //  Undo the last change (2026-11-15). Last, so the numbers above keep their meaning.
+       kToolUndo, kToolCount };
 //  The toolbar can be moved out of the way.
 //
 //  It sits across the top, which is where the status bars, the corner icons
@@ -1570,6 +1584,7 @@ bool *hidFlag() {
         if (g_editSel == kGrpPotion && g_editSlot < kPotMax)    return &g_hidPot[g_editSlot];
         if (g_editSel == kGrpPage   && g_editSlot < kPageMax)   return &g_hidPage[g_editSlot];
         if (g_editSel == kGrpCorner && g_editSlot < kCornerMax) return &g_hidCorner[g_editSlot];
+        if (g_editSel == kGrpWin    && g_editSlot == kWinTarget) return &g_hidWinTarget;
         return NULL;
     }
     if (g_editSel == kGrpSkill || g_editSel == kGrpPotion || g_editSel == kGrpCorner) return NULL;
@@ -1584,7 +1599,7 @@ void toolCircle(int t, Vec2 &c, float &r) {
     //  not four more across: the bar is already ~0.96 of the short edge, and
     //  wider would run off a 4:3 tablet.
     static const float slot[kToolCount] = { 0.0f, 1.0f, 2.6f, 4.4f, 5.6f, 7.4f, 9.0f, 10.4f,
-                                            3.7f, 4.7f, 5.7f, 6.7f };
+                                            3.7f, 4.7f, 5.7f, 6.7f, 2.2f };
     const float total = 10.4f * step;
     c.x = (float)g_width * 0.5f - total * 0.5f + slot[t] * step + g_toolDX;
     //  A third of the way down, not on the top edge: the health section, the
@@ -1756,7 +1771,7 @@ bool groupCircle(int g, Vec2 &c, float &r) {
         case kGrpEvent:   eventCircle(c, r); r *= 1.35f; return r > 0.0f;
         //  Always in the editor too: the rest button shows only while the
         //  bot runs, and has to be placeable before that.
-        case kGrpWalk:    c = g_buttons[kBtnWalk].centre; r = g_buttons[kBtnWalk].radius * 1.35f; return r > 0.0f;
+        case kGrpWalk:    return false;     //  walk lock removed 2026-11-13 (buttonHidden)
         case kGrpRest:    c = g_buttons[kBtnRest].centre; r = g_buttons[kBtnRest].radius * 1.35f; return r > 0.0f;
         case kGrpPage: {
             c.x = (g_buttons[kBtnF1].centre.x + g_buttons[kBtnF4].centre.x) * 0.5f;
@@ -1928,6 +1943,7 @@ void editDefaultsAll() {
     memset(g_hidGrp, 0, sizeof(g_hidGrp));     memset(g_hidSkill, 0, sizeof(g_hidSkill));
     memset(g_hidPot, 0, sizeof(g_hidPot));     memset(g_hidPage, 0, sizeof(g_hidPage));
     memset(g_hidCorner, 0, sizeof(g_hidCorner));
+    g_hidWinTarget = false;
     g_toolDX = g_toolDY = 0.0f;
 }
 
@@ -1943,6 +1959,7 @@ void editEnd() {
     g_editSel = -1;
     g_editSlot = -1;
     g_editPtr = -1;
+    g_editUiPtr = -1;
 }
 
 //  Tap feedback - the ring that answers every touch, as the phone games this
@@ -2217,6 +2234,9 @@ void RanTouch_SetActive(int active) {
     if (!on) { g_rest = false; g_restDown = false; g_restExit = false; }
     //  Drop anything held, or a finger that was down when the world unloaded
     //  would leave the character walking forever.
+    //  The stall log (2026-11-14): the thumb was on the stick when the pad went.
+    if (g_stick.held)
+        LOGI("stick: dropped while held, pad %s (age %d)", on ? "back on" : "timed out", g_activeAge);
     g_stick.pointer = -1; g_stick.held = false;
     g_stick.dir.x = g_stick.dir.y = 0.0f; g_stick.magnitude = 0.0f;
     for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; }
@@ -2303,6 +2323,260 @@ extern "C" int RanTouch_ConsumePhotoExit(void) {
     return b ? 1 : 0;
 }
 
+//  --- the editor's working aids (2026-11-15, the user: "consider the ux ui
+//  in the edit hud, do the research and implement"). What the layout editors
+//  of other mobile games give (PUBG Mobile, Rainbow Six Mobile, Aion 2 mobile,
+//  Throne and Liberty): undo, a reset that cannot wipe everything by accident,
+//  steppers that repeat while held, and alignment while dragging.
+
+//  Undo: the whole arrangement before each change, newest last.
+struct EditSnap {
+    HudAdj  adj[kGrpCount];
+    SlotAdj slot[RANTOUCH_MAX_SKILL_CIRCLES], pot[kPotMax], page[kPageMax], corner[kCornerMax], win[kWinAll];
+    bool    hidGrp[kGrpCount], hidSkill[RANTOUCH_MAX_SKILL_CIRCLES], hidPot[kPotMax], hidPage[kPageMax], hidCorner[kCornerMax];
+    bool    hidWinTarget, pickNewHome;
+};
+const int kUndoMax = 30;
+EditSnap g_undo[kUndoMax];
+int      g_undoN = 0;
+double   g_resetArmUntil = 0.0;      //  reset all: armed by a first tap until then
+
+void editPushUndo() {
+    if (g_undoN == kUndoMax) { memmove(&g_undo[0], &g_undo[1], sizeof(EditSnap) * (kUndoMax - 1)); --g_undoN; }
+    EditSnap &e = g_undo[g_undoN++];
+    memcpy(e.adj, g_adj, sizeof(e.adj));
+    memcpy(e.slot, g_slotAdj, sizeof(e.slot));   memcpy(e.pot, g_potAdj, sizeof(e.pot));
+    memcpy(e.page, g_pageAdj, sizeof(e.page));   memcpy(e.corner, g_cornerAdj, sizeof(e.corner));
+    memcpy(e.win, g_winAdj, sizeof(e.win));
+    memcpy(e.hidGrp, g_hidGrp, sizeof(e.hidGrp)); memcpy(e.hidSkill, g_hidSkill, sizeof(e.hidSkill));
+    memcpy(e.hidPot, g_hidPot, sizeof(e.hidPot)); memcpy(e.hidPage, g_hidPage, sizeof(e.hidPage));
+    memcpy(e.hidCorner, g_hidCorner, sizeof(e.hidCorner));
+    e.hidWinTarget = g_hidWinTarget; e.pickNewHome = g_pickNewHome;
+}
+
+void editUndo() {
+    if (g_undoN <= 0) return;
+    const EditSnap &e = g_undo[--g_undoN];
+    memcpy(g_adj, e.adj, sizeof(e.adj));
+    memcpy(g_slotAdj, e.slot, sizeof(e.slot));   memcpy(g_potAdj, e.pot, sizeof(e.pot));
+    memcpy(g_pageAdj, e.page, sizeof(e.page));   memcpy(g_cornerAdj, e.corner, sizeof(e.corner));
+    memcpy(g_winAdj, e.win, sizeof(e.win));
+    memcpy(g_hidGrp, e.hidGrp, sizeof(e.hidGrp)); memcpy(g_hidSkill, e.hidSkill, sizeof(e.hidSkill));
+    memcpy(g_hidPot, e.hidPot, sizeof(e.hidPot)); memcpy(g_hidPage, e.hidPage, sizeof(e.hidPage));
+    memcpy(g_hidCorner, e.hidCorner, sizeof(e.hidCorner));
+    g_hidWinTarget = e.hidWinTarget; g_pickNewHome = e.pickNewHome;
+}
+
+//  What is selected, back to where and how it was designed, shown.
+void editDefaultsSel() {
+    const int g = g_editSel, i = g_editSlot;
+    if (g < 0) return;
+    if (g == kGrpSkill && i >= 0 && i < RANTOUCH_MAX_SKILL_CIRCLES) { g_slotAdj[i] = SlotAdj(); g_hidSkill[i] = false; return; }
+    if (g == kGrpPotion && i >= 0 && i < kPotMax)   { g_potAdj[i] = SlotAdj(); g_hidPot[i] = false; return; }
+    if (g == kGrpPage && i >= 0 && i < kPageMax)    { g_pageAdj[i] = SlotAdj(); g_hidPage[i] = false; return; }
+    if (g == kGrpCorner && i >= 0 && i < kCornerMax) { g_cornerAdj[i] = SlotAdj(); g_hidCorner[i] = false; return; }
+    if (g == kGrpWin && i >= 0 && i < kWinAll)      { g_winAdj[i] = SlotAdj(); if (i == kWinTarget) g_hidWinTarget = false; return; }
+    g_adj[g] = HudAdj();
+    g_hidGrp[g] = false;
+    if (g == kGrpPickup) g_pickNewHome = true;
+}
+
+//  Where the selection is now (pixels).
+bool editSelCentre(Vec2 &c) {
+    const int g = g_editSel, i = g_editSlot;
+    if (g < 0) return false;
+    if (g == kGrpSkill && i >= 0 && i < g_skillCircleCount) { c.x = g_skillCircles[i].x; c.y = g_skillCircles[i].y; return true; }
+    if (g == kGrpPotion && i >= 0 && i < g_potCount)       { c.x = g_potX[i]; c.y = g_potY[i]; return true; }
+    if (g == kGrpPage && i >= 0 && i < kPageMax)           { c = g_buttons[kPageBtn[i]].centre; return g_buttons[kPageBtn[i]].radius > 0.0f; }
+    if (g == kGrpCorner && i >= 0 && i < g_cornerCount)    { c.x = g_cornerBox[i].x; c.y = g_cornerBox[i].y; return g_cornerBox[i].has; }
+    if (g == kGrpWin && i >= 0 && i < g_winCount) {
+        if (!g_winBox[i].has) return false;
+        c.x = g_winBox[i].x + g_winBox[i].w * 0.5f; c.y = g_winBox[i].y + g_winBox[i].h * 0.5f; return true;
+    }
+    float r;
+    return groupCircle(g, c, r);
+}
+
+//  Alignment while dragging: the selection's centre clicks onto the screen's
+//  middle lines and onto the centre lines of everything else on the HUD
+//  within kSnap pixels, and a guide line shows which. Taken when the drag
+//  starts, so things that hang off the selection cannot drag the lines along.
+const int   kSnapMax = 64;
+const float kSnapPx = 6.0f;
+float g_snapX[kSnapMax], g_snapY[kSnapMax];
+int   g_snapN = 0;
+bool  g_dragHasC = false, g_dragPushed = false;
+Vec2  g_dragC0;
+float g_dragRawX = 0.0f, g_dragRawY = 0.0f, g_dragAppX = 0.0f, g_dragAppY = 0.0f;
+float g_guideX = -1.0f, g_guideY = -1.0f;
+
+void snapAdd(float x, float y) {
+    if (g_snapN < kSnapMax) { g_snapX[g_snapN] = x; g_snapY[g_snapN] = y; ++g_snapN; }
+}
+
+void editDragBegin() {
+    g_dragPushed = false;
+    g_dragRawX = g_dragRawY = g_dragAppX = g_dragAppY = 0.0f;
+    g_guideX = g_guideY = -1.0f;
+    g_dragHasC = editSelCentre(g_dragC0);
+    g_snapN = 0;
+    snapAdd((float)g_width * 0.5f, (float)g_height * 0.5f);
+    const int gs = g_editSel, is = g_editSlot;
+    for (int g = 0; g < kGrpCount; ++g) {
+        if (g == kGrpSkill || g == kGrpPotion || g == kGrpCorner || g == kGrpPage || g == kGrpWin || g == gs) continue;
+        Vec2 c; float r;
+        if (groupCircle(g, c, r)) snapAdd(c.x, c.y);
+    }
+    for (int i = 0; i < g_skillCircleCount && i < RANTOUCH_MAX_SKILL_CIRCLES; ++i)
+        if (!(gs == kGrpSkill && is == i)) snapAdd(g_skillCircles[i].x, g_skillCircles[i].y);
+    for (int i = 0; i < g_potCount && i < kPotMax; ++i)
+        if (!(gs == kGrpPotion && is == i)) snapAdd(g_potX[i], g_potY[i]);
+    for (int k = 0; k < kPageMax; ++k)
+        if (!(gs == kGrpPage && is == k) && g_buttons[kPageBtn[k]].radius > 0.0f)
+            snapAdd(g_buttons[kPageBtn[k]].centre.x, g_buttons[kPageBtn[k]].centre.y);
+    for (int i = 0; i < g_cornerCount && i < kCornerMax; ++i)
+        if (!(gs == kGrpCorner && is == i) && g_cornerBox[i].has) snapAdd(g_cornerBox[i].x, g_cornerBox[i].y);
+    for (int i = 0; i < g_winCount && i < kWinAll; ++i)
+        if (!(gs == kGrpWin && is == i) && g_winBox[i].has)
+            snapAdd(g_winBox[i].x + g_winBox[i].w * 0.5f, g_winBox[i].y + g_winBox[i].h * 0.5f);
+}
+
+void editDragMove(float dx, float dy) {
+    if (!g_dragPushed) { editPushUndo(); g_dragPushed = true; }
+    g_resetArmUntil = 0.0;
+    g_dragRawX += dx; g_dragRawY += dy;
+    if (!g_dragHasC || editingChat()) {
+        editNudge(dx / g_unit, dy / g_unit);
+        return;
+    }
+    float wx = g_dragC0.x + g_dragRawX, wy = g_dragC0.y + g_dragRawY;
+    float bx = kSnapPx + 1.0f, by = kSnapPx + 1.0f;
+    g_guideX = g_guideY = -1.0f;
+    for (int k = 0; k < g_snapN; ++k) {
+        const float ex = fabsf(g_snapX[k] - wx), ey = fabsf(g_snapY[k] - wy);
+        if (ex <= kSnapPx && ex < bx) { bx = ex; g_guideX = g_snapX[k]; }
+        if (ey <= kSnapPx && ey < by) { by = ey; g_guideY = g_snapY[k]; }
+    }
+    if (g_guideX >= 0.0f) wx = g_guideX;
+    if (g_guideY >= 0.0f) wy = g_guideY;
+    const float mx = (wx - g_dragC0.x) - g_dragAppX, my = (wy - g_dragC0.y) - g_dragAppY;
+    if (mx != 0.0f || my != 0.0f) {
+        editNudge(mx / g_unit, my / g_unit);
+        g_dragAppX += mx; g_dragAppY += my;
+    }
+}
+
+//  A stepper held down repeats: after 0.4 s, every 0.07 s; the move buttons
+//  take 4 pixels a step after a second held.
+int    g_holdTool = -1, g_holdPtr = -1;
+double g_holdT0 = 0.0, g_holdNext = 0.0;
+bool toolRepeats(int t) {
+    return (t >= kToolSizeDn && t <= kToolAlphaUp) || (t >= kToolLeft && t <= kToolRight);
+}
+
+void editTool(int t, bool bRepeat);
+void editHoldTick() {
+    if (g_holdTool < 0 || !g_edit) return;
+    const double now = tapFxNow();
+    int guard = 0;
+    while (now >= g_holdNext && guard++ < 4) {
+        editTool(g_holdTool, true);
+        g_holdNext += 0.07;
+    }
+}
+
+void editTool(int t, bool bRepeat) {
+    if (!g_edit || t < 0 || t >= kToolCount) return;
+    const float step = (bRepeat && tapFxNow() - g_holdT0 > 1.4) ? 4.0f : 1.0f;
+    if (t != kToolReset) g_resetArmUntil = 0.0;
+    //  One undo step per press, however long it is held; none for what is
+    //  not a change.
+    const bool bChange = (t >= kToolSizeDn && t <= kToolHide) || (t >= kToolLeft && t <= kToolRight) ||
+                         (t == kToolReset && (g_editSel >= 0 || tapFxNow() < g_resetArmUntil));
+    if (bChange && !bRepeat) {
+        if (t != kToolHide || hidFlag()) editPushUndo();
+    }
+    HudAdj *a = (g_editSel >= 0) ? &g_adj[g_editSel] : NULL;
+
+    //  Size goes to whatever is SELECTED, and a slot is a thing on its
+    //  own - the same rule dragging has always used. With one scale a
+    //  group, growing the skill slot under the thumb grew all six.
+    float *pScale = a ? &a->scale : NULL;
+    if (g_editSlot >= 0) {
+        if (g_editSel == kGrpSkill && g_editSlot < RANTOUCH_MAX_SKILL_CIRCLES)
+            pScale = &g_slotAdj[g_editSlot].scale;
+        else if (g_editSel == kGrpPotion && g_editSlot < kPotMax)
+            pScale = &g_potAdj[g_editSlot].scale;
+        else if (g_editSel == kGrpPage && g_editSlot < kPageMax)
+            pScale = &g_pageAdj[g_editSlot].scale;
+        else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax)
+            pScale = &g_cornerAdj[g_editSlot].scale;
+        else if (g_editSel == kGrpWin && g_editSlot < kWinAll)
+            pScale = &g_winAdj[g_editSlot].scale;
+    }
+    switch (t) {
+        case kToolCancel:
+            memcpy(g_adj, g_editBefore, sizeof(g_adj));
+            memcpy(g_slotAdj, g_slotBefore, sizeof(g_slotAdj));
+            memcpy(g_potAdj,  g_potBefore,  sizeof(g_potAdj));
+            memcpy(g_cornerAdj, g_cornerBefore, sizeof(g_cornerAdj));
+            memcpy(g_winAdj, g_winBefore, sizeof(g_winAdj));
+            memcpy(g_pageAdj, g_pageBefore, sizeof(g_pageAdj));
+            memcpy(g_hidGrp, g_hidGrpB, sizeof(g_hidGrp));       memcpy(g_hidSkill, g_hidSkillB, sizeof(g_hidSkill));
+            memcpy(g_hidPot, g_hidPotB, sizeof(g_hidPot));       memcpy(g_hidPage, g_hidPageB, sizeof(g_hidPage));
+            memcpy(g_hidCorner, g_hidCornerB, sizeof(g_hidCorner));
+            g_hidWinTarget = g_hidWinTargetB;
+            g_pickNewHome = g_pickNewHomeB;
+            editEnd();
+            break;
+        case kToolReset:
+            //  What is selected goes back to its default; with nothing selected,
+            //  everything - but only on a second tap within 3 s, since one stray
+            //  tap used to wipe a whole arrangement.
+            if (g_editSel >= 0)                       editDefaultsSel();
+            else if (tapFxNow() < g_resetArmUntil)  { editDefaultsAll(); g_resetArmUntil = 0.0; }
+            else                                    { g_resetArmUntil = tapFxNow() + 3.0; return; }
+            break;
+        case kToolSizeDn: if (pScale && editingKillFeed()) {
+            //  One row fewer, down to one.
+            const int n = killFeedRows() - 1;
+            *pScale = (float)(n < 1 ? 1 : n) / (float)kKillFeedRowsMax;
+        } else if (pScale && editingChat()) {
+            //  10% lower, down to 60% (the chat keeps three lines itself).
+            *pScale = floorf((*pScale - 0.1f) * 10.0f + 0.5f) / 10.0f;
+            if (*pScale < kChatMin) *pScale = kChatMin;
+        } else if (pScale) {
+            //  A game window only grows: its art is pixel art, and below
+            //  100% rows of it drop out (the HP labels at 90%, 2026-10-07).
+            //  Not the target panel: the panel lays itself out at any size.
+            const float fMin = (g_editSel == kGrpWin && g_editSlot != kWinTarget) ? 1.0f : kTargetMin;
+            *pScale -= 0.1f; if (*pScale < fMin) *pScale = fMin; } break;
+        case kToolSizeUp: if (pScale && editingKillFeed()) {
+            const int n = killFeedRows() + 1;
+            *pScale = (float)(n > kKillFeedRowsMax ? kKillFeedRowsMax : n) / (float)kKillFeedRowsMax;
+        } else if (pScale && editingChat()) {
+            *pScale = floorf((*pScale + 0.1f) * 10.0f + 0.5f) / 10.0f;
+            if (*pScale > kChatMax) *pScale = kChatMax;
+        } else if (pScale) { *pScale += 0.1f; if (*pScale > 1.6f) *pScale = 1.6f; } break;
+        case kToolAlphaDn: if (a) { a->alpha -= 0.1f; if (a->alpha < 0.2f) a->alpha = 0.2f; } break;
+        case kToolAlphaUp: if (a) { a->alpha += 0.1f; if (a->alpha > 1.0f) a->alpha = 1.0f; } break;
+        case kToolHide: { bool *h = hidFlag(); if (h) *h = !*h; } break;
+        //  One screen pixel a tap, for what a finger cannot place
+        //  (user, 2026-10-20: "some user need to move it pixel by pixel").
+        //  Held, a step grows to 4 pixels after a second (editHoldTick).
+        case kToolLeft:  editNudge(-step / g_unit, 0.0f); break;
+        case kToolRight: editNudge( step / g_unit, 0.0f); break;
+        case kToolUp:    editNudge(0.0f, -step / g_unit); break;
+        case kToolDown:  editNudge(0.0f,  step / g_unit); break;
+        case kToolUndo:  editUndo(); break;
+        case kToolSave:
+            editEnd();
+            ++g_hudSavedGen;
+            break;
+    }
+    layout();
+}
+
 int RanTouch_PointerDown(int id, float x, float y) {
     //  Every touch gets its ring, whatever it lands on and whether or not the
     //  HUD is up - except in the HUD editor, where a ring under each drag
@@ -2350,96 +2624,20 @@ int RanTouch_PointerDown(int id, float x, float y) {
     //  Editing the HUD: every touch is the editor's. Nothing reaches the game,
     //  so dragging a skill slot moves it instead of casting it.
     if (g_edit) {
-        for (int t = 0; t < kToolCount; ++t) {
-            Vec2 c; float r;
-            toolCircle(t, c, r);
-            if (!hit(c, r * 1.2f, x, y)) continue;
-            HudAdj *a = (g_editSel >= 0) ? &g_adj[g_editSel] : NULL;
-
-            //  Size goes to whatever is SELECTED, and a slot is a thing on its
-            //  own - the same rule dragging has always used. With one scale a
-            //  group, growing the skill slot under the thumb grew all six.
-            float *pScale = a ? &a->scale : NULL;
-            if (g_editSlot >= 0) {
-                if (g_editSel == kGrpSkill && g_editSlot < RANTOUCH_MAX_SKILL_CIRCLES)
-                    pScale = &g_slotAdj[g_editSlot].scale;
-                else if (g_editSel == kGrpPotion && g_editSlot < kPotMax)
-                    pScale = &g_potAdj[g_editSlot].scale;
-                else if (g_editSel == kGrpPage && g_editSlot < kPageMax)
-                    pScale = &g_pageAdj[g_editSlot].scale;
-                else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax)
-                    pScale = &g_cornerAdj[g_editSlot].scale;
-                else if (g_editSel == kGrpWin && g_editSlot < kWinAll)
-                    pScale = &g_winAdj[g_editSlot].scale;
-            }
-            switch (t) {
-                case kToolCancel:
-                    memcpy(g_adj, g_editBefore, sizeof(g_adj));
-                    memcpy(g_slotAdj, g_slotBefore, sizeof(g_slotAdj));
-                    memcpy(g_potAdj,  g_potBefore,  sizeof(g_potAdj));
-                    memcpy(g_cornerAdj, g_cornerBefore, sizeof(g_cornerAdj));
-                    memcpy(g_winAdj, g_winBefore, sizeof(g_winAdj));
-                    memcpy(g_pageAdj, g_pageBefore, sizeof(g_pageAdj));
-                    memcpy(g_hidGrp, g_hidGrpB, sizeof(g_hidGrp));       memcpy(g_hidSkill, g_hidSkillB, sizeof(g_hidSkill));
-                    memcpy(g_hidPot, g_hidPotB, sizeof(g_hidPot));       memcpy(g_hidPage, g_hidPageB, sizeof(g_hidPage));
-                    memcpy(g_hidCorner, g_hidCornerB, sizeof(g_hidCorner));
-                    g_pickNewHome = g_pickNewHomeB;
-                    editEnd();
-                    break;
-                case kToolReset:  editDefaultsAll(); break;
-                case kToolSizeDn: if (pScale && editingKillFeed()) {
-                    //  One row fewer, down to one.
-                    const int n = killFeedRows() - 1;
-                    *pScale = (float)(n < 1 ? 1 : n) / (float)kKillFeedRowsMax;
-                } else if (pScale && editingChat()) {
-                    //  10% lower, down to 60% (the chat keeps three lines itself).
-                    *pScale = floorf((*pScale - 0.1f) * 10.0f + 0.5f) / 10.0f;
-                    if (*pScale < kChatMin) *pScale = kChatMin;
-                } else if (pScale) {
-                    //  A game window only grows: its art is pixel art, and below
-                    //  100% rows of it drop out (the HP labels at 90%, 2026-10-07).
-                    //  Not the target panel: the panel lays itself out at any size.
-                    const float fMin = (g_editSel == kGrpWin && g_editSlot != kWinTarget) ? 1.0f : kTargetMin;
-                    *pScale -= 0.1f; if (*pScale < fMin) *pScale = fMin; } break;
-                case kToolSizeUp: if (pScale && editingKillFeed()) {
-                    const int n = killFeedRows() + 1;
-                    *pScale = (float)(n > kKillFeedRowsMax ? kKillFeedRowsMax : n) / (float)kKillFeedRowsMax;
-                } else if (pScale && editingChat()) {
-                    *pScale = floorf((*pScale + 0.1f) * 10.0f + 0.5f) / 10.0f;
-                    if (*pScale > kChatMax) *pScale = kChatMax;
-                } else if (pScale) { *pScale += 0.1f; if (*pScale > 1.6f) *pScale = 1.6f; } break;
-                case kToolAlphaDn: if (a) { a->alpha -= 0.1f; if (a->alpha < 0.2f) a->alpha = 0.2f; } break;
-                case kToolAlphaUp: if (a) { a->alpha += 0.1f; if (a->alpha > 1.0f) a->alpha = 1.0f; } break;
-                case kToolHide: { bool *h = hidFlag(); if (h) *h = !*h; } break;
-                //  One screen pixel a tap, for what a finger cannot place
-                //  (user, 2026-10-20: "some user need to move it pixel by pixel").
-                case kToolLeft:  editNudge(-1.0f / g_unit, 0.0f); break;
-                case kToolRight: editNudge( 1.0f / g_unit, 0.0f); break;
-                case kToolUp:    editNudge(0.0f, -1.0f / g_unit); break;
-                case kToolDown:  editNudge(0.0f,  1.0f / g_unit); break;
-                case kToolSave:
-                    editEnd();
-                    ++g_hudSavedGen;
-                    break;
-            }
-            layout();
-            return 1;
-        }
-        //  The plate itself: not a button, so it is the bar's handle.
-        {
-            float bx, by, bw, bh;
-            toolBar(&bx, &by, &bw, &bh);
-            if (x >= bx && x < bx + bw && y >= by && y < by + bh) {
-                g_editBar = true;
-                g_editPtr = id; g_editLastX = x; g_editLastY = y;
-                return 1;
-            }
+        //  The tools are a window of the game's own kit (CMobileHudEditBar,
+        //  2026-11-15): a press on it is the game's, and so are that finger's
+        //  moves and its lift.
+        if (g_editPanelW > 0.0f && x >= g_editPanelX && x < g_editPanelX + g_editPanelW &&
+            y >= g_editPanelY && y < g_editPanelY + g_editPanelH) {
+            g_editUiPtr = id;
+            return 0;
         }
 
         const int g = groupAt(x, y);
         g_editSel = g;
         g_editBar = false;
-        if (g >= 0) { g_editPtr = id; g_editLastX = x; g_editLastY = y; }
+        g_resetArmUntil = 0.0;
+        if (g >= 0) { g_editPtr = id; g_editLastX = x; g_editLastY = y; editDragBegin(); }
         return 1;
     }
 
@@ -2596,6 +2794,11 @@ int RanTouch_PointerDown(int id, float x, float y) {
             //  The press itself still goes to the window.
             if (!findTouch(id)) addTouch(id, x, y);
             pinchCheckStart();
+            //  The stall log (2026-11-14): a press on the stick's own pad that
+            //  a window took instead. The stick does not move for that touch.
+            if (g_stick.pointer < 0 &&
+                len(x - g_stick.centre.x, y - g_stick.centre.y) < g_stick.radius * 1.9f)
+                LOGI("stick: press at (%.0f,%.0f) went to a window under it, not the stick", x, y);
             return 0;
         }
     }
@@ -2628,10 +2831,27 @@ int RanTouch_PointerDown(int id, float x, float y) {
     if (g_stick.pointer < 0 && !onButton && stickDist < stickReach) {
         g_stick.pointer = id;
         g_stick.held = true;
-        g_stick.origin.x = x; g_stick.origin.y = y;
-        g_stick.knob = g_stick.origin;
         g_stick.dir.x = g_stick.dir.y = 0.0f;
         g_stick.magnitude = 0.0f;
+        if (g_stickFixed) {
+            //  The ring stays put: the press already counts as a push from
+            //  its centre, the same sum PointerMove does.
+            g_stick.origin = g_stick.centre;
+            g_stick.knob = g_stick.centre;
+            const float dx = x - g_stick.origin.x, dy = y - g_stick.origin.y;
+            const float d = len(dx, dy), r = g_stick.radius;
+            if (d > 0.0001f && r > 0.0f) {
+                g_stick.magnitude = d > r ? 1.0f : d / r;
+                g_stick.dir.x = dx / d;
+                g_stick.dir.y = dy / d;
+                const float k = d > r ? r / d : 1.0f;
+                g_stick.knob.x = g_stick.origin.x + dx * k;
+                g_stick.knob.y = g_stick.origin.y + dy * k;
+            }
+        } else {
+            g_stick.origin.x = x; g_stick.origin.y = y;
+            g_stick.knob = g_stick.origin;
+        }
         if (t) t->claimed = true;
         return 1;
     }
@@ -2675,6 +2895,7 @@ int RanTouch_PointerMove(int id, float x, float y) {
     if (!g_active) { lobbyPinchMove(id, x, y); return 0; }
     if (g_rest) return 1;
     if (g_edit) {
+        if (id == g_editUiPtr) return 0;
         if (id == g_editPtr && g_editBar) {
             g_toolDX += x - g_editLastX;
             g_toolDY += y - g_editLastY;
@@ -2689,7 +2910,7 @@ int RanTouch_PointerMove(int id, float x, float y) {
             return 1;
         }
         if (id == g_editPtr && g_editSel >= 0) {
-            editNudge((x - g_editLastX) / g_unit, (y - g_editLastY) / g_unit);
+            editDragMove(x - g_editLastX, y - g_editLastY);
             g_editLastX = x; g_editLastY = y;
             layout();
         }
@@ -2831,7 +3052,9 @@ int RanTouch_PointerUp(int id, float x, float y) {
         return 1;
     }
     if (g_edit) {
-        if (id == g_editPtr) g_editPtr = -1;
+        if (id == g_editUiPtr) { g_editUiPtr = -1; return 0; }
+        if (id == g_editPtr) { g_editPtr = -1; g_guideX = g_guideY = -1.0f; }
+        if (id == g_holdPtr) { g_holdPtr = -1; g_holdTool = -1; }
         removeTouch(id);
         return 1;
     }
@@ -3242,6 +3465,11 @@ bool buttonHidden(int slot) {
     //  the user: "then we can remove the lock btn on the screen"). Its group
     //  stays in the layout file so nothing saved after it moves.
     if (slot == kSlotAuto) return true;
+    //  Walk lock removed (2026-11-13, the user: "remove the walk btn"): never
+    //  drawn, never hit, not in the HUD editor. The stick still walks or runs
+    //  by how far it is pushed. Its group stays in the layout file so nothing
+    //  saved after it moves.
+    if (slot == kSlotWalk) return true;
     if ((slot == kSlotVehicle || slot == kSlotFist) && !g_vehShow) return true;
     if (slot == kSlotBot && !g_botShow) return true;
     //  Rest screen: only while the bot runs (the client says), and in the editor.
@@ -3581,6 +3809,11 @@ extern "C" int RanTouch_IsPotionSlotHidden(int i) {
 }
 extern "C" int RanTouch_IsCornerHidden(int i) {
     return (i >= 0 && i < kCornerMax && g_hidCorner[i] && !g_edit) ? 1 : 0;
+}
+//  The top target panel, taken off: the client does not show it. In the
+//  editor it is shown as ever, crossed out.
+extern "C" int RanTouch_IsTargetPanelHidden(void) {
+    return (g_hidWinTarget && !g_edit) ? 1 : 0;
 }
 
 //  How big the player has asked the skill slots to be.
@@ -4214,12 +4447,24 @@ static unsigned long long staticSignature() {
 //  The editor's overlay: an outline on every group the player can arrange, a
 //  brighter one on the selected group, and the toolbar across the top.
 void drawEditor();
+bool underEditPanel(float x, float y) {
+    return g_editPanelW > 0.0f && x >= g_editPanelX && x < g_editPanelX + g_editPanelW &&
+           y >= g_editPanelY && y < g_editPanelY + g_editPanelH;
+}
+
 void drawEditor() {
     const float u = g_unit;
+    editHoldTick();
+    //  Alignment guides while a drag has clicked onto a line.
+    if (g_editPtr >= 0 && !g_editBar) {
+        if (g_guideX >= 0.0f) drawRect(g_guideX - 1.0f, 0.0f, 2.0f, (float)g_height, kCyan.r, kCyan.g, kCyan.b, 0.85f);
+        if (g_guideY >= 0.0f) drawRect(0.0f, g_guideY - 1.0f, (float)g_width, 2.0f, kCyan.r, kCyan.g, kCyan.b, 0.85f);
+    }
     //  Outlines.
     for (int i = 0; i < g_skillCircleCount && i < RANTOUCH_MAX_SKILL_CIRCLES; ++i) {
         const SkillCircle &sc = g_skillCircles[i];
         const float rr = sc.r * 1.32f;
+        if (underEditPanel(sc.x, sc.y)) continue;
         if (g_editSel == kGrpSkill && g_editSlot == i) {
             //  A thin ring, no halo: the glow read as a heavy shadow over the
             //  control it was meant to point at.
@@ -4230,6 +4475,7 @@ void drawEditor() {
     }
     for (int i = 0; i < g_potCount && i < kPotMax; ++i) {
         const float rr = g_potRad[i] * 1.45f;
+        if (underEditPanel(g_potX[i], g_potY[i])) continue;
         if (g_editSel == kGrpPotion && g_editSlot == i) {
             drawRing(g_potX[i], g_potY[i], rr - u * 0.016f, rr, kAmber.r, kAmber.g, kAmber.b, 0.95f);
         } else {
@@ -4238,6 +4484,7 @@ void drawEditor() {
     }
     for (int i = 0; i < g_cornerCount && i < kCornerMax; ++i) {
         if (!g_cornerBox[i].has) continue;
+        if (underEditPanel(g_cornerBox[i].x, g_cornerBox[i].y)) continue;
         const float rr = g_cornerBox[i].r;
         if (g_editSel == kGrpCorner && g_editSlot == i) {
             drawRing(g_cornerBox[i].x, g_cornerBox[i].y, rr - u * 0.016f, rr,
@@ -4251,6 +4498,8 @@ void drawEditor() {
     for (int i = 0; i < g_winCount && i < kWinAll; ++i) {
         if (!g_winBox[i].has) continue;
         const WinBox &wb = g_winBox[i];
+        if (g_editPanelW > 0.0f && wb.x < g_editPanelX + g_editPanelW && wb.x + wb.w > g_editPanelX &&
+            wb.y < g_editPanelY + g_editPanelH && wb.y + wb.h > g_editPanelY) continue;
         const bool sel = (g_editSel == kGrpWin && g_editSlot == i);
         const Col cc = sel ? kAmber : kInk;
         const float t = u * (sel ? 0.016f : 0.012f), al = sel ? 0.95f : 0.5f;
@@ -4264,6 +4513,7 @@ void drawEditor() {
     for (int k = 0; k < 4; ++k) {
         const Button &b = g_buttons[kPageBtn[k]];
         if (b.radius <= 0.0f) continue;
+        if (underEditPanel(b.centre.x, b.centre.y)) continue;
         const float rr = b.radius * 1.3f;
         if (g_editSel == kGrpPage && g_editSlot == k)
             drawRing(b.centre.x, b.centre.y, rr - u * 0.016f, rr, kAmber.r, kAmber.g, kAmber.b, 0.95f);
@@ -4275,6 +4525,7 @@ void drawEditor() {
         if (g == kGrpSkill || g == kGrpPotion || g == kGrpCorner || g == kGrpPage || g == kGrpWin) continue;
         Vec2 c; float r;
         if (!groupCircle(g, c, r)) continue;
+        if (underEditPanel(c.x, c.y)) continue;
         if (g == g_editSel) {
             drawRing(c.x, c.y, r - u * 0.016f, r, kAmber.r, kAmber.g, kAmber.b, 0.95f);
         } else {
@@ -4285,6 +4536,7 @@ void drawEditor() {
     //  What is taken off the HUD: crossed out, so it can be found and put back.
     {
         struct X { static void at(float x, float y, float rr, float u) {
+            if (underEditPanel(x, y)) return;
             const float k = rr * 0.6f;
             drawCapsule(x - k, y - k, x + k, y + k, u * 0.03f, alpha(kCrim, 0.85f));
             drawCapsule(x - k, y + k, x + k, y - k, u * 0.03f, alpha(kCrim, 0.85f));
@@ -4295,6 +4547,10 @@ void drawEditor() {
             if (g_hidPot[i]) X::at(g_potX[i], g_potY[i], g_potRad[i], u);
         for (int i = 0; i < g_cornerCount && i < kCornerMax; ++i)
             if (g_hidCorner[i] && g_cornerBox[i].has) X::at(g_cornerBox[i].x, g_cornerBox[i].y, g_cornerBox[i].r, u);
+        if (g_hidWinTarget && kWinTarget < g_winCount && g_winBox[kWinTarget].has) {
+            const WinBox &wb = g_winBox[kWinTarget];
+            X::at(wb.x + wb.w * 0.5f, wb.y + wb.h * 0.5f, wb.h * 0.5f, u);
+        }
         for (int k = 0; k < 4; ++k) {
             const Button &b = g_buttons[kPageBtn[k]];
             if ((g_hidPage[k] || g_hidGrp[kGrpPage]) && b.radius > 0.0f) X::at(b.centre.x, b.centre.y, b.radius, u);
@@ -4308,116 +4564,7 @@ void drawEditor() {
 
     emit();
 
-    //  Toolbar plate, which is also the handle it is dragged by.
-    {
-        float bx, by, bw, bh;
-        toolBar(&bx, &by, &bw, &bh);
-        drawRect(bx, by, bw, bh, 0.0f, 0.0f, 0.0f, g_editBar ? 0.75f : 0.55f);
-    }
-    const bool haveSel = g_editSel >= 0;
-    for (int t = 0; t < kToolCount; ++t) {
-        Vec2 c; float r;
-        toolCircle(t, c, r);
-        const bool needsSel = (t >= kToolSizeDn && t <= kToolHide) || t >= kToolLeft;
-        float dim = (needsSel && !haveSel) ? 0.35f : 1.0f;
-        if (t == kToolHide && !hidFlag()) dim = 0.35f;      //  this one cannot be taken off
-        chromeDisc(c.x, c.y, r, dim, kFace, kFaceE);
-        const Col ink = alpha(t == kToolSave ? kCyan : (t == kToolCancel ? kCrim : kInk), dim);
-        const float s = r * 0.46f, w = r * 0.09f;
-        switch (t) {
-            case kToolCancel:
-                drawCapsule(c.x - s, c.y - s, c.x + s, c.y + s, w, ink);
-                drawCapsule(c.x - s, c.y + s, c.x + s, c.y - s, w, ink);
-                break;
-            case kToolSave:
-                drawCapsule(c.x - s, c.y, c.x - s * 0.25f, c.y + s * 0.7f, w, ink);
-                drawCapsule(c.x - s * 0.25f, c.y + s * 0.7f, c.x + s, c.y - s * 0.7f, w, ink);
-                break;
-            case kToolReset:
-                drawArc(c.x, c.y, s * 0.78f, s, 0.9f, 5.6f, ink.r, ink.g, ink.b, ink.a);
-                drawTri(c.x + s * 0.55f, c.y - s * 0.72f, s * 0.42f, 1.0f, ink.r, ink.g, ink.b, ink.a);
-                break;
-            case kToolSizeDn: case kToolAlphaDn:
-                drawCapsule(c.x - s, c.y, c.x + s, c.y, w, ink);
-                break;
-            case kToolHide: {
-                //  An eye, struck through while the selection is hidden.
-                bool *h = hidFlag();
-                drawRing(c.x, c.y, s * 0.30f, s * 0.48f, ink.r, ink.g, ink.b, ink.a);
-                drawCapsule(c.x - s, c.y, c.x - s * 0.5f, c.y - s * 0.45f, w, ink);
-                drawCapsule(c.x + s, c.y, c.x + s * 0.5f, c.y - s * 0.45f, w, ink);
-                drawCapsule(c.x - s, c.y, c.x - s * 0.5f, c.y + s * 0.45f, w, ink);
-                drawCapsule(c.x + s, c.y, c.x + s * 0.5f, c.y + s * 0.45f, w, ink);
-                if (h && *h) drawCapsule(c.x - s, c.y + s, c.x + s, c.y - s, w * 1.2f, alpha(kCrim, dim));
-                break;
-            }
-            case kToolSizeUp: case kToolAlphaUp:
-                drawCapsule(c.x - s, c.y, c.x + s, c.y, w, ink);
-                drawCapsule(c.x, c.y - s, c.x, c.y + s, w, ink);
-                break;
-            case kToolLeft: case kToolRight: case kToolUp: case kToolDown: {
-                //  A chevron pointing the way it moves.
-                const float dx = (t == kToolLeft) ? -1.0f : (t == kToolRight ? 1.0f : 0.0f);
-                const float dy = (t == kToolUp)   ? -1.0f : (t == kToolDown  ? 1.0f : 0.0f);
-                const float tx = c.x + dx * s * 0.55f, ty = c.y + dy * s * 0.55f;   //  tip
-                const float bx = c.x - dx * s * 0.35f, by = c.y - dy * s * 0.35f;   //  back
-                const float px = -dy * s * 0.75f, py = dx * s * 0.75f;              //  across
-                drawCapsule(bx + px, by + py, tx, ty, w, ink);
-                drawCapsule(bx - px, by - py, tx, ty, w, ink);
-                break;
-            }
-        }
-    }
-    //  What the - and + change, and its current value, between each pair.
-    for (int pair = 0; pair < 2; ++pair) {
-        Vec2 a, b; float r;
-        toolCircle(pair == 0 ? kToolSizeDn : kToolAlphaDn, a, r);
-        toolCircle(pair == 0 ? kToolSizeUp : kToolAlphaUp, b, r);
-        const float mx = (a.x + b.x) * 0.5f;
-        const float ly = a.y - r * 0.75f;
-        //  A square for size, a half-filled disc for opacity.
-        if (pair == 0) drawRing(mx, ly, r * 0.16f, r * 0.26f, kSteel.r, kSteel.g, kSteel.b, 0.9f);
-        else           drawDiscBottom(mx, ly, r * 0.26f, 0.5f, kSteel.r, kSteel.g, kSteel.b, 0.9f);
-        if (!haveSel) continue;
-        //  The number has to be the one the buttons change.
-        //
-        //  It read the GROUP's size while a selected slot's own size was what
-        //  moved, so pressing + on a skill slot grew the slot and left the
-        //  readout sitting at 100.
-        float vScale = g_adj[g_editSel].scale;
-        if (g_editSlot >= 0) {
-            if (g_editSel == kGrpSkill && g_editSlot < RANTOUCH_MAX_SKILL_CIRCLES)
-                vScale = g_slotAdj[g_editSlot].scale;
-            else if (g_editSel == kGrpPotion && g_editSlot < kPotMax)
-                vScale = g_potAdj[g_editSlot].scale;
-            else if (g_editSel == kGrpPage && g_editSlot < kPageMax)
-                vScale = g_pageAdj[g_editSlot].scale;
-            else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax)
-                vScale = g_cornerAdj[g_editSlot].scale;
-            else if (g_editSel == kGrpWin && g_editSlot < kWinAll)
-                vScale = g_winAdj[g_editSlot].scale;
-        }
-        const float v = (pair == 0) ? vScale : g_adj[g_editSel].alpha;
-        int pct = (int)(v * 100.0f + 0.5f);
-        const float dh = r * 0.62f, dw = dh * 0.55f, gap = dw * 0.25f;
-        char digits[4]; int nd = 0;
-        if (pair == 0 && editingKillFeed()) {
-            //  The kill feed's size is its row count: 1 to 10.
-            const int n = killFeedRows();
-            if (n >= 10) digits[nd++] = (char)(n / 10);
-            digits[nd++] = (char)(n % 10);
-        } else {
-        if (pct >= 100) digits[nd++] = (char)(pct / 100);
-        digits[nd++] = (char)((pct / 10) % 10);
-        digits[nd++] = (char)(pct % 10);
-        }
-        float x = mx - (nd * dw + (nd - 1) * gap) * 0.5f;
-        for (int i = 0; i < nd; ++i) {
-            drawDigit(x, a.y - dh * 0.25f, dw, dh, digits[i], kInk.r, kInk.g, kInk.b, 1.0f);
-            x += dw + gap;
-        }
-    }
-    emit();
+    //  The tools are the game's window (CMobileHudEditBar).
 }
 
 extern "C" void RanTouch_RenderChatMode(int mode);
@@ -5352,6 +5499,8 @@ extern "C" void RanTouch_SetSkillAim(int on) {
 
 extern "C" void RanTouch_SetSkillCarry(int carrying) { g_skillCarry = (carrying != 0); }
 
+extern "C" void RanTouch_SetFixedStick(int on) { g_stickFixed = (on != 0); }
+
 extern "C" void RanTouch_SetTalkButton(int show) {
     g_talkShow = (show != 0);
     if (!g_talkShow) { g_talkPtr = -1; g_talkDown = false; }
@@ -5458,6 +5607,7 @@ extern "C" void RanTouch_SetEditMode(int on) {
         memcpy(g_hidGrpB, g_hidGrp, sizeof(g_hidGrp));       memcpy(g_hidSkillB, g_hidSkill, sizeof(g_hidSkill));
         memcpy(g_hidPotB, g_hidPot, sizeof(g_hidPot));       memcpy(g_hidPageB, g_hidPage, sizeof(g_hidPage));
         memcpy(g_hidCornerB, g_hidCorner, sizeof(g_hidCorner));
+        g_hidWinTargetB = g_hidWinTarget;
         g_stick.pointer = -1; g_stick.held = false; g_stick.magnitude = 0.0f;
         g_stick.knob = g_stick.origin = g_stick.centre;
         for (int i = 0; i < kButtonCount; ++i) { g_buttons[i].pointer = -1; g_buttons[i].down = false; g_buttons[i].pressedEdge = false; }
@@ -5470,6 +5620,7 @@ extern "C" void RanTouch_SetEditMode(int on) {
         g_evtPtr = -1; g_evtDown = false; g_evtEdge = false;
         g_balloonPtr = -1; g_balloonDown = false; g_balloonEdge = false;
         g_pickNewHomeB = g_pickNewHome;
+        g_undoN = 0; g_resetArmUntil = 0.0; g_holdTool = g_holdPtr = -1;
         g_edit = true;
         g_editSel = -1;
     } else if (!on && g_edit) {
@@ -5478,6 +5629,89 @@ extern "C" void RanTouch_SetEditMode(int on) {
 }
 
 extern "C" int RanTouch_IsEditMode(void) { return g_edit ? 1 : 0; }
+
+//  The editor's tools, for the game's window (CMobileHudEditBar, 2026-11-15).
+//  held: seconds the button has been held (0 for a tap) - the move buttons
+//  take bigger steps after a while.
+extern "C" void RanTouch_EditTool(int t, float held) {
+    if (held > 0.0f) { g_holdT0 = tapFxNow() - (double)held; editTool(t, true); }
+    else editTool(t, false);
+}
+//  Where the tools' window (w x h) covers the least of the HUD: every place
+//  on a 16-pixel grid, scored by the area it hides of each control and HUD
+//  window; ties go to the one nearest the top middle, where the old bar was.
+extern "C" void RanTouch_SuggestEditPanel(float w, float h, float *px, float *py) {
+    struct R { float x0, y0, x1, y1; };
+    R box[160]; int n = 0;
+    auto addC = [&](float cx, float cy, float r) { if (n < 160 && r > 0.0f) box[n++] = { cx - r, cy - r, cx + r, cy + r }; };
+    for (int i = 0; i < g_skillCircleCount && i < RANTOUCH_MAX_SKILL_CIRCLES; ++i) addC(g_skillCircles[i].x, g_skillCircles[i].y, g_skillCircles[i].r);
+    for (int i = 0; i < g_potCount && i < kPotMax; ++i) addC(g_potX[i], g_potY[i], g_potRad[i]);
+    for (int i = 0; i < g_cornerCount && i < kCornerMax; ++i) if (g_cornerBox[i].has) addC(g_cornerBox[i].x, g_cornerBox[i].y, g_cornerBox[i].r);
+    for (int k = 0; k < kPageMax; ++k) addC(g_buttons[kPageBtn[k]].centre.x, g_buttons[kPageBtn[k]].centre.y, g_buttons[kPageBtn[k]].radius);
+    for (int g = 0; g < kGrpCount; ++g) {
+        if (g == kGrpSkill || g == kGrpPotion || g == kGrpCorner || g == kGrpPage || g == kGrpWin) continue;
+        Vec2 c; float r;
+        if (groupCircle(g, c, r)) addC(c.x, c.y, r);
+    }
+    for (int i = 0; i < g_winCount && i < kWinAll; ++i)
+        if (g_winBox[i].has && n < 160) box[n++] = { g_winBox[i].x, g_winBox[i].y, g_winBox[i].x + g_winBox[i].w, g_winBox[i].y + g_winBox[i].h };
+    const float W = (float)g_width, H = (float)g_height;
+    float bx = (W - w) * 0.5f, by = H * 0.14f, best = 1e30f, bestD = 1e30f;
+    for (float y = 0.0f; y + h <= H; y += 16.0f)
+        for (float x = 0.0f; x + w <= W; x += 16.0f) {
+            float cost = 0.0f;
+            for (int k = 0; k < n; ++k) {
+                const float ox = fminf(x + w, box[k].x1) - fmaxf(x, box[k].x0);
+                const float oy = fminf(y + h, box[k].y1) - fmaxf(y, box[k].y0);
+                if (ox > 0.0f && oy > 0.0f) cost += ox * oy;
+            }
+            const float d = fabsf(x + w * 0.5f - W * 0.5f) + fabsf(y - H * 0.14f);
+            if (cost < best - 1.0f || (fabsf(cost - best) <= 1.0f && d < bestD)) { best = cost; bestD = d; bx = x; by = y; }
+        }
+    if (px) *px = bx;
+    if (py) *py = by;
+}
+
+extern "C" void RanTouch_SetEditPanelRect(float x, float y, float w, float h) {
+    g_editPanelX = x; g_editPanelY = y; g_editPanelW = w; g_editPanelH = h;
+}
+static_assert(kToolCancel == 0 && kToolReset == 1 && kToolSizeDn == 2 && kToolSizeUp == 3 &&
+              kToolAlphaDn == 4 && kToolAlphaUp == 5 && kToolHide == 6 && kToolSave == 7 &&
+              kToolLeft == 8 && kToolUp == 9 && kToolDown == 10 && kToolRight == 11 && kToolUndo == 12,
+              "RANTOUCH_EDIT_*");
+static_assert(kGrpStick == 0 && kGrpAttack == 1 && kGrpSkill == 2 && kGrpPage == 3 && kGrpPK == 5 &&
+              kGrpPickup == 6 && kGrpMenu == 8 && kGrpPotion == 9 && kGrpCorner == 10 &&
+              kGrpVehicle == 11 && kGrpFist == 12 && kGrpBot == 13 && kGrpWin == 14 && kGrpTalk == 15 &&
+              kGrpNear == 16 && kGrpEvent == 17 && kGrpRest == 19, "CMobileHudEditBar names groups by number");
+//  What is selected and what the tools would do. 0 outside the editor.
+extern "C" int RanTouch_GetEditInfo(int *grp, int *slot, int *size, int *alpha, int *flags) {
+    int f = 0, sz = 100, al = 100;
+    if (g_edit && g_editSel >= 0) {
+        f |= 1;                                                 //  selected
+        float v = g_adj[g_editSel].scale;
+        if (g_editSlot >= 0) {
+            if (g_editSel == kGrpSkill && g_editSlot < RANTOUCH_MAX_SKILL_CIRCLES) v = g_slotAdj[g_editSlot].scale;
+            else if (g_editSel == kGrpPotion && g_editSlot < kPotMax)    v = g_potAdj[g_editSlot].scale;
+            else if (g_editSel == kGrpPage && g_editSlot < kPageMax)     v = g_pageAdj[g_editSlot].scale;
+            else if (g_editSel == kGrpCorner && g_editSlot < kCornerMax) v = g_cornerAdj[g_editSlot].scale;
+            else if (g_editSel == kGrpWin && g_editSlot < kWinAll)       v = g_winAdj[g_editSlot].scale;
+        }
+        if (editingKillFeed()) { sz = killFeedRows(); f |= 2; } //  size is a row count
+        else sz = (int)(v * 100.0f + 0.5f);
+        al = (int)(g_adj[g_editSel].alpha * 100.0f + 0.5f);
+        if (!editingChat()) f |= 4;                             //  can move
+        bool *h = hidFlag();
+        if (h) { f |= 8; if (*h) f |= 16; }                     //  can hide, is hidden
+    }
+    if (g_edit && g_undoN > 0) f |= 32;                         //  something to undo
+    if (g_edit && tapFxNow() < g_resetArmUntil) f |= 64;        //  reset all armed
+    if (grp)   *grp   = g_edit ? g_editSel : -1;
+    if (slot)  *slot  = g_edit ? g_editSlot : -1;
+    if (size)  *size  = sz;
+    if (alpha) *alpha = al;
+    if (flags) *flags = f;
+    return g_edit ? 1 : 0;
+}
 
 //  The arrangement as kGrpCount * 4 floats: dx, dy, size, opacity per group.
 //  The arrangement, as floats.
@@ -5506,7 +5740,8 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
                 + 1                                     //  pick-up anchor, appended 2026-10-20
                 + 4 + 1                                 //  event scoreboard button + its hidden flag, 2026-11-05
                 + (4 + 1) * 2                           //  walk, rest screen buttons + their hidden flags, 2026-11-07
-                + (kWinAll - kWinMax) * 3;              //  target panel place and size (dx, dy, size), 2026-11-08
+                + (kWinAll - kWinMax) * 3               //  target panel place and size (dx, dy, size), 2026-11-08
+                + 1;                                    //  target panel hidden flag, 2026-11-15
     if (!out || max < n) return n;
     for (int i = 0; i < kGrpLegacy; ++i) {
         out[i * 4]     = g_adj[i].dx;    out[i * 4 + 1] = g_adj[i].dy;
@@ -5561,6 +5796,8 @@ extern "C" int RanTouch_GetHudLayout(float *out, int max) {
     for (int i = kWinMax; i < kWinAll; ++i) {
         out[w++] = g_winAdj[i].dx; out[w++] = g_winAdj[i].dy; out[w++] = g_winAdj[i].scale;
     }
+    //  The target panel taken off the HUD (2026-11-15), last.
+    out[w++] = g_hidWinTarget ? 1.0f : 0.0f;
     return n;
 }
 
@@ -5711,6 +5948,9 @@ extern "C" void RanTouch_SetHudLayout(const float *in, int n) {
             if (!(sc >= kTargetMin - 0.01f && sc <= kTargetMax + 0.01f)) sc = 1.0f;
             g_winAdj[i].dx = dx; g_winAdj[i].dy = dy; g_winAdj[i].scale = sc;
         }
+        //  The target panel taken off (2026-11-15). Older files stop before
+        //  it: shown.
+        g_hidWinTarget = (r < n) ? (in[r++] > 0.5f) : false;
         for (int g = 0; g < kGrpCount; ++g)
             if (!canHideGroup(g) || g == kGrpSkill || g == kGrpPotion || g == kGrpCorner) g_hidGrp[g] = false;
     }

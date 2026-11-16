@@ -134,12 +134,145 @@ the patch ships a needless APK bump).
 
 
 
+## 2026-11-15 - OPEN: players disconnect often, even on home Wi-Fi (analysis done, WAITING for the user's server check)
+
+User: "even user use the wifi at home most of the time it disconnected, I'm not sure where it came from". The user will check later.
+
+Could not read the live sources from this PC (2026-11-15):
+- Live DB (143.14.11.x,1433): login timed out; not retried (IP blocker).
+- Crash viewer ran-legacy-m.com/crash/: the password in RAN/crash/crashcfgkey.php is NOT the server's any more ("รหัสผ่านไม่ถูกต้อง"); stopped after 2 tries (5 = 10 min lock). Need the current one, or the server copy of crashcfgkey.php.
+
+Found in the code (not yet proven to be the cause):
+- Heartbeat is not it: SESSION_CHECK_TIME 5 min; the agent asks, and only closes a client that has not answered by the next check 5 min later (s_CAgentServer.cpp AgentSrvHeartBeatCheck). Short phone freezes cannot trip it.
+- The server firewall-blocks a whole IP (WinExec "netsh advfirewall firewall add rule ... action=block remoteip=<ip>/32", permanent) on:
+  1. "Buffer Over": more than NET_DATA_CLIENT_MSG_BUFSIZE (16384) bytes waiting from one client (s_CNetUser.cpp InsertBuffer -> CIPFilter::AddIPBlock).
+  2. "invalid Garbage Msg": a message carrying one of the last two anti-replay tags (CNetUser::CheckGarbageMsg; client side CNetClient::GetGarbageMsg / SendMsgAddGarbageValue).
+  3. "invalid Msg": a message the server cannot parse (CNetUser::getRcvMsg -> AddIPBlock + CloseClient).
+  4. "IPLimit reached", only if ipclient_max > 0 (s_CClientManager.cpp IPAllowConnect, bBlockCMD). Local cfg copies (June) have ipclient_max 0; the live value is unknown.
+  A home shares one public IP: one trigger from any device there blocks everyone in that house, players already in game included, until the rule is deleted. (The same blocker banned the owner's IP in August.)
+- Phone socket layer (MOBILE/native/shim/win/net_events.cpp poll-based WSAEventSelect, s_NetClient NetThreadProc): no bug found.
+- Side note: CNetClient::SendNormal has no overflow check (assert only), unlike Send(); not linked to this yet.
+
+Next step - the user runs on the game server (PowerShell, read only, prints counts, not IPs):
+
+    (Get-NetFirewallRule -Direction Inbound -Action Block | ? DisplayName -match '^\d{1,3}(\.\d{1,3}){3}$').Count
+
+    Get-ChildItem C:\,D:\ -Recurse -Filter "NETWORK_*.log" -ErrorAction SilentlyContinue | ? LastWriteTime -gt (Get-Date).AddDays(-7) | Select-String "Block IP|Buffer Over|invalid Garbage Msg|invalid Msg|IPLimit reached|IPFilter IP" | % { if ($_.Line -match "Buffer Over|invalid Garbage Msg|invalid Msg|IPLimit reached|Block IP|Added To BlockList") { $matches[0] } } | Group-Object | Select Count,Name
+
+    Get-ChildItem C:\,D:\ -Recurse -Filter "*.cfg" -ErrorAction SilentlyContinue | Select-String "^ipclient_max" | Select Path,Line
+
+(Server logs: <server exe folder>\log\NETWORK_YYYYMMDDHHMM.log, s_CLogSystem.cpp.)
+
+- If the counts are high: trace the trigger that fires back into the phone client. Proposed server fix: close only the offending connection instead of a firewall block, and remove the rules already made. Server code change, so ask the user first.
+- If near zero: need the DB login history or the crash reports to look further.
+
+## 2026-11-14 — three more bosses announced (data only, not shipped)
+
+- User: every boss should be announced; the ลานประลอง boss and the new map's bosses were not. One flag decides all three lines (appeared / killed by / dropped): EMCROWACT_KNOCK 0x200 in SCROWACTION::m_dwActFlag (GLLandMan.cpp:570, GLCrowGenerateReward.cpp:217/467).
+- Set on the 6 single-spawn bosses that had EMCROWACT_BOSS but not KNOCK (0x10404 -> 0x10604): 57/5 Cruel Jupiter (23/0), 57/13 + 57/14 (29/0), 38/12 Ice Tyrant, 38/13 Death Reaper, 38/14 Saint Gambler (Hangout floors, 3 channels each). crow.mnsf 6 bytes, every other field of all 1858 records identical. Now 16 placed bosses announce.
+- **Corrected the same day (user: "leave the Ice Tyrant, Death Reaper, and Saint Gambler"):** 38/12, 38/13, 38/14 are back to silent. Final: only 57/5, 57/13, 57/14 gained the flag (3 bytes); 13 placed bosses announce. GLogic.rcc md5 **4b285f31** (not d90c88f7 as written below).
+- **Left as they are, waiting for the user:** 18 'Leader' monsters carry the boss flag too but stand 3-7 to a map on the school maps (Vulgar Leader lv10 ... Violent Baldie lv114); announcing them would fill the chat.
+- CLIENT/data/glogic/GLogic.rcc md5 d90c88f7 (only crow.mnsf) + loose crow.mnsf. Backup backups/boss_announce_20261114/. Pushed to LDPlayer-1 RAN EMU, not tested in game. **Ship:** server GLogic.rcc (the server decides) and the client patch carries the same file.
+
+## 2026-11-14 — target HP panel can be switched off (built for RAN EMU x86_64 + MSVC; not seen on a device)
+
+- User: the target HP panel should be hideable in the settings. Settings > Function, right column, 8th row: แสดงแถบ HP เป้าหมาย / Show target HP panel (SW_TARGETPANEL), default on. RANPARAM::bMobileTargetPanel, saved in option.ini (GRAPHIC OPTION), reset with the others.
+- Off: CInnerInterface::MobileTargetPanelFrame passes bAllowed false, so CMobileTargetPanel never shows, HUD editor included. The lock button lives on that panel; with it hidden the lock is still set in Settings (Target lock). The name and HP bar over the target itself are untouched.
+- Right column pitch is now for 8 rows. No Gui.rcc change (literal label). Both platforms from the same SOURCE; not built: arm64, iOS. Installed on LDPlayer-1 for the user to check; I did not open it. Backup backups/target_panel_switch_20261114/.
+- Also today: walk fixes confirmed by the user ("look like it already fix"), `walktrace` removed from LDPlayer-1, MSVC 4 targets 0 errors.
+
+## 2026-11-14 — walk freezes after a knockback (built for RAN EMU x86_64 only; fix not verified on device)
+
+- User: with many items on the floor the walk still freezes sometimes. Measured, not guessed: diag file `walktrace` (DxGameStage stick code, GLChar::MsgGoto server gap, client MOVE2GATE_FB) logs stick up/down as the game reads it, every action change while held, long frames, speed under 25% for 0.1 s.
+- LDPlayer, 101 drops on the floor, 20 passes with the stick held: no item-related stop. No server position snap, no long frame, no stick loss. Every interruption was action 1 -> 5 -> 0: GLAT_PUSHPULL from a monster's crushing blow (GLLandMan::PushPullAct -> NET_MSG_GCTRL_PUSHPULL_BRD), 7 in ~45 s; when the push ends the client goes GLAT_IDLE with no path and the held stick only asked again on its 0.3 s heartbeat (measured 0.2-0.28 s standing still at mag 1.00). Drops lie where monsters are fought, hence 'when many items'.
+- Fix (RAN_MOBILE, DxGameStage.cpp): the frame PUSHPULL / SHOCK / SKILLMOVE / SKILLDASH ends in IDLE while the stick is held, the stick retargets at once (bKnockEnded). Arriving at a wall keeps the heartbeat, so no extra GOTOs.
+- **Second cause, from the user's own test log (20:21-20:22, 249 drops, no knockback, no slow frames):** 11 of 46 stick presses stopped while pushed. The thumb lands at mag 0.12-0.18, the first aim is fREACH x mag = 17-25 units; sliding out to 1.00 does not turn the heading, so no retarget; the character arrives after 0.17-0.23 s (action 1 -> 0) and stands 0.09-0.14 s until the 0.3 s heartbeat. Fix: retarget when the stick is pushed 0.25 further out than at the last aim (fLastMag, bPushedOut), at most three per press, none while the thumb holds still.
+- The user tests it themself: installed on LDPlayer-1 with `walktrace` left on (logging only) so a remaining freeze is captured. **I did not run the fixed build.** Also not built: arm64, iOS, MSVC (GLCharacter.h, GLCharMsg.cpp, GLCharacterMsg.cpp touched under RAN_MOBILE only). Backup backups/walktrace_20261114/.
+
+## 2026-11-14 — stone-element weapons never drop (data only, not shipped)
+
+- User: ธาตุหิน / หินรุนแรง should not drop at all (seen from the 29/0 bosses: 70/101 in spec 92, 70/102 in spec 93; drop-enabled since at least 10-18, not from our edits).
+- bGenEnable 1 -> 0 (ITEM::SGENERATE) on every item whose Thai name has ธาตุหิน or หินรุนแรง: 190 matched, 147 were already off, 43 switched (22 in specs 92-95, 21 in 242/x spec 0). item.isf 43 bytes, item.csv same rows; nothing else. Script scratchpad stone/mk.js.
+- Side effect by design: bGenEnable 0 = retired, so they also leave the private-market want-to-buy list and the mob drop viewer. Existing ones in bags are unaffected.
+- Read back: all 190 off; drop-report finds 0 stone items dropping. CLIENT/data/glogic/GLogic.rcc md5 91d1c73c (only item.isf + item.csv) + loose item.isf/item.csv. Backup backups/stone_element_nodrop_20261114/. Pushed to LDPlayer-1 RAN EMU.
+- **Ship:** server GLogic.rcc (drops) + client patch GLogic.rcc (want-list/viewer).
+
+## 2026-11-14 — เขตธรณีพิบัติภัย (29/0) bosses: respawn times + normal-element weapon set (data only, not shipped)
+
+- User asked. Respawn (w_city_e2.lev, m_fReGenTime, seconds after death): 40/28 Lightning Tycoon 1 h -> 8 h; 57/13 Star Swordsman and 57/14 Crimson Swordsman 8 h -> 16 h. 40/27 stays 8 h, 40/29 6 h.
+- Drops: Bilanggo (40/27), Dark_Arts_Agent (40/28), sundoboss (57/13, 57/14; also 57/17 and 57/18, which are on no map) gain `ITEMSPEC 92 10` = the normal-element Kung Fu set the map's monsters drop (66 weapons). Strong set (spec 93, 5%) unchanged. Per 100 kills, normal / strong: Swordsmen 54 / 27, Tycoon 38 / 19, Cross Demon 42 / 21. User chose: strong stays, normal above it.
+- Files: CLIENT/data/glogicserver/GLogicServer.rcc md5 57d00e42 (only those 3 .genitem differ; the loose .genitem files are older copies, untouched, as on 11-11), CLIENT/data/glogic/level/Level.rcc md5 e61799e0 (only w_city_e2.lev, 6 bytes) + loose w_city_e2.lev. Backup backups/boss29_respawn_normalset_20261114/.
+- **Server only:** GLogicServer.rcc + Level.rcc, then field restart. Clients do not read either value. Not tested in game.
+
+## 2026-11-14 — walking stutters over a floor full of drops (built for RAN EMU x86_64 + MSVC; not shipped, not committed)
+
+- User: walking freezes when many items lie on the floor, like walking through a crowd.
+- Cause found in code: Render_MobItem cast one ray through the land mesh per visible dropped item and money pile, every frame, to decide whether its name is hidden. The players' names had the same cost (3.2 ms a frame on an iPhone) until MobileNameOccluded cached it; drops were left out.
+- Fix (RAN_MOBILE, GLLandManClient.cpp): drops and money use MobileNameOccluded too (re-cast every 12th frame, spread by id; kind 1 item, 2 money, 0 player so ids do not collide). PC and servers unchanged.
+- Diag file `itemnamecast` = the old ray every frame. Profiler: sections mi:drop-namecast, mi:drop-draw, count mi:drop-seen.
+- LDPlayer (RAN EMU): 15 drops on the floor from spawned bosses, names shown, 60 fps. **No before/after timing taken** (the emulator's CPU hides it); the user tested and said it looks right. Monsters' names still cast every frame (mi:mob-namecast) - not changed.
+- Not built: arm64, iOS. Backup backups/item_namecast_20261114/.
+
+## 2026-11-14 — vehicle preview + the box-contents window redesigned (built for RAN EMU x86_64 + MSVC; not shipped, not committed)
+
+User: "two feature that we need to add is the preview the vehicle like ดูตัวอย่าง; also in the window ดูของข้างใน it's so small and we should refactor to match the existing UI".
+
+- **Vehicle preview (shared SOURCE, PC client gets it too):** `PreviewItemCheckSimple/Wear` accept ITEM_VEHICLE with a wearing file, so a bike, car, mount or board (and a box holding one) gets ดูตัวอย่าง / the PC ALT preview. `CItemPreviewWindowRender::m_sVehicle`: mounted the way GLCharacter::UpdateSuit does (.vcf -> SetVehicle, a board .cps -> SetPiece), drawn with RenderVehicle, riding pose as CVehicleWindowRender::UpdateAnimation (board AN_SUB_HOVERBOARD, else CHECK_VEHICLE_MAIN/SUB), the vehicle AN_VEHICLE_STAY. Placement: the vehicle window's angles, sized to sit between the slot columns (bike 0.85 + 3 right; car/cart 0.45; board moved back z+12 because its fog effect ignores scale). Turn arrows still turn it. No accessories/paint (the item is new). One log line per preview on mobile ("preview vehicle ... file ... data ...").
+  - LDPlayer: BMW 918/8, tiger mount 918/10, Lamborghini 47/9, cloud board 161/1 all shown ridden. The car draws pale/see-through with bright lights (not compared with riding it in the world).
+  - **Data gap found:** 10 of the 50 .vcf files items point at are not in CLIENT/data/skinobject (car_ferra_black, event_police_car, event_rearcar_01, m&m_mount_whale, ryg_bike3, ryg_bike3_normal, sc_bmw_r1100r, sc_bmw_s1000rr, sc_dream50, sc_z800). Those vehicles (e.g. 47/3 BMW trial) preview as the rider alone, and should be invisible when ridden too. Not touched.
+- **Box contents on mobile (`CMobileBoxContentsPanel`, RAN_MOBILE, MobileBoxContentsPanel.h/.cpp, MOBILE_BOX_CONTENTS_PANEL):** drawn in INFO_BOX_CONTENTS' place (MobileHostRedirect); the classic window stays open hosted, so ShowBoxContents fills it and ReqBoxOpen reads its picks unchanged. Solid panel titled ดูของข้างใน: the box (slot + name in its grade colour + the classic line: chance of nothing / โปรดเลือก N ไอเทม), its items at the bag's 60-unit slot size, 6 a row, amount or rate under each, 1-4 rows then scrolling (the NPC shop grid), a random box lists its whole table. Tap = the item window (preview / contents / link). Pick-one boxes (60 in data, all pick 1): the item window gets เลือก / ยกเลิก (`VIEW_BOX_PICK`, `SMOBILEVIEW::nBoxSlot`, `MobileNoteBoxTap`), the pick gets the ring, ยืนยัน opens the box (CInfoBoxContents::MobileToggleSelect / MobileConfirm). Only existing words used (no Gui.rcc change).
+  - LDPlayer: Silver Dragon gacha 2 items 5%/95%; pick box 928/1 picked the first weapon, ยืนยัน -> "เปิดกล่องเรียบร้อย", that weapon in the bag.
+- **Follow-up (user: "I have to click so many time to rotate"; "why hold the weapon like that instead of in the not ready position"):** the preview turns by dragging a finger/mouse across the model (a full turn per window width; starts after 8 px so slot taps still work) and keeps turning while an arrow is held (after 0.25 s, half a turn a second; a tap still steps 0.1). On a phone a resting finger is not "pressed" (the arrow only got MOUSEIN + a high-word 0x0004), so the hold reads `RanGesture_Holding()` like CMobileButton. Riding, the weapon is put away (FrameMove bAttackMode FALSE, as GLCharacter out of combat) whatever Stance says. Bike placement centred, 0.65 (side-on it swung into the right slot column). LDPlayer: drag turned it, a held arrow turned it continuously (3 shots 0.6 s apart), bow on the back. Shared code: the PC preview gets drag and hold too.
+- Files: ItemPreviewWindow.cpp, ItemPreviewWindowRender.h/.cpp, InnerInterface.h/.cpp, InnerInterfaceSimple.cpp, InnerInterfaceGuid.h, InfoBoxContents.h/.cpp, MobileBoxContentsPanel.h/.cpp (new), native/cmake/sources_Lib_ClientUI.cmake. Backup `DEV EP9/backups/vehicle_preview_boxcontents_20261114/`.
+- Built: MSVC GameClient2/Emulator/ServerAgent/ServerField 0 errors (16:48); RAN EMU x86_64 installed on LDPlayer-1. Not built: arm64, iOS (same code, same cmake list; not run on an iPhone).
+
+## 2026-11-14 — Silver Dragon Necklace สร้อยคอมังกรเงิน (keep-grade protection; first named Sapphire/ไพลิน, renamed: user said the name exists - สร้อยไพลิน 115/302) + its gacha (not shipped, not committed; goes with patch 175)
+
+User: a second protection necklace like 143/3 สร้อยคอมังกรทอง, but a failed upgrade keeps its grade (+6 to +7 fails = stays +6); new item, new icon, new gacha like Black Dragon at about 5 in 100. Answers: used up only when it saved the grade; worn like 143/3; names/icon my design; gacha like the others; stack 30, permanent.
+
+- **Code (shared, servers + every client):** new item type `ITEM_ANTI_RESET = 100` (ITEM_NSIZE 101). Failed upgrade (`GLCHARLOGIC::DOGRINDING`): when the reset roll hits and this necklace is worn, the item keeps its grade, no break roll, the necklace is used (`EMANTIDISAPPEAR_KEEP_ON/KEEP_USE` 3/4). A fail that keeps the grade anyway does not use it. `GET_GRIND_PROTECT` picks the necklace: keep-grade first, then 143/3; neck slot, then ornament (server grinding + mobile enhance window). Worn like 143/3 (`CHECKSLOT_ITEM`). Message `EMGRINDING_ANTIRESET` (TH/EN). An old client (292) shows a plain "upgrade failed" for it. Also: tooltip, drop sound, wearable sheet, item log, Editor_Item tree/type name.
+- **Data (GLogic.rcc 6bdee6c3 -> 95788581 after the rename, only item.isf, item.csv, ItemStrTable(_en).txt, spender.npcex):**
+  - 143/25 สร้อยคอมังกรเงิน / Silver Dragon Necklace (copy of 143/3, type 100, description ID_143_025)
+  - 1997/57 กาชาสร้อยมังกรเงิน / Silver Dragon Necklace Gacha (copy of Ruby gacha 1997/12): 5% 143/25, 95% salt 1997/58
+  - 1997/58 เกลือกาชาสร้อยมังกรเงิน / Silver Dragon Necklace Gacha Salt (copy of 1997/13)
+  - spender.npcex (Gacha Exchange Clerk 49/21): [11] 10 salt 1997/58 -> 1 gacha 1997/57, [12] 100 salt -> 143/25 (same as Ruby [7]/[8])
+- **Icons:** costumegacha01 row 4 cells 0-2. Necklace (0,4), third version (user: keep the 143/3 shape, add other things): the 143/3 dragon swirl cut out by colour and turned polished silver, deep blue backdrop + blue aura, a faceted sapphire (Blender render) in the curl where the gold ball was, a small sapphire at the cord, star glints; frame ring of the 143/3 cell (backups/keep_grade_necklace_20261114/compose2.py, gem.py, necklace_icon_preview_v3.png). Earlier versions: icon_v1/ (recolour), icon_v2_render/ (Blender chain + claw pendant). Gacha (1,4) and salt (2,4): blue recolours of the Ruby gacha/salt, like every other gacha set. Other pixels unchanged (checked). textures/gui/costumegacha01.dds + gui_hd/costumegacha01.png.
+- **Gui.rcc** 601660a5 -> 02c673fe (gameintext.xml, gameintext_en.xml only).
+- **Selling the gacha box 1997/57: the user adds it to the item shop themself** (2026-11-14). Ruby/Black Dragon boxes are not in any NPC shop file.
+- **Still to do (user: later):** copy the new ServerField.exe (SOURCE/_Bin/Tool) into store-release/ep3_175_gunner/server before the 175 upload; without it the necklace does nothing on the server.
+- Built: MSVC GameClient2/Emulator/ServerAgent/ServerField + Editor_Item (installed CLIENT/Editor_Item.exe; the old one in the backup), RAN EMU x86_64 on LDPlayer-1 with the data pushed (md5 checked). Not built: arm64, iOS. **Not tested in game.** Server needs the new ServerField + GLogic.rcc (store-release/ep3_175_gunner/server updated: GLogic.rcc 95788581; ServerField.exe there is still the old one). Backup `DEV EP9/backups/keep_grade_necklace_20261114/`.
+
+## 2026-11-14 — skill casts by itself, chase while steering, stick stall log (built for RAN EMU x86_64 only; not shipped, not committed)
+
+Player reports: (1) a skill is used when it is only being put in a slot, or with no press at all; (2) after a skill/attack the character keeps going for other mobs or players while the player moves away; (3) the stick sticks for a moment in the emu.
+- (1a) A 450 ms hold is the right button (touch_gesture.cpp) and PlayerUpdate cast the armed skill on a right click, on a mob/player and for self/ground skills on bare ground. `GLCharacter.cpp` PlayerUpdate: under RAN_MOBILE the right button no longer selects pRunSkill (hold still picks the target and opens a player's menu; FrameMoveBot's copy untouched). LDPlayer: holds on mobs 246 and 312 logged `GESTURE right(hold)` + target pick, character stayed idle.
+- (1b) `GLCharacterMsg.cpp` NET_MSG_GCTRL_REQ_SKILLQ_FB: with no skill armed the client arms the slot just filled (ReqSkillRunSet), which on mobile is the cast trigger. Now armed without the press flag. Code only, not exercised on a device.
+- (2) The stick walks through ActionMoveTo and never cleared m_sREACTION (the PC clears it on a ground click). MobileTargetTick's re-pick then moved the attack to each new nearest enemy during a stick walk (GLAT_MOVE + REACT_MOB/PVP). New `GLCharacter::MobileStickSteering()` (called every frame the stick is read, DxGameStage) resets the reservation. A/B on LDPlayer, same 14-hold script, level 30 Brawler in the SG yard: fix off 16 and 19 takeovers while the stick was held, fix on 0 (12 reservations dropped).
+- (3) Not reproduced as a fault: every stall caught was the character against the yard's boundary ("no floor" refusals). A stall log is now always on: `RanStick: STALL n s: mag, step 0/1 (refused: no floor a, no straight line b, move c) move-refuse r action path react ...` when the stick is pushed and the character moves < 2 units in 0.5 s; `RanStick: IGNORED while held` (input locked / skill-cancel off); `RanTouch: stick: press ... went to a window under it`; `stick: dropped while held, pad timed out`; `RanTarget: re-pick moves the attack ... stick held n`. Read these from logcat when a player reports it.
+- Shared SOURCE + shim, so Android and iOS both get it at the next build. Built: RAN EMU x86_64 (LDPlayer-1), MSVC GameClient2/Emulator/ServerAgent/ServerField. Not built: arm64 APK, iOS. Backup `DEV EP9/backups/touch_skill_chase_20261114/`.
+
+- (3, found later the same day; user: "it happens when I walk into a crowd of monsters and try to walk through") The stick's move went through ActionMoveTo's click rule `IsCollisionMobToPoint` (do not walk to a point where a monster or NPC stands). The stick's point is only a heading a stride ahead, asked for 3 times a second, and the field has no such rule (GLChar::MsgGoto). Fix: `GLCharacter::s_bMobileStickMove` is set round the stick's candidates (DxGameStage) and ActionMoveTo skips the rule for them; tap-to-move, map walk and MobileApproach keep it. Log `RanStick: crowd: N candidates on a monster's spot, moves refused M, went 0/1`; diag file `stickmobcheck` puts the rule back for the stick. User tested on LDPlayer-1 (RAN EMU x86_64): "looks right"; their run logged 22 crowd lines, 0 with nowhere to go, no stall. No old-vs-new measurement was made (user took over the test). The rule checks monsters/NPCs only, not players. Not built: arm64 APK, iOS. Backup `DEV EP9/backups/stick_crowd_20261114/`.
+
+- (4, user 2026-11-14: "another player's stall is behind the joystick, the press opens the stall instead of walking") Stall signs (PRIVATE_MARKET_SHOW_MAN) are controls, so the touch layer's "a window is under this press" test (touch_ui.cpp, `RanUI_PointInDragControl` / `RanUI_PointInWindowOverSkill`) gave the press to the sign before the stick or a skill button could take it. Fix: both tests leave the sign out, as they already do for name plates (`CUIMan::IsPointInControlExcept` got a third skip id; DxGameStage.cpp). Side effect, same as name plates: a drag that starts on a sign turns the camera. A tap on a sign away from the pad is meant to still open the stall. Test signs: diag file `fakestall` puts four signs at fixed screen places (stick, skill buttons, attack button, middle; PrivateMarketShowMan.cpp, RAN_MOBILE), a press a sign takes prints an orange TEST line instead of opening a stall. User tested with them on LDPlayer-1 (RAN EMU x86_64): "working good". Not tested with a real stall on the live server. Built: RAN EMU x86_64, MSVC GameClient2/Emulator/ServerAgent/ServerField 0 errors. Not built: arm64 APK, iOS. Backup `DEV EP9/backups/stall_sign_under_pad_20261114/`.
+
+## 2026-11-13 — walk button removed, "fixed joystick" setting (not shipped yet; goes with patch 175)
+- Walk lock button gone: `buttonHidden(kSlotWalk)` + out of the HUD editor (shim/platform/touch_ui.cpp, shared by Android and iOS). The stick still walks/runs by push distance; DxGameStage's bWALK stays false.
+- Settings > Function "จอยสติ๊กอยู่กับที่ / Fixed joystick" (SW_FIXSTICK, RANPARAM::bMobileFixedStick, option.ini, default off). On: the ring stays put, direction from its centre (RanTouch_SetFixedStick, set every frame next to SetSkillAim). Off: recentres on the thumb as before.
+- Verified on LDPlayer (RAN EMU build): walk button absent, switch row shown, saved as bMobileFixedStick = 1, ring stayed fixed while dragging. Not yet on the tablet or an iPhone. MiniA / Emulator / ServerAgent / ServerField build clean. Backup: DEV EP9/backups/walk_joystick_20261113/.
+
+## 2026-11-13 — RAN EMU: the PC Emulator on Android (test app only, never shipped)
+- Separate app com.ran.native.emu ("RAN EMU") on LDPlayer: no login/server; the PC Emulator's in-process server (SOURCE/GameEmulator/EmuCore.cpp, now shared with the PC Emulator), character from native/emu/emu.ini, GM window and /emu_pc /emu_pk /emu_pot work as on PC.
+- Build ./build-emu.sh -> native/out-emu/RanEmu.apk; data ./emu-push.sh (game data copied on the device + CLIENT files newer than the built manifest + GLogicServer.rcc + emutest/). Verified on LDPlayer: boots, Admin joins สถาบัน SG, 60 fps.
+- Shipped app unaffected: everything new is #ifdef RAN_EMU (CMake option, app target only); the normal build's ran_app.o / android_main.o machine code is identical with and without the change. iOS: not built (Android test tool only). PC Emulator rebuilt and installed (CLIENT/Emulator.exe 3497d37d, old in backups/emu_mobile_20261113/exe/).
+
 ## UPLOAD CHECKLIST — release 832 / app 292 (2026-11-10)
 Fix: NPC shop quantity box (stackable items) counted affordable units from the item's own dwBuyPrice instead of the NPC sale-list price; NPC 49/26 (1997/16 at 1M, item price 5M) said "no money" under 5M and allowed only 1 at 5-9M. InnerInterfaceModalMsg.cpp MODAL_PILE_ITEM now uses GLCrowData::GetNpcSellPrice when set (same as ReqNpcTo and the server). RAN_MOBILE only, shared SOURCE b2344690 so Android and iOS both have it. User tested on LDPlayer (292 x86_64): works. iOS: CI 42816257895 compiled the file from b2344690, not run on an iPhone.
 Stores: Play production 1.1.105 (292) uploaded 2026-11-10 (AAB store-release/RanMobile-store-292.aab sha a24e9e1c, edit 03867587402699009257) - replaces 291 in review (user chose). TestFlight CI 42816793477 started (store branch 3296b4e).
 - [ ] Upload out/upload: `blobs/d290d726...` (APK 292) first, then `ios/`, `android/`, then `manifest.json` + `manifest.sig` (832, minApk 289 / minIos 291), purge manifest + ios/source.json + android/ in Cloudflare
 - [x] TestFlight 292 (CI 42816793477, VALID): What to Test (th) set, added to Public, Beta App Review WAITING_FOR_REVIEW (2026-11-10 20:3x, read back via asc_status)
-- [ ] After Play approves 292 (public Play page shows 1.1.105) and TestFlight 292 is approved: rebuild with `--min-apk 292 --min-ios 292`
+- [x] Play 292 on production (user, 2026-11-12) and TestFlight 292 betaReview APPROVED (asc_status 2026-11-12)
+- [x] **833 built 2026-11-12 = 832 re-signed with minApk 292 / minIos 292** (scratchpad remin.js, same write + sign as make-manifest; diff vs 832 = version + minApk + minIos only). NOT a make-manifest run: CLIENT now holds the unreleased EP3 data (GLogic, NpcTalk, Quest, Level, EffectChar, config.ini differ from 832) and --ship only covers single-file entries. Backup of 832 manifests: backups/patch832_before_min292_20261112/.
+- [ ] Upload out/upload (same APK 292 blob, ios/, android/ as 832; manifest 833 last), purge, then `--uploaded`
 
 ## Release 830 (2026-11-10): manifest only, minApk 289 / minIos 289 (user OK)
 829 was uploaded but Play still serves 1.1.102 (289): 291 not approved yet (the Play API says "completed" as soon as a release is sent for review; the public page is the truth). Play phones showed "update the game before play" with no update in Play. 291 changed no packets (SOURCE d551683a: lag fixes, queued-message guard, class gate are server side), so 289 works with the new server. 830 = 829 content with min 289; the APK block still offers 291 to patch-site phones.
@@ -15732,3 +15865,166 @@ Worth keeping in mind if it ever comes up again: the idea is sound on paper and
 the implementation was cheap (two candidates tracked in one pass, falling back
 to nearest when nothing is in front). What made it wrong was play feel, not
 correctness, and that is not something the code can tell you.
+
+### 2026-11-14 — plain spirit gauntlets get their energy add-on back
+
+- User: "why the Brawler item spi ... does not have energy option", example สนับทรงพลังอย่างบาง (79/15).
+- Cause: group 79 (79/1..79/17, plain spirit gauntlets) had sADDON type 0 on every slot in item.isf/item.csv. Plain spirit swords (group 3) and bows (group 27) have EMADD_MA. Already empty in the oldest backup (2026-10-26); the June EP9 table (`_cryptotools_PRIVATE/item.csv`) has it.
+- Fix (data only): sADDON[0] = EMADD_MA with 13, 46, 50, 55, 58, 64, 70, 76, 81, 86, 92, 98, 105, 112, 119, 135, 155 (June values = group 68 element twins).
+- Verified old vs new: 34 bytes in item.isf, all inside those 17 items; 17 csv lines, columns 109+110 only; the other 390 archive entries identical.
+- `CLIENT/data/glogic/GLogic.rcc` md5 `9d2a92d2` (was `4b285f31`), loose item.isf / item.csv too. Backup `backups/brawler_spi_energy_20261114/`.
+- Not pushed to LDPlayer-1 (RAN EMU was running). Not tested in game. Server + client patch both need this GLogic.rcc.
+- Left alone: 68/22 สนับคาร์บอนเวทย์ (ธาตุไฟ) also has no energy (siblings have 81).
+
+### 2026-11-15 - target HP panel hide moved from Settings to the HUD editor (built, on LDPlayer-1, NOT tested, NOT patched, NOT committed)
+
+- User: "in the hide hp target pannel setting. why not do in the edit hub?" -> chose "Edit HUD only".
+- This replaces the 2026-11-14 Settings > Function switch: `RANPARAM::bMobileTargetPanel`, `SW_TARGETPANEL` and the 8th row are gone (RANPARAM.h/.cpp, RANPARAM_OPTION.cpp, MobileSettingsPanel.h/.cpp restored from backups/target_panel_switch_20261114/). A leftover `bMobileTargetPanel` line in option.ini is ignored.
+- Shim (touch_ui.cpp/.h, Android + iOS): `g_hidWinTarget`; the eye tool works on window slot 8 (the target panel) and on no other window; crossed out in the editor; reset shows it again, cancel restores. `RanTouch_IsTargetPanelHidden()` (0 while the editor is open).
+- Layout: one float at the end, `nMOBILE_HUD_FLOATS` 247 (`_V13` = 246 still loads, panel shown).
+- Client: `CInnerInterface::MobileTargetPanelFrame` passes `!RanTouch_IsTargetPanelHidden()`.
+- Built: RAN EMU x86_64 (installed on LDPlayer-1, apk md5 978dc036), MiniA, Emulator, ServerAgent, ServerField - 0 errors. Not built: arm64 game APK, iOS.
+- Backup: backups/target_panel_hudhide_20261115/.
+
+### 2026-11-15 - HUD editor tools rebuilt as a glass window (built, on LDPlayer-1, NOT seen on screen by me, NOT patched, NOT committed)
+
+- User: "the UI edit hub it's not align with existing ui and the ux not good" -> chose "Glass panel, labelled".
+- New `SOURCE/Lib_ClientUI/Interface/MobileHudEditPanel.h/.cpp` (`CMobileHudEditPanel`, a CMobilePanel; in `MOBILE/native/cmake/sources_Lib_ClientUI.cmake`; group `MOBILE_HUDEDIT_PANEL`): selected item by name, Size - value +, Opacity - value +, Position (left/up/down/right, 1 px, repeat while held), Hide/Show, Reset all / Cancel / Save. Thai + English labels. No X; dragged by its title; place kept for the session.
+- `CInnerInterface::MobileHudEditFrame` (DxGameStage::FrameMove) keeps it up exactly while `RanTouch_IsEditMode`.
+- Shim touch_ui.cpp/.h (Android + iOS): the overlay's own black icon bar is gone (not drawn, not hit). Its actions are `editTool` -> `RanTouch_EditTool`; `RanTouch_GetEditInfo` (selection, size, opacity, flags); `RanTouch_SetEditPanelRect` so a press on the window goes to the game (g_editUiPtr), not to picking. Picking, outlines and dragging on the HUD are unchanged.
+- Built: RAN EMU x86_64 (LDPlayer-1, apk md5 f0ec6f58), MiniA, Emulator, ServerAgent, ServerField - 0 errors. Not built: arm64 game APK, iOS.
+- Backup: backups/hudedit_panel_20261115/ (new files have no backup: delete them and the cmake line to revert).
+- To check on screen: window fits and reads well at phone and tablet size; buttons take taps; a press on the window does not select what is under it; hold-repeat on the move buttons; hide/show label; cancel and save close it.
+
+### 2026-11-15 - glass HUD editor window REMOVED, old toolbar back (tested on emulator-5554)
+
+- User: "you did not a good job ... stop guessing" -> chose "Old toolbar back". The CMobileHudEditPanel section above is void: files restored from backups/hudedit_panel_20261115/, MobileHudEditPanel.h/.cpp deleted (copies in backups/hudedit_panel_removed_20261115/).
+- Kept: the target HP panel hide in the old toolbar's eye tool (section "target HP panel hide moved ... to the HUD editor").
+- Tested by me on emulator-5554 (RAN EMU, apk dad0bbde): editor opens with the old bar; a tap on the target panel selects it (amber frame, eye lit); eye -> crossed out; 10 taps left / right moved it 30 / back 30 physical px (1 logical px each); save -> an NPC selected, no panel; eye again + save -> the same NPC shows the panel.
+- Built: RAN EMU x86_64 (LDPlayer-1 + emulator-5554, dad0bbde), MiniA, Emulator, ServerAgent, ServerField - 0 errors.
+
+### 2026-11-15 - HUD editor UX: undo, safe reset, hold-repeat, snap guides (on LDPlayer-1, tested on emulator-5554, NOT patched, NOT committed)
+
+- User: "consider the ux ui in the edit hub do the research and do the implement". Research (PUBG Mobile, Rainbow Six Mobile, Aion 2 mobile, Throne and Liberty, Forza HUD editors): undo, reset with confirm, position/size/opacity steppers, grid/snap alignment. Old toolbar look kept (the user rejected the glass window).
+- shim/platform/touch_ui.cpp only (Android + iOS): kToolUndo (second row, left; 30 steps, one per tap/drag/hold, cleared when the editor opens); reset = selected item only, or with nothing selected reset all on a second tap within 3 s (red pulsing ring while armed); -/+ and arrows repeat when held (0.4 s, then every 0.07 s; arrows 4 px a step after 1.4 s); dragging snaps the item centre to the screen middle and other items' centres within 6 px with a cyan guide line (candidates taken at drag start).
+- Tested on emulator-5554: reset armed + disarmed after 3 s; attack button dragged to x 643 snapped to 640 with the guide; undo put it back; hold + 1.3 s -> 160%; reset on selection -> 100%, undo -> 160%; hold left 2.5 s -> 78 px, one undo -> home; cancel.
+- RAN EMU on LDPlayer-1 + emulator-5554. Backup backups/hudedit_ux_20261115/touch_ui.cpp. No SOURCE change (no MSVC build needed).
+
+### 2026-11-15 - HUD editor toolbar rebuilt in the game's UI kit (tested on emulator-5554, on LDPlayer-1, NOT patched, NOT committed)
+
+- User: "then fix the ui that not match with existing UI! and ux! stop guessing". Measured mismatch (1:1 crops vs the Settings window it opens from): the overlay bar used round icon-only discs, 7-segment digits and a black plate; the game's windows use chrome rectangular buttons, Thai Tahoma labels, gold values.
+- New `SOURCE/Lib_ClientUI/Interface/MobileHudEditBar.h/.cpp` (CMobileHudEditBar, group MOBILE_HUDEDIT_PANEL, cmake list): title "ปรับแต่งปุ่มกด" (the Settings button's words); "เลือก: <name>" or a hint; ขนาด -/value/+, ความโปร่งใส -/value/+, ซ่อน/แสดง/ซ่อนไม่ได้; ตำแหน่ง ซ้าย ขึ้น ลง ขวา, ย้อนกลับ; รีเซ็ตปุ่มนี้ / รีเซ็ตทั้งหมด -> แตะอีกครั้งเพื่อยืนยัน (KIND_WARN, 3 s), ยกเลิก, บันทึก. Labels sized from their measured text width. No X. Dragged by its title (from the DXKEY_DOWN press, not the stale first-frame pointer); place kept for the session. First place: RanTouch_SuggestEditPanel picks the spot covering the least HUD.
+- Hold-repeat: the gesture layer turns a still finger into a right-button long press at 0.45 s (measured: "GESTURE right(hold) after 451ms"), which ended the first hold detection before any repeat; RB held now counts as held.
+- Shim touch_ui.cpp/.h: overlay toolbar no longer drawn or hit; presses inside the window go to the game; outlines/crosses under the window skipped; RanTouch_EditTool / GetEditInfo (undo + armed flags) / SetEditPanelRect / SuggestEditPanel. Undo, reset confirm, snap guides from the previous section kept.
+- Tested on emulator-5554: select attack -> name shown, size + 100->110, hold right 19 steps (34 px), undo x2 back to start, title drag down 235 px, target panel hide -> "แสดง" + crossed out, deselect + reset all -> confirm label, back after 3 s, cancel closes the editor.
+- Built: RAN EMU (LDPlayer-1 + emulator-5554), MiniA, Emulator, ServerAgent, ServerField - 0 errors. Not built: arm64 game APK, iOS. Backup backups/hudedit_kitbar_20261115/.
+
+### 2026-11-15 - new resist Mystic Ring 512/81 + its box 512/82 (data only, tested on emulator-5554, on LDPlayer-1, NOT shipped)
+
+- User: from the four [ทับ]แหวนลึกลับ (512/56 โจมตี, 65 พลังงาน, 66 อัตราโจม, 67 หลบหลีก) make a new one, new icon, new box: keep HP/MP/SP, no values, resistance +10. Answers: one ring, 7 days.
+- 512/81 "[ทับ]แหวนลึกลับ[ต้านทาน][7 วัน]" / "[Costume]Mystic Ring [Resist][7 Days]" = byte copy of 512/56: add-ons (stat +5, def +5, HP +25) cleared, resist 2 -> 10 x5, kept sVARIATE AP 0.001 (HP+MP+SP recovery 0.10%), 7 days, same flags.
+- 512/82 "[ทับ]กล่องแหวนลึกลับ[ต้านทาน][7 วัน]" / "[Costume]Mystic Ring Box [Resist][7 Days]" = copy of 512/60 giving 512/81 (not a choice box: bSelect 0, nMaxSelect 0).
+- IDs: 512/81-82, after the last used 512/80 (512/68-73 are free but 71-73 still have stale names, so not reused).
+- Icons: costumegacha01 (3,4) ring, (4,4) box - teal recolours of 512/56's ring (taiwan_event 11/5) and 512/60's box (commercialsetarmada 1/0), frame kept; other pixels unchanged (checked). textures/gui/costumegacha01.dds + gui_hd/costumegacha01.png.
+- Verified: item.isf old bytes identical, 18,918 items; csv rows differ from their templates only in the intended columns; names TH (+empty ID_ keys like the four) and EN.
+- Tested on emulator-5554: /item 512 82 1 -> teal box; open -> teal ring; tooltip: resist 10 x5, HP+MP+SP 0.10%, 7 days, nothing else.
+- CLIENT/data/glogic/GLogic.rcc md5 954e628c (+ loose item.isf, item.csv, ItemStrTable*.txt). Backup + scripts: backups/resist_ring_20261115/. Ship: server GLogic.rcc + client patch (GLogic.rcc + costumegacha01 dds/png). How players get the box (shop/NPC) is not set.
+
+### 2026-11-15 - every costume piece now has the MaskuRAN 912 stats (data only, tested on LDPlayer-1, NOT shipped)
+
+- User: "can you make all costume have stats like MaskuRAN set? only in the clothes head hands top bottom and feet. nothing else". Answers: the 912 version (7 days, weak), all pieces.
+- MaskuRAN had 4 stat versions (800-803, 912, 952, 981). 912: head nothing; top def +5, HP+MP+SP rec 0.1%; bottom avoid +5, rec 0.1%; gloves hit +5; shoes HP +20, move speed +1.
+- Scope: ITEM_SUIT + ITEM_DISGUISE (0x10) + emSuit 0-4 = 5,267 pieces (72 groups, 915 permanent): 4,826 changed, 441 already equal. Copied from 912/46-50 (same slot): SSUIT 0x112 gdDamage, nDefense, nHitRate, nAvoidRate, sResist, sVARIATE, sVOLUME, sBLOW, sADDON. Not touched: slot, hand, attack type, wReModelNum (upgrade count), every other block (names, icons, time, requirements, flags). Verified: all changed bytes inside those fields; csv only costume rows and only those columns; basic data of every item unchanged.
+- Tested on LDPlayer-1: 981/47 MaskuRAN top (was atk 70, def 40, HP 400) -> def +5, HP+MP+SP 0.10%; 1990/1 คิริโตะผม [ขยายพลัง] head -> no stats (like 912's head).
+- Note: players' existing costumes change too (stats come from the item table). The strong sets (981, 952, 800-803 and other groups) are now weak.
+- CLIENT/data/glogic/GLogic.rcc md5 277dffa3 (+ loose item.isf, item.csv). Backup + script + list: backups/costume_stats_912_20261115/. Ship: server GLogic.rcc + client patch.
+
+### 2026-11-15 - GM window on mobile: bigger, spaced buttons, full Thai labels, wider list; chat block asks for what is missing (built, tested on LDPlayer-1, NOT patched, NOT committed)
+
+- User: "in the window GM tool the text is longer than the btn and the btn it's too small and too close ... also the feature ผู้เล่น and แบน did not work"; then "what about the long name in the list item and monster? and the btn in the list no space between".
+- Measured before: PC rects 20 tall, 2 apart, tabs 53 wide (Thai cut: มอนส, สงครา, ทัวร์นาเม), list 182 wide, rows 17 tall 1 apart.
+- RAN_MOBILE only (PC unchanged), GMGenItemWindow.cpp/.h: window 820x536 (was 560x510; close button moved by hand); tabs in two rows sized to the row; list 300 wide, rows 22 tall 4 apart; plain tabs: button grid right of the list (columns by measured text, 28 tall, 8 apart), fields two a row under it, Mob list output / Player merchant picture under those; Event/World/Self/Tourney: rows kept, spread wide, two 2-button rows share a line; Item tab: own layout moved right. New CBasicTextButton::MobileResize (BasicTextButton.h/.cpp, BasicTextButtonEx.cpp): resizes the parts from the rect they were laid out for, centres the label, re-lays it at the new width (labels had been cut once at the creation width).
+- "แบน" buttons are CHAT BLOCK (/chatblock_cn/_ci/_ua, minutes 0 = lift) - there is no account ban command. Empty name/id/account or minutes now says so in red (before: "invalid param" only). /dsp allplayer: the count line always prints (0 others printed nothing) - GLGaeaClient.cpp.
+- Kick / chat block / info / all players are agent-server commands: RAN EMU has no agent (EmuCore), so they could not be run here; need a test on the live server.
+- Tested on LDPlayer-1: every tab captured (Item, Mob, Tele, Player, World, Event, Self, Auction, War, Tourney, PK150); labels full; chat block with empty name -> "พิมพ์ชื่อตัวละครก่อน". Note: the window is see-through (existing style), so a label over a white HUD ring can lose a letter visually (Player "ไอดีตัวละคร" over a skill button; the text itself is whole - logged).
+- Built: RAN EMU (LDPlayer-1), MiniA, Emulator, ServerAgent, ServerField 0 errors. Not built: arm64, iOS. Backup backups/gm_window_mobile_20261115/.
+
+## 2026-11-15 - Crushing blow 15% on Brawler DEX + Swordsman DEX (skill.csv only, NOT packed yet)
+
+User: DEX skills should have the "critical" (crushing blow) like SPI; "just make 15%".
+- 13 damage skills at the grades every other attack tree has crushing blow (3, 5, 9, 11, 12, 13, 14): Brawler DEX 0/2 0/3 0/7 0/8 0/10 0/11, Swordsman DEX 4/1 4/4 4/6 4/7 4/8 4/9 4/11. g15/g16 already had 15%.
+- No crush slot: Swordsman POW slot of the same grade copied into the first free slot, then fVAR2 = 0.15 at every level. 0/11 had an empty 0% crush slot: rate only.
+- Diff checked: 13 rows, 237 cells, all in spec slots 1-2 of those skills. Shaman SPI not touched.
+- Script reports/adjust-crush-dex-15.js, backup backups/skill_crush_dex15_20261115/ (skill.csv + skill.ssf).
+- **User: EditorSkill Load CSV -> save skill.ssf**, then repack GLogic.rcc (client + server, ServerField restart).
+- **Update same day: done by me, no EditorSkill.** skill.ssf written directly by reports/adjust-crush-dex-15-ssf.js (647 bytes, only the 13 spec slots; ssf vs skill.csv: 0 mismatched fields of 1162 skills). GLogic.rcc repacked (only skill.csv + skill.ssf differ of 392 entries) md5 927171aa, old one in the backup folder as GLogic.rcc.before. Pushed to LDPlayer-1 (RAN EMU), boots into the world. **Server needs this GLogic.rcc + ServerField restart; next patch too.**
+
+## 2026-11-16 - Damage per hit analysis, grade 12+ (PLAN ONLY, nothing changed)
+
+User: per-hit damage of every class/build (POW/DEX/SPI) with full gear, crit, crushing blow, Power Up, full Shaman buff; grade 12+; plan what to change, do not change yet.
+- Calculator = live CALCDAMAGE_2004 (no *_PARAM/_RELEASED defined anywhere, so the server runs 2004) on the 14 level-175 test characters (+9 Iron A gear, real players builds). Checked in RAN EMU on LDPlayer-1: brawler_pow + swordsman_pow stats, PA/SA/MA, defense, attack range all equal; resist is +36 on every element in game vs the item sum (source not found, used the measured value).
+- Full buff = own learned buffs + Shaman 14/14 (+10%) + POWER UP box (+45%). Results, scripts: backups/dmg_analysis_20261116/ (calc.js, table2.js, table2.txt).
+- Findings: SPI top vs a dummy (Archer SPI 7367 avg) , DEX lowest (Gunner DEX 4875 = 66%); DEX skill power ~20% below POW, SPI g14 power below g13; Brawler SPI / Shaman SPI have no damage-rate buff (x1.55 vs x1.85-1.95); Shaman SPI g13/g14 no crushing blow; critical = 0% at full HP in 2004 (gear critical options ignored); vs players magic ignores defense but resist cuts its skill power (res x0.68).
+- User: what must be equal is the hit on a PLAYER. PvP plan: per grade target = average vs-player hit of Brawler/Swordsman/Archer/Gunner POW; needed max-level power per skill in backups/dmg_analysis_20261116/pvpplan.txt (pvpplan.js). Not applied; waiting for the go.
+- Correction (user: patch 150 learns up to char lv 147 = grade 14, patch 175 up to 167 = grade 16): earlier tables used skill Lv9 for every skill on lv175 chars - wrong. Redone per patch (patch.js / patch.txt): skill level = highest whose char level AND stat requirement are met; player hit x fPK_POINT_DEC 0.40 (GLLandMan::DoSkillAct), shown as % of target HP (avg 2094 at 150, 2168 at 175). Many top skills not learnable with the real players stat splits (stat requirement rises 5 per level). Waiting for the user: real splits or pure builds.
+- User chose pure builds (all player stat points in the main stat) + real splits as check: backups/dmg_analysis_20261116/patch_pure.txt. Every build learns every grade then. Data oddity: g16 Archer SPI 10/17 and Shaman POW 12/14 need char 167 for Lv1 and "1" for Lv2-9 (Lv9 at 167) while all other g16 need 167..183 (Lv5 at 175). In RAN EMU (LDPlayer-1) swordsman_pow_175 skills on the spawned T999 archer_spi_175 (HP 1970, emu_log per-second HP): drops ~500, ~555 (2 parts), ~800 HP = calc x0.4 for 6/2, 6/3, 6/7 within a few %, skill per button identified from the damage only. Confirms the x0.40 player cut.
+
+## 2026-11-16 - PvP-equal skill damage grade 12-16 (DONE in data, waiting for the user in-game test)
+
+- reports/adjust-pvp-equal.js (2 passes; second after adding the game weapon check CHECHSKILL_ITEM to calc.js - Gunner DEX Dual Gun does not get passive 39/1). Changes: g16 level requirement 10/17 + 12/14 now 167..183; 66 damage skills g12-16 of the 14 trees scaled so a full-buff hit on a player (pure build, lv175 targets, x0.40) = grade target g12 1634, g13 1873, g14 1952, g15 2016, g16 1987; Shaman SPI 13/12 + 13/13 crushing blow 15%. ssf == csv on every field. Backup backups/skill_pvp_equal_20261116/ (skill.csv, skill.ssf, GLogic.rcc before + changes.txt, changes_pass2.txt).
+- After: patch 175 pure all 100% of target; real splits 92-102%; patch 150 pure 85-108% (SPI 85-94%: shared skills tuned to 175).
+- GLogic.rcc md5 244006d9 (only skill.csv + skill.ssf differ), on LDPlayer-1. Expected in-game hits: backups/dmg_analysis_20261116/expected_ingame.json. Buff Card only works on war maps (bFeatureSelfBuffCardOnlyEvent) -> test on Tyranny 222/0 (/m2p 222 0 100 100).
+- NOT done: in-game check (user plays it, I read emu_log.txt + logcat RanSkill), server + client patch.
+
+## 2026-11-16 - Crushing blow rolled once per cast (SERVER CODE, user approved)
+
+User: Swordsman POW shows "critical" much more at full HP. Found: a cast runs CALCDAMAGE once per animation strike (SANIATTACK m_wDivCount = cfg m_wStrikeCount; GLChar PreStrikeProc hit list -> SkillProc per strike) and each strike rolled crushing blow 15% on its own (Swordsman POW g10 4 / g11 5 / g15 4 strikes, Gunner DEX g16 6...). Average damage was the same for all, only the label frequency differed. Critical itself needs the attacker below full HP (CALCDAMAGE_2004).
+- In-game check of the PvP data (Swordsman POW vs Swordsman DEX, full buff confirmed by user): 6/9 ~1498/1525 vs 1566, 6/12 ~1654/1617 vs 1661, 6/8 ~1265 vs 1368, 6/11 ~1621 vs 1685, crush ~2097 vs 2159 (within 2-8%, once-a-second HP log + potion heals).
+- Change: GLCHARLOGIC::m_fCastCrushRoll (GLogicEx.h, -1 in ctor GLogixExPC.cpp); GLChar::PreStrikeProc stamps RANDOM_POS once per cast/attack; CALCDAMAGE_2004 + 20060328 use it for the crushing-blow check (else RANDOM_POS as before). So one roll per cast, every strike of it crushes together. Crow/summon untouched. Backup backups/crush_once_per_cast_20261116/.
+- Built: MiniA, Emulator, ServerAgent, ServerField 0 errors; RAN EMU installed on LDPlayer-1. Not built: arm64 game / iOS (server-side logic only, but header changed - rebuild with next patch). Not committed. Live needs the new ServerField + GLogic.rcc 244006d9.
+- **REVERTED same day (user: "should not change the server code this is critical it should work as is")**: GLogicEx.h, GLogixExPC.cpp, GLChar.cpp restored from backups/crush_once_per_cast_20261116/ (byte-equal, touched), MiniA/Emulator/ServerAgent/ServerField + RAN EMU rebuilt. Crushing blow is rolled per strike again (original behaviour). Balance stays data-only.
+
+## 2026-11-16 - Crushing blow x1.5 for patch 175 (data only)
+
+User test (Swordsman POW real split, full buff, vs Swordsman DEX 2386 HP, original server code): normal 6/12 ~1580-1658, 6/9 ~1519, 6/8 ~1308 (calc within ~4%), every kill = 2 skills, 1 crushing blow in 12 casts ~2081 = did not kill. User: crushing blow should kill in 1 hit with full gear; normal stays 2 hits -> "yes we can try that" for 150%.
+- default.charclass dwCRUSHING_BLOW_DAMAGE 130 -> 150 (one character changed; edited from the GLogic.rcc copy - the loose CLIENT/data/glogic/default.charclass was stale (wGRADE_MAX 7, no dwSKILL_SPEC_OFF, old fGRADE_RATE) and is now = the packed one). Also applies to monsters. GLogic.rcc md5 82394f73 (only default.charclass differs), on LDPlayer-1. Backup backups/crush_150_20261116/.
+- Patch 150 version (grades 12-14 tuned at level 150 + crushing blow ~160%) waits for the live 150 GLogic.rcc.
+
+## 2026-11-16 - Critical from gear at full HP (SERVER CODE, user approved, switchable)
+
+- GLogixExPC.cpp CALCDAMAGE_2004 (the live formula): after the HP rule, #define RAN_CRIT_FROM_GEAR 1 / #if: nPercentCri += m_sSUMITEM.fIncR_Critical*100 (the same line CALCDAMAGE_20060328 has). 0 = original behaviour. Commented block explains how to turn it off. Backup backups/crit_from_gear_20261116/.
+- Built MiniA/Emulator/ServerAgent/ServerField 0 errors, RAN EMU installed on LDPlayer-1. Not built arm64/iOS.
+- Found: none of the 28 test characters (real players gear, lv150 + lv175) has any critical rate, so with their gear the chance at full HP is still 0%. 212 items carry EMVAR_CRITICAL_RATE in sVARIATE (Guru/Sage chains 4-6%, Rainbow weapons 0.5%...); random option EMR_OPT_BLOW_RATE (34) also counts. Next: user decides which gear gives how much critical.
+- **REMOVED same day:** the user meant the skill crushing blow (15%) by "critical"; RAN_CRIT_FROM_GEAR change taken out, GLogixExPC.cpp restored from backups/crit_from_gear_20261116/ (byte-equal). Server code = original again (GLogicEx.h, GLogixExPC.cpp, GLChar.cpp all byte-equal to the pre-change backups). Rebuilding MiniA/Emulator/ServerAgent/ServerField + RAN EMU.
+
+### 2026-11-16 - GM window: new Emulator tab "PK +5/6" (gear not fully upgraded), 56 test characters (built, installed on LDPlayer-1, NOT patched, NOT committed)
+
+- **Tab** (`SOURCE/Lib_ClientUI/Interface/GMGenItemWindow.cpp/.h`, `TAB_PKGEAR`): PC Emulator / RAN EMU only, like PK 150 / PK 175 (MiniA and the mobile game never show it). Buttons: the 14 class/build targets, Remove Targets, Free PK On/Off, and the picks `Lv 150` / `Lv 175` / `Gear +5` / `Gear +6` (the picked ones show as `[..]`). A class button runs `/emu_pc test_<class>_<build>_<lv>_p<5|6>`. On PC the 13 tabs now sit 41 wide on a 42 step (were 44 on 45). Backup of both files: `backups/gm_pkgear_20261116/`.
+- **Test files** (`CLIENT/emutest/test_*_{150,175}_p{5,6}.charset`, 56): copies of the PK 150 / PK 175 characters with only the armour defence grade (UPPER LOWER HAND FOOT) and weapon damage grade (RHAND/LHAND) set to +5 or +6, in PutOnItems and EmuPutOn; checked that no other line differs. Element resist grades, stats, skills, options unchanged. Generator: `reports/make-gear-charsets.js`.
+- Built: MiniA, Emulator, ServerAgent, ServerField 0 errors (`SOURCE/_Bin/Tool`, 15:19); RAN EMU built and installed on LDPlayer-1 (emulator-5556) with the 56 files, md5 checked.
+- Expected hits (calculator, one skill on the average same-patch player): scratchpad `gear56/expected.txt`.
+- **Quick bars (same day):** every test character (28 base + 56 `_p5/_p6`) now has its own learned buffs on skill tray tab 2 (QuickSkill slots 11+; tab 1 attacks unchanged, a short tab 1 padded with an empty slot) and POWER UP [111,21] + Buff Card [1996,32] on the item quick bar (QuickAction 1-2; both were already in the bag). Script `reports/add-quick-buffs.js`, then `make-gear-charsets.js` re-run. Base files before: `backups/emutest_quick_20261116/`. Pushed to LDPlayer-1, 84 files md5 checked. Only Quick* lines differ.
+- **PC Emulator installed:** `SOURCE/_Bin/Tool/Emulator.exe` (15:19 build, PK +5/6 tab) copied to `CLIENT/Emulator.exe`; the previous one (11-13 01:49) is in `backups/gm_pkgear_20261116/exe/`.
+
+### 2026-11-16 - Target lock holds like PC + buff row no longer drifts (client code, built, tested on LDPlayer-1, NOT patched, NOT committed)
+
+- **Target lock** (`SOURCE/Lib_Client/G-Logic/GLCharacter.cpp` MobileAimSolve): with the lock on and a live enemy target, a dragged (aimed) target skill goes to the locked target instead of the enemy nearest the drag line (that pick overrode the lock: in a crowd the skill switched to another player/mob). `SOURCE/Lib_Client/DxGameStage.cpp` PK button: while locked on a live target it no longer re-picks (PK on) or clears (PK off) the target. Tapping another character still switches (PC click). Tested at 2560x1600: same short drag, locked = 3 casts stay on T997 (no "aim lock ->"), unlocked = switched to 998; PK off+on while locked = target and lock kept.
+- **Buff row drift** (player video from a tablet: buff + pet/event rows step ~2 px right each second, then jump back): the player had dragged the buff row (SKILL_TIME_DISPLAY, 588 wide) to the top with the HUD editor; the 1 s edge sweep pushed it in ("RanEdge: id 62 692,0 588x35 -> 676,16" every second) and MobileArrangeHudWindows took the pushed place as the new anchor and added the offset again. Fix in DxGameStage.cpp: a HUD window the player moved/sized (s_nMobileHudAdjusted) is skipped by the sweep and kept the edge margin in by MobileArrangeHudWindows itself; the pet / vehicle / pet-skill / event-buff boxes (placed under the buff row every frame) are skipped by the sweep too. Unmoved windows: unchanged (same startup RanEdge moves as before). Tested: drag to the top -> row sits at 676,16, no RanEdge for it, same pixel over 8 screenshots.
+- Not fixed (seen, not asked): window id 114 (300x300 at 965,200) gets a 1 px RanEdge push every second at the default layout, before and after this change.
+- Backup: `backups/target_lock_hud_edge_20261116/` (both .cpp + old CLIENT/Emulator.exe). Built MiniA/Emulator/ServerAgent/ServerField 0 errors, CLIENT/Emulator.exe installed; RAN EMU (x86_64) installed on LDPlayer-1. Android arm64 + iOS get it with the next MAKE-PATCH / iOS CI (shared SOURCE, RAN_MOBILE code). LDPlayer-1 restored (option.ini md5 ee114c86, 3840x2160).
+
+### 2026-11-16 - GM Tool player lists go to the GM window, not the chat (client code, built, tested on LDPlayer-1, NOT patched, NOT committed)
+
+- User: the GM Tool must not print lists in the chat (example: ผู้เล่น tab). `GMGenItemWindow.cpp/.h`: the ผู้เล่น tab's รายชื่อผู้เล่น (was `/dsp player` to chat) now fills the GM window list with the players on the current map (BuildMapPlayerList); ผู้เล่นทั้งหมด (was `/dsp allplayer` to chat) = the same list load as opening the tab / รีเฟรชรายชื่อ. The window's own `/dsp allplayer` request is quiet for 5 s (m_dwQuietPlayerUntil / IsQuietPlayerList): `GLGaeaClient.cpp` NET_MSG_GM_VIEWALLPLAYER_FLD_FB then skips the per-player chat line and "Player Count", and only feeds the list. Typed `/dsp player` / `/dsp allplayer` print in chat as before.
+- Tested on LDPlayer-1 (RAN EMU, 2 test players): tab open + both buttons = no chat lines; รายชื่อผู้เล่น lists both players (1/1 (2)); typed `/dsp player` prints both. ผู้เล่นทั้งหมด shows 0/0 in RAN EMU because the emu has no agent reply (typed `/dsp allplayer` prints nothing there either) - check on the live server.
+- Backup `backups/gm_quiet_playerlist_20261116/`. Built MiniA/Emulator/ServerAgent/ServerField 0 errors, CLIENT/Emulator.exe installed; RAN EMU installed. Android arm64 + iOS with the next patch.
+
+### 2026-11-16 - F9 (ซ่อนเครื่องแต่งกาย) outfit in each guild's colour (client code + 8 textures, built, tested on LDPlayer-1, NOT patched, NOT committed)
+
+- User: the F9 outfit in a different colour per guild; "make the current outfit support". The F9 outfit (strSimpleWearM/F: *_cos_min_cap/body/leg/foot.cps + *_bs_hand.cps) has no user-colour effect and near-black cloth (the dye pass is base texture x colour x 2, so black stays black).
+- Textures (new, `CLIENT/textures/char`): `m_cos_min_body`, `w_cos_min_body`, `m_cos_min_cap`, `black_leg` each get `<name>_dye.dds` (light-grey cloth, trims/logo/white bands/cap hair unchanged, DXT1 9 mips like the originals) and `<name>_dyem.dds` (cloth mask, DXT5). Made by `backups/f9_guild_dye_20261116/mkdye.py` + `enc.js`. No .cps / SkinObject.rcc change (the pack has no loose fallback; a new piece would mean re-shipping the 46 MB pack).
+- `SOURCE/Lib_Engine/Meshs/DxCharPart.h/.cpp`: `ApplyClothDye(dev, fromTex, dyeTex, maskTex, ARGB)` - for materials drawn with fromTex: adds a DxEffCharUserColor pass (USEUSERCOLOR1, mask = dyeTex mask) built like CloneInstance, then switches the part's material texture to the light copy and SetColor1. Part-owned, cleared by ReSetPart. Light textures loaded once (static cache).
+- `SOURCE/Lib_Client/G-Logic/GLCharClient.cpp`: UpdateSuit, F9 branch, slots cap/body/leg/foot (not gloves): F9GuildDye with F9GuildColor(dwGuild): every guild its own colour (user: "make it to the maximum we can") - hue = guild id x golden ratio, 4 brightness bands (vivid/deep/pastel/medium) by id % 4; guilds 1-64 all distinct, nearest pairs 68 apart. Tested guild 1 deep blue, 2 pastel yellow-green, 22 pale blue, 100 magenta. No guild = black as before. CLUB_INFO_BRD / CLUB_DEL_BRD call UpdateSuit when F9 is on and the guild changed. Own character unchanged (F9 only re-dresses others, as before).
+- Emulator only (`SOURCE/GameEmulator/EmuCore.cpp`): `/emu_pc <file> [school] [guild id]` - test characters show that guild id (no such guild exists on the emu server).
+- Tested on LDPlayer-1 (RAN EMU 16:9): F9 on - guild 1 blue, 2 green, 3 yellow (male), 4 purple (female), no guild black; trims/logo kept; F9 off - real costumes back. Textures loaded (RanD3D log), md5 checked on device.
+- Backup `backups/f9_guild_dye_20261116/` (DxCharPart.h/.cpp, GLCharClient.cpp, EmuCore.cpp, old CLIENT/Emulator.exe, texture scripts). Built MiniA/Emulator/ServerAgent/ServerField 0 errors, CLIENT/Emulator.exe installed; RAN EMU installed. Android arm64 + iOS with the next patch (8 textures ride in textures/).

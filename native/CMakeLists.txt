@@ -365,6 +365,16 @@ elseif(APP_SRC)
   # -u keeps ANativeActivity_onCreate (referenced only by the OS) from being stripped.
   target_link_options(ran PRIVATE
     -Wl,--error-limit=0 -Wl,--no-dependent-libraries -u ANativeActivity_onCreate)
+  #  RAN_EMU: the PC Emulator's in-process server in a separate test app (build-emu.sh,
+  #  out-emu/, package com.ran.native.emu). Never on in build.sh, MAKE-PATCH or iOS:
+  #  it adds one source file and one define to the app target only, so every game
+  #  library compiles exactly as in the shipped build.
+  option(RAN_EMU "Emulator test app (build-emu.sh only, never shipped)" OFF)
+  if(RAN_EMU)
+    target_sources(ran PRIVATE ${RAN_SRC}/GameEmulator/EmuCore.cpp)
+    target_include_directories(ran PRIVATE ${RAN_SRC}/GameEmulator)
+    target_compile_definitions(ran PRIVATE RAN_EMU=1)
+  endif()
 endif()
 if(RAN_WRAPMEMCPY AND NOT RAN_IOS)
   target_sources(ran PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shim/platform/memcpy_wrap.c)
