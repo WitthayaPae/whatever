@@ -56,9 +56,55 @@ extern "C" void RanD3D_ReportBuffers(unsigned frames);
 #include "../../shim/gl/gl_thread.h"
 extern "C" void RanPath_ProbeVersionFile(void);
 
+#ifdef RAN_EMU
+//  Emulator test build only (build-emu.sh, package com.ran.native.emu; never shipped):
+//  the PC Emulator's in-process server (SOURCE/GameEmulator/EmuCore.cpp) instead of
+//  login and the network. The character comes from <data root>/emu.ini.
+#include "EmuCore.h"
+#include "s_NetGlobal.h"
+#endif
+
 namespace {
 
 char g_appPath[MAX_PATH] = {0};
+
+#ifdef RAN_EMU
+//  emu.ini, one "key=value" per line:
+//    charset=class00.charset   (a GLogic charset, or a file in <data root>/emutest/)
+//    name=Admin  userlevel=30 (30 master, 0 player)  maxlevel=0/1  maxstats=0/1
+//    allskills=0/1  gold=0/1
+//  Missing file or key: the PC Emulator dialog's defaults, with GM master so the GM window works.
+SEMUSTART EmuReadIni() {
+    SEMUSTART s;
+    s.nUserLevel = USER_MASTER;
+    std::string path = std::string(g_appPath) + "emu.ini";
+    FILE *fp = fopen(path.c_str(), "rb");
+    if (!fp) { LOGI("emu: no %s, defaults (%s)", path.c_str(), s.strCharSet.c_str()); return s; }
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        std::string l(line);
+        while (!l.empty() && (l.back() == '\r' || l.back() == '\n' || l.back() == ' ' || l.back() == '\t')) l.pop_back();
+        size_t eq = l.find('=');
+        if (eq == std::string::npos || l[0] == '#' || l[0] == ';') continue;
+        std::string k = l.substr(0, eq), v = l.substr(eq + 1);
+        const bool on = (v == "1" || v == "true" || v == "yes");
+        if (k == "charset") s.strCharSet = v;
+        else if (k == "name") s.strCharName = v;
+        else if (k == "userlevel") s.nUserLevel = atoi(v.c_str());
+        else if (k == "maxlevel") s.bMaxLevel = on;
+        else if (k == "level") s.nLevel = atoi(v.c_str());
+        else if (k == "maxstats") s.bMaxStats = on;
+        else if (k == "allskills") s.bAllSkills = on;
+        else if (k == "gold") s.b1BGold = on;
+        else if (k == "contrib") s.b100KContrib = on;
+        else if (k == "activity") s.b100KActivity = on;
+    }
+    fclose(fp);
+    LOGI("emu: %s charset=%s name=%s userlevel=%d maxlevel=%d allskills=%d", path.c_str(),
+         s.strCharSet.c_str(), s.strCharName.c_str(), s.nUserLevel, (int)s.bMaxLevel, (int)s.bAllSkills);
+    return s;
+}
+#endif
 
 // The engine dereferences the CWnd it is handed (DxResponseMan reads
 // pWndApp->m_hWnd for DirectInput and the cursor). There is no window on
@@ -81,6 +127,12 @@ public:
         HRESULT hr = DxResponseMan::GetInstance().OneTimeSceneInit(
             g_appPath, &g_dummyWnd, "D3DXFONT", RANPARAM::dwLangSet, RANPARAM::strGDIFont);
         if (FAILED(hr)) { LOGE("DxResponseMan::OneTimeSceneInit failed 0x%08X", (unsigned)hr); return E_FAIL; }
+#ifdef RAN_EMU
+        //  as CGameEmulatorView::OneTimeSceneInit: the field server in this process first
+        RANPARAM::SETUSERID("userid");
+        if (!EmuCreateServer(g_appPath)) { LOGE("emu: EmuCreateServer failed"); return E_FAIL; }
+        LOGI("emu: in-process server up");
+#endif
         return S_OK;
     }
 
@@ -124,9 +176,23 @@ public:
         DxLightMan::SetDefDirect(sDirectional);
 
         DxGlobalStage::GetInstance().SetD3DApp(this);
-        HRESULT hr = DxGlobalStage::GetInstance().OneTimeSceneInit(g_appPath, NULL, FALSE,
+#ifdef RAN_EMU
+        const BOOL bEmulate = TRUE;     //  messages go to the in-process server, not the network
+#else
+        const BOOL bEmulate = FALSE;
+#endif
+        HRESULT hr = DxGlobalStage::GetInstance().OneTimeSceneInit(g_appPath, NULL, bEmulate,
                                                                    m_width, m_height);
         if (FAILED(hr)) { LOGE("DxGlobalStage::OneTimeSceneInit failed 0x%08X", (unsigned)hr); return hr; }
+#ifdef RAN_EMU
+        //  as CGameEmulatorView::InitDeviceObjects: the player joins before the stage's device objects
+        {
+            const int nStart = EmuStartPlayer(EmuReadIni());
+            if (nStart & EMU_START_CHARSET_FAILED)  LOGE("emu: charset failed to load");
+            if (nStart & EMU_START_CREATEPC_FAILED) LOGE("emu: CreatePC failed");
+            if (!nStart) LOGI("emu: player created and joined");
+        }
+#endif
 
         hr = DxGlobalStage::GetInstance().InitDeviceObjects(m_pd3dDevice);
         if (FAILED(hr)) { LOGE("DxGlobalStage::InitDeviceObjects failed 0x%08X", (unsigned)hr); return hr; }
@@ -158,6 +224,9 @@ public:
     // entire 3D world is discarded before it is drawn — a black scene with a
     // working UI on top, and no error anywhere.
     HRESULT FrameMove() override {
+#ifdef RAN_EMU
+        EmuFrameMove(m_fTime, m_fElapsedTime);     //  the in-process server, then the PK targets
+#endif
         DxGlobalStage::GetInstance().FrameMove(m_fTime, m_fElapsedTime);
         DxResponseMan::GetInstance().FrameMove(m_fTime, m_fElapsedTime, TRUE, TRUE);
         DxViewPort::GetInstance().FrameMove(m_fTime, m_fElapsedTime);

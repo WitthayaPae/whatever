@@ -392,6 +392,16 @@ elseif(APP_SRC)
     # it. 16 KB alignment loads fine on 4 KB devices too. libc++_shared from
     # NDK r27 is already 0x4000.
     -Wl,-z,max-page-size=16384)
+  #  RAN_EMU: the PC Emulator's in-process server in a separate test app (build-emu.sh,
+  #  out-emu/, package com.ran.native.emu). Never on in build.sh, MAKE-PATCH or iOS:
+  #  it adds one source file and one define to the app target only, so every game
+  #  library compiles exactly as in the shipped build.
+  option(RAN_EMU "Emulator test app (build-emu.sh only, never shipped)" OFF)
+  if(RAN_EMU)
+    target_sources(ran PRIVATE ${RAN_SRC}/GameEmulator/EmuCore.cpp)
+    target_include_directories(ran PRIVATE ${RAN_SRC}/GameEmulator)
+    target_compile_definitions(ran PRIVATE RAN_EMU=1)
+  endif()
 endif()
 if(RAN_WRAPMEMCPY AND NOT RAN_IOS)
   target_sources(ran PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shim/platform/memcpy_wrap.c)

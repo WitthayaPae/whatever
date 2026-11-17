@@ -1073,6 +1073,36 @@ void ReportPreviousRun ( const char *path )
 
 }   //  namespace
 
+//  The run's own lines - patch, build-id, device - for other reports written
+//  during the run (RanGuard, ran_guard.cpp), so they say what a crash report
+//  says about the build and the phone.
+extern "C" int RanCrash_DescribeRun ( char *out, int cap )
+{
+    if ( !out || cap <= 0 ) return 0;
+    out[0] = 0;
+    Text t = { NULL, 0, 0 };
+    char build[13] = "";
+    unsigned char id[20];
+    memset ( id, 0, sizeof(id) );
+    if ( g_run ) {
+        memcpy ( build, g_run->build, 12 );
+        memcpy ( id, g_run->buildId, 20 );
+    }
+    build[12] = 0;
+    t.addf ( "patch: %s\n", build[0] ? build : "?" );
+    int haveId = 0;
+    for ( int k = 0; k < 20; ++k ) haveId |= id[k];
+    char bid[41] = "";
+    if ( haveId )
+        for ( int k = 0; k < 20; ++k ) snprintf ( bid + k * 2, 3, "%02x", id[k] );
+    t.addf ( "build-id: %s\n", haveId ? bid : "?" );
+    AddDevice ( t );
+    if ( !t.p ) return 0;
+    snprintf ( out, (size_t) cap, "%s", t.p );
+    free ( t.p );
+    return (int) strlen ( out );
+}
+
 static void RanCrash_LogLine ( int level, const char *tag, const char *fmt, va_list ap )
 {
     char line[1100];

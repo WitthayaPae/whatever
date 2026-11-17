@@ -109,3 +109,6 @@ native/.play/
 tools/play-mcp/node_modules/
 # App Store Connect MCP (tools/asc-mcp); key lives in native/.appstore/
 tools/asc-mcp/node_modules/
+
+# Emulator test app (native/build-emu.sh), never shipped
+native/out-emu/

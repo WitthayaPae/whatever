@@ -200,6 +200,13 @@ extern "C" float RanTouch_GetSkillSlotScale(int i);
 extern "C" int RanTouch_IsSkillSlotHidden(int i);
 extern "C" int RanTouch_IsPotionSlotHidden(int i);
 extern "C" int RanTouch_IsCornerHidden(int i);
+//  The top target panel taken off in the editor (2026-11-15): do not show it.
+extern "C" int RanTouch_IsTargetPanelHidden(void);
+//  The HUD editor tools, for the game window that shows them (CMobileHudEditBar, 2026-11-15).
+extern "C" void RanTouch_EditTool(int t, float held);
+extern "C" void RanTouch_SetEditPanelRect(float x, float y, float w, float h);
+extern "C" void RanTouch_SuggestEditPanel(float w, float h, float *x, float *y);
+extern "C" int  RanTouch_GetEditInfo(int *grp, int *slot, int *size, int *alpha, int *flags);
 extern "C" float RanTouch_GetPotionSlotScale(int i);
 
 //  Where potion slot i has been dragged, in pixels, on top of the row.
@@ -305,6 +312,9 @@ extern "C" int  RanTouch_GetSkillAim(int *slot, int *aimed, float *dx, float *dy
 extern "C" int  RanTouch_ConsumeSkill(int *slot, int *aimed, float *dx, float *dy, float *mag);
 //  Settings > Function. Off: dragging does not aim, every lift is a tap.
 extern "C" void RanTouch_SetSkillAim(int on);
+//  Settings > Function "fixed joystick" (2026-11-13). 1: the stick ring stays
+//  where it is laid out; 0 (default): it recentres where the thumb lands.
+extern "C" void RanTouch_SetFixedStick(int on);
 //  The client holds a skill picked up from the skill window: skill buttons
 //  are left to the client so the drop lands in the slot.
 extern "C" void RanTouch_SetSkillCarry(int carrying);

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- RAN EMU: the PC Emulator on Android, for testing unreleased data on LDPlayer.
+     Built only by build-emu.sh (RAN_EMU). Never shipped, never in the patch: its own
+     package, so it installs beside the real game and keeps its own data folder
+     (/sdcard/Android/data/com.ran.native.emu/files/). No launcher, no patcher, no
+     login: RanActivity starts the in-process server and joins the character in emu.ini. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.ran.native.emu"
+    android:versionCode="1"
+    android:versionName="emu">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:label="RAN EMU"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:hasCode="true"
+        android:allowBackup="false"
+        android:debuggable="true">
+
+        <!-- Start page: pick the character and options (emu/java/com/ran/emu/EmuPicker.java). -->
+        <activity android:name="com.ran.emu.EmuPicker"
+            android:label="RAN EMU"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:screenOrientation="sensorLandscape"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- The game, in its own process: every Start from the page is a clean emulator. -->
+        <activity android:name="com.ran.launcher.RanActivity"
+            android:label="RAN EMU"
+            android:theme="@style/RanSplash"
+            android:process=":game"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|keyboard|navigation|uiMode|density"
+            android:windowSoftInputMode="adjustNothing"
+            android:screenOrientation="sensorLandscape"
+            android:exported="false">
+            <meta-data android:name="android.app.lib_name" android:value="ran" />
+        </activity>
+
+        <service android:name="com.ran.launcher.RanSessionService"
+            android:process=":game"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Emulator test build." />
+        </service>
+    </application>
+</manifest>

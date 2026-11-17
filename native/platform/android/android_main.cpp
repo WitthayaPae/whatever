@@ -348,6 +348,9 @@ extern "C" int RanPlat_MemHeadroomMB(void) {
 //  store rules forbid in the store build - the website top-up button
 //  (ItemShopWindow, MobileItemShopPanel). Same test as RanLauncher.isStore().
 extern "C" int RanPlat_IsStore(void) {
+#ifdef RAN_EMU
+    return 0;                           //  emulator test app (com.ran.native.emu): the direct build's answer
+#endif
     static int s = -1;
     if (s < 0) {
         const char *p = (g_app && g_app->activity) ? g_app->activity->internalDataPath : NULL;
