@@ -119,6 +119,14 @@ int         RanPlat_TakePickedImage ( unsigned int *argb, int w, int h );
 //  Each platform layer: POST every *.txt in dir to the crash endpoint on a
 //  background thread, deleting each one the server accepts.
 void        RanPlat_UploadCrashReports ( const char *dir );
+//  The run's patch, build-id and device as report lines (ran_plat.cpp).
+int         RanCrash_DescribeRun ( char *out, int cap );
+//  Cheat signs on the phone, sent home as reports - log only (ran_guard.cpp).
+//  The game names the player once a character is in the world; the checks
+//  start then. Called every frame; it only does work when something changed.
+void        RanGuard_SetPlayer ( unsigned int userNum, unsigned int charId, const char *charName );
+//  A value the game saw changed in memory; reported at the next check.
+void        RanGuard_ReportValue ( const char *line );
 
 #ifdef __cplusplus
 }

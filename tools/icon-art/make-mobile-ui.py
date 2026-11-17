@@ -160,6 +160,91 @@ def classic_cell(cv, bx, idx, rect, c, tint=None):
     x, y = cell_xy(idx)
     cv.im.alpha_composite(img, ((bx + x) * k, y * k))
 
+def chrome_cell(cv, bx, idx, rect, tint=None):
+    """The PC chrome button, redrawn smooth (2026-11-17, the user: "some btn ... corner
+    look odd, not professional"). classic_cell blew the PC's 4 px corner up with
+    NEAREST, so each source pixel became a 4-unit block: a stepped black notch and two
+    bright bevel dots in every corner. Here the same colours are kept row for row (the
+    source's middle column, rows placed exactly where the nine-slice puts them: rows
+    0-3 in the top 16 units, the middle stretched, the last 4 in the bottom 16), with
+    the PC's black line on top and both sides, and the corners round and anti-aliased."""
+    src = classic().crop(rect)
+    sw, sh = src.size
+    col = [src.getpixel((sw // 2, y)) for y in range(sh)]
+    if tint:
+        col = [(min(255, int(c[0] * tint[0])), min(255, int(c[0] * tint[1])), min(255, int(c[0] * tint[2])), c[3]) for c in col]
+    L, d, k = cv.layer(CELL, CELL)
+    n = CELL * k
+    u = n / CELL                                  # one atlas unit at this resolution
+    def row_at(yu):                               # nine-slice mapping, units -> source row
+        if yu < SEG:            return min(sh - 1, int(yu / 4))
+        if yu >= CELL - SEG:    return min(sh - 1, sh - 4 + int((yu - (CELL - SEG)) / 4))
+        return 4 + min(sh - 9, int((yu - SEG) * (sh - 8) / (CELL - 2 * SEG)))
+    grad = Image.new('RGBA', (1, n))
+    for y in range(n):
+        grad.putpixel((0, y), col[row_at(y / u)])
+    grad = grad.resize((n, n), Image.NEAREST)
+    edge, r_out = 4 * u, 9 * u                    # 1 source px = 4 units; corner radius
+    outer = Image.new('L', (n, n), 0)
+    ImageDraw.Draw(outer).rounded_rectangle([0, 0, n - 1, n - 1], radius=r_out, fill=255)
+    inner = Image.new('L', (n, n), 0)
+    ImageDraw.Draw(inner).rounded_rectangle([edge, edge, n - 1 - edge, n - 1], radius=r_out - edge, fill=255)
+    black = Image.new('RGBA', (n, n), (0, 0, 0, 255))
+    L.paste(black, (0, 0), outer)
+    L.paste(grad, (0, 0), inner)
+    x, y = cell_xy(idx)
+    cv.paste(L, bx + x, y)
+
+def slot_cell(cv, bx, idx):
+    """The PC item slot frame (interface_main 0,162 40x41), redrawn clean (2026-11-17,
+    same request as chrome_cell): NEAREST at 16/5 gave uneven line widths and the PC's
+    grey ramp in the top-left corner showed as notches. Same lines, equal widths, square:
+    black, see-through gap (77), black, light line (183 top/left, 100 bottom/right),
+    body black at 77. 1 source px = 16/5 units, as the nine-slice draws it."""
+    L, d, k = cv.layer(CELL, CELL)
+    n = CELL * k
+    p = 16.0 / 5 * k
+    def box(i, fill):
+        d.rectangle([i * p, i * p, n - i * p - 1, n - i * p - 1], fill=fill)
+    box(0, (0, 0, 0, 255))
+    box(1, (0, 0, 0, 77))
+    box(2, (0, 0, 0, 255))
+    box(3, (183, 183, 183, 255))
+    d.polygon([(n - 3 * p, 3 * p), (n - 3 * p, n - 3 * p), (3 * p, n - 3 * p), (4 * p, n - 4 * p), (n - 4 * p, n - 4 * p), (n - 4 * p, 4 * p)],
+              fill=(100, 100, 100, 255))
+    box(4, (0, 0, 0, 77))
+    x, y = cell_xy(idx)
+    cv.paste(L, bx + x, y)
+
+def title_strip(cv, bx):
+    """The window title strip (PC BASIC_WINDOW_TITLE, interface_main 0,0 120x18), redrawn
+    smooth (2026-11-17, the user: "look at the edge or corner of the header tab"). The PC
+    art has a pixel bevel on its left end only (the right end is cut square); blown up it
+    was a stepped notch on the left and a square right end. Same colours row for row (the
+    middle column: black top line, grey chrome, then black fading to 153), a black edge
+    on both sides, both top corners round and anti-aliased. The code 3-slices it with
+    6-unit caps, so the corner fits inside 6 units."""
+    src = classic().crop((0, 0, 120, 18))
+    col = [src.getpixel((60, y)) for y in range(18)]
+    W_, H_ = 96, 24
+    L, d, k = cv.layer(W_, H_)
+    w, h = W_ * k, H_ * k
+    u = float(k)
+    grad = Image.new('RGBA', (1, h))
+    for y in range(h):
+        grad.putpixel((0, y), col[min(17, int(y / u * 18 / H_))])
+    grad = grad.resize((w, h), Image.NEAREST)
+    edge, rad = 1.34 * u, 2.5 * u                    # 1 source px tall = 24/18 units
+    outer = Image.new('L', (w, h), 0)
+    ImageDraw.Draw(outer).rounded_rectangle([0, 0, w - 1, h + rad], radius=rad, fill=255)
+    inner = Image.new('L', (w, h), 0)
+    ImageDraw.Draw(inner).rounded_rectangle([edge, edge, w - 1 - edge, h + rad], radius=rad - edge, fill=255)
+    L.paste(Image.new('RGBA', (w, h), (0, 0, 0, 255)), (0, 0), outer)
+    # the lower rows are see-through black: keep their own alpha inside the edge
+    L.paste(Image.new('RGBA', (w, h), (0, 0, 0, 0)), (0, 0), inner)
+    L.alpha_composite(Image.composite(grad, Image.new('RGBA', (w, h), (0, 0, 0, 0)), inner))
+    cv.paste(L, bx + 64, 200)
+
 def block(cv, theme):
     bx = theme * BLOCK
     if theme == 0:      # A Crystal
@@ -242,19 +327,16 @@ def block(cv, theme):
         # black line; at that weight the bag's sections cover most of the window and
         # bring the dark back, so a lighter 70 keeps the sections and the grey.
         paint_cell(cv, bx, 1, R, (0, 0, 0, 70), (0, 0, 0, 255), 1)
-        classic_cell(cv, bx, 2, (316, 23, 371, 44), 4)                        # dark chrome button
-        classic_cell(cv, bx, 3, (316, 0, 371, 21), 4)                         # light chrome button
-        classic_cell(cv, bx, 4, (316, 23, 371, 44), 4, tint=(1.9, 0.75, 0.7)) # the dark one, red
-        classic_cell(cv, bx, 5, (0, 162, 40, 203), 5)                         # the item slot frame
+        chrome_cell(cv, bx, 2, (316, 23, 371, 44))                            # dark chrome button
+        chrome_cell(cv, bx, 3, (316, 0, 371, 21))                             # light chrome button
+        chrome_cell(cv, bx, 4, (316, 23, 371, 44), tint=(1.9, 0.75, 0.7))     # the dark one, red
+        slot_cell(cv, bx, 5)                                                  # the item slot frame
         paint_cell(cv, bx, 6, R, (0, 0, 0, 132), (0, 0, 0, 255), 1)          # input field (QUEST_LIST well)
         paint_cell(cv, bx, 7, R, (255, 165, 0, 55), None)                     # selection (classic orange)
         paint_cell(cv, bx, 8, R, (0, 0, 0, 0), (255, 200, 40, 255), 2.5)     # ring
         paint_cell(cv, bx, 9, R, (0, 0, 0, 120), None)
         # the title strip, 3-sliced by the code: classic BASIC_WINDOW_TITLE art
-        strip = classic().crop((0, 0, 120, 18))
-        k = cv.s
-        img = nine_from(strip, 6, 96 * k, 24 * k, 6 * k)
-        cv.im.alpha_composite(img, ((bx + 64) * k, 200 * k))
+        title_strip(cv, bx)
     else:               # C Tactical
         CH = ('chamfer', 14, ('tl', 'br'))
         BOXC = ('chamfer', 12, ('tr',))
